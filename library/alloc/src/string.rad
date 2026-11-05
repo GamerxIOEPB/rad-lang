@@ -1,0 +1,71 @@
+// Rad Alloc Library: String (Owned Growable UTF-8 String)
+
+pub struct String {
+    pub buf: Vec<u8>,
+}
+
+impl String {
+    pub fn new() -> String {
+        String { buf: Vec.new() }
+    }
+
+    pub fn from_raw(ptr: *raw u8, length: usize) -> String {
+        var s = String.new()
+        var i = 0usize
+        while i < length {
+            s.buf.push(ptr[i])
+            i = i + 1usize
+        }
+        s
+    }
+
+    pub fn from_str(s: str) -> String {
+        var str_obj = String.new()
+        str_obj.push_str(s)
+        str_obj
+    }
+
+    pub fn len(self) -> usize {
+        self.buf.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.buf.len == 0usize
+    }
+
+    pub fn push_byte(var self, byte: u8) {
+        self.buf.push(byte)
+    }
+
+    pub fn push_char(var self, ch: char) {
+        self.buf.push(ch as u8)
+    }
+
+    pub fn push_str(var self, s: str) {
+        if (s as usize) == 0usize {
+            return
+        }
+        let p = s as *raw u8
+        var i = 0usize
+        while p[i] != 0u8 {
+            self.buf.push(p[i])
+            i = i + 1usize
+        }
+    }
+
+    pub fn get_byte(self, idx: usize) -> Option<u8> {
+        self.buf.get(idx)
+    }
+
+    pub fn as_ptr(self) -> *raw u8 {
+        if (self.buf.ptr as usize) == 0usize {
+            "" as *raw u8
+        } else {
+            self.buf.ptr as *raw u8
+        }
+    }
+
+    pub fn drop(var self) {
+        self.buf.drop()
+    }
+}

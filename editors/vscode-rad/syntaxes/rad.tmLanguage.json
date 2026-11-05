@@ -1,0 +1,191 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Rad",
+  "scopeName": "source.rad",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#attributes" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#functions" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.rad",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.rad",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.format.rad",
+          "begin": "f\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.rad",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.embedded.expression.rad",
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [
+                { "include": "$self" }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.raw.rad",
+          "begin": "r(#*)\"",
+          "end": "\"\\1"
+        },
+        {
+          "name": "string.quoted.double.rad",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.rad",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.rad",
+          "match": "'(\\\\.|[^'\\\\])'"
+        }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        {
+          "name": "meta.attribute.rad",
+          "begin": "#!?\\[",
+          "end": "\\]",
+          "patterns": [
+            {
+              "name": "entity.name.function.attribute.rad",
+              "match": "[a-zA-Z_][a-zA-Z0-9_]*"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.rad",
+          "match": "\\b(if|else|while|for|in|match|return|defer)\\b"
+        },
+        {
+          "name": "keyword.declaration.rad",
+          "match": "\\b(fn|struct|enum|trait|impl|type|extern)\\b"
+        },
+        {
+          "name": "keyword.other.rad",
+          "match": "\\b(let|var|take|ref|mut|pub|unsafe|async|import|from|as)\\b"
+        },
+        {
+          "name": "constant.language.boolean.rad",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.rad",
+          "match": "\\b(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize|f32|f64|bool|char|str|void)\\b"
+        },
+        {
+          "name": "storage.modifier.pointer.rad",
+          "match": "\\*raw(\\s+(const|var))?"
+        },
+        {
+          "name": "entity.name.type.rad",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.rad",
+          "match": "\\b[0-9][0-9_]*\\.[0-9_]+([eE][+-]?[0-9_]+)?(f32|f64)?\\b"
+        },
+        {
+          "name": "constant.numeric.hex.rad",
+          "match": "\\b0x[0-9a-fA-F_]+(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?\\b"
+        },
+        {
+          "name": "constant.numeric.binary.rad",
+          "match": "\\b0b[01_]+(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?\\b"
+        },
+        {
+          "name": "constant.numeric.octal.rad",
+          "match": "\\b0o[0-7_]+(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?\\b"
+        },
+        {
+          "name": "constant.numeric.decimal.rad",
+          "match": "\\b[0-9][0-9_]*(i8|i16|i32|i64|isize|u8|u16|u32|u64|usize)?\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "match": "\\bfn\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "captures": {
+            "1": { "name": "entity.name.function.rad" }
+          }
+        },
+        {
+          "match": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
+          "captures": {
+            "1": { "name": "entity.name.function.call.rad" }
+          }
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.rad",
+          "match": "(\\+|-|\\*|/|%|=|\\+=|-=|\\*=|/=|%=|==|!=|<|<=|>|>=|&&|\\|\\||!|&|\\||\\^|<<|>>|->|=>)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.delimiter.rad",
+          "match": "(,|\\.|:|::|;)"
+        },
+        {
+          "name": "punctuation.bracket.rad",
+          "match": "(\\(|\\)|\\[|\\]|\\{|\\})"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,247 @@
+// ==============================================================================
+// radc/src/linker.rad — Mode A Linker Cascade Driver
+// ==============================================================================
+
+fn parse_exit_status(raw_status: i32) -> i32 {
+    if raw_status == 0 {
+        return 0
+    }
+    if raw_status < 0 {
+        return 1
+    }
+    let sig: i32 = raw_status % 128
+    if sig != 0 && sig != raw_status {
+        return 128 + sig
+    }
+    let exit_code: i32 = (raw_status / 256) % 256
+    if exit_code != 0 {
+        return exit_code
+    }
+    return 1
+}
+
+fn run_cmd(cmd: str) -> i32 {
+    let raw_cmd_status: i32 = system(cmd)
+    let parsed: i32 = parse_exit_status(raw_cmd_status)
+    return parsed
+}
+
+fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cmd: String) -> i32 {
+    let ir = ir_path.as_ptr() as str
+    let out = out_path.as_ptr() as str
+    let opt = opt_level.as_ptr() as str
+
+    // Tier 1: User-Specified Linker Override
+    if linker_cmd.len() > 0usize {
+        var cmd = String.new()
+        cmd.push_str(linker_cmd.as_ptr() as str)
+        cmd.push_str(" ")
+        cmd.push_str(ir)
+        cmd.push_str(" -o ")
+        cmd.push_str(out)
+        let status = run_cmd(cmd.as_ptr() as str)
+        if status == 0 {
+            return 0
+        }
+    }
+
+    // Tier 2: Bundled / Musl Target Sysroot Backend (Static PIE)
+    var obj_path = String.new()
+    obj_path.push_str(out)
+    obj_path.push_str(".o")
+
+    var llc_cmd = String.new()
+    llc_cmd.push_str("rad-llc -filetype=obj -relocation-model=pic -O")
+    llc_cmd.push_str(opt)
+    llc_cmd.push_str(" ")
+    llc_cmd.push_str(ir)
+    llc_cmd.push_str(" -o ")
+    llc_cmd.push_str(obj_path.as_ptr() as str)
+    llc_cmd.push_str(" 2>/dev/null")
+    var llc_status = run_cmd(llc_cmd.as_ptr() as str)
+
+    if llc_status != 0 {
+        var llc_cmd_fb = String.new()
+        llc_cmd_fb.push_str("llc -filetype=obj -relocation-model=pic -O")
+        llc_cmd_fb.push_str(opt)
+        llc_cmd_fb.push_str(" ")
+        llc_cmd_fb.push_str(ir)
+        llc_cmd_fb.push_str(" -o ")
+        llc_cmd_fb.push_str(obj_path.as_ptr() as str)
+        llc_cmd_fb.push_str(" 2>/dev/null")
+        llc_status = run_cmd(llc_cmd_fb.as_ptr() as str)
+    }
+
+    if llc_status == 0 {
+        var sysroot = String.new()
+        let fp1 = fopen("lib/targets/x86_64-unknown-linux-musl/crt/rcrt1.o", "rb")
+        if (fp1 as usize) != 0usize {
+            fclose(fp1)
+            sysroot.push_str("lib/targets/x86_64-unknown-linux-musl")
+        } else {
+            let fp2 = fopen("../lib/targets/x86_64-unknown-linux-musl/crt/rcrt1.o", "rb")
+            if (fp2 as usize) != 0usize {
+                fclose(fp2)
+                sysroot.push_str("../lib/targets/x86_64-unknown-linux-musl")
+            } else {
+                let env_rad_home = getenv("RAD_HOME")
+                if (env_rad_home as usize) != 0usize {
+                    var p1 = String.new()
+                    p1.push_str(env_rad_home as str)
+                    p1.push_str("/lib/targets/x86_64-unknown-linux-musl/crt/rcrt1.o")
+                    p1.push_byte(0u8)
+                    let fp3 = fopen(p1.as_ptr() as str, "rb")
+                    if (fp3 as usize) != 0usize {
+                        fclose(fp3)
+                        sysroot.push_str(env_rad_home as str)
+                        sysroot.push_str("/lib/targets/x86_64-unknown-linux-musl")
+                    }
+                }
+                if sysroot.len() == 0usize {
+                    let env_home = getenv("HOME")
+                    if (env_home as usize) != 0usize {
+                        var p2 = String.new()
+                        p2.push_str(env_home as str)
+                        p2.push_str("/.rad/lib/targets/x86_64-unknown-linux-musl/crt/rcrt1.o")
+                        p2.push_byte(0u8)
+                        let fp4 = fopen(p2.as_ptr() as str, "rb")
+                        if (fp4 as usize) != 0usize {
+                            fclose(fp4)
+                            sysroot.push_str(env_home as str)
+                            sysroot.push_str("/.rad/lib/targets/x86_64-unknown-linux-musl")
+                        }
+                    }
+                }
+            }
+        }
+
+        if sysroot.len() > 0usize {
+            var ld_cmd = String.new()
+            ld_cmd.push_str("rad-lld -flavor gnu -m elf_x86_64 -static -pie --no-dynamic-linker -z text -z noexecstack -o ")
+            ld_cmd.push_str(out)
+            ld_cmd.push_str(" ")
+            ld_cmd.push_str(sysroot.as_ptr() as str)
+            ld_cmd.push_str("/crt/rcrt1.o ")
+            ld_cmd.push_str(sysroot.as_ptr() as str)
+            ld_cmd.push_str("/crt/crti.o ")
+            ld_cmd.push_str(obj_path.as_ptr() as str)
+            ld_cmd.push_str(" -L")
+            ld_cmd.push_str(sysroot.as_ptr() as str)
+            ld_cmd.push_str("/lib --start-group ")
+            ld_cmd.push_str(sysroot.as_ptr() as str)
+            ld_cmd.push_str("/lib/libc.a ")
+            ld_cmd.push_str(sysroot.as_ptr() as str)
+            ld_cmd.push_str("/lib/libclang_rt.builtins-x86_64.a --end-group ")
+            ld_cmd.push_str(sysroot.as_ptr() as str)
+            ld_cmd.push_str("/crt/crtn.o 2>/dev/null")
+
+            var ld_status = run_cmd(ld_cmd.as_ptr() as str)
+            if ld_status != 0 {
+                var ld_cmd_fb = String.new()
+                ld_cmd_fb.push_str("ld.lld -flavor gnu -m elf_x86_64 -static -pie --no-dynamic-linker -z text -z noexecstack -o ")
+                ld_cmd_fb.push_str(out)
+                ld_cmd_fb.push_str(" ")
+                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                ld_cmd_fb.push_str("/crt/rcrt1.o ")
+                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                ld_cmd_fb.push_str("/crt/crti.o ")
+                ld_cmd_fb.push_str(obj_path.as_ptr() as str)
+                ld_cmd_fb.push_str(" -L")
+                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                ld_cmd_fb.push_str("/lib --start-group ")
+                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                ld_cmd_fb.push_str("/lib/libc.a ")
+                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                ld_cmd_fb.push_str("/lib/libclang_rt.builtins-x86_64.a --end-group ")
+                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                ld_cmd_fb.push_str("/crt/crtn.o")
+                ld_status = run_cmd(ld_cmd_fb.as_ptr() as str)
+            }
+
+            if ld_status == 0 {
+                var rm_cmd = String.new()
+                rm_cmd.push_str("rm -f ")
+                rm_cmd.push_str(obj_path.as_ptr() as str)
+                system(rm_cmd.as_ptr() as str)
+                return 0
+            }
+        }
+    }
+
+    // Tier 3: Default System Clang (Fallback)
+    var clang_cmd = String.new()
+    clang_cmd.push_str("clang -x ir ")
+    clang_cmd.push_str(ir)
+    clang_cmd.push_str(" -o ")
+    clang_cmd.push_str(out)
+    clang_cmd.push_str(" -O")
+    clang_cmd.push_str(opt)
+    clang_cmd.push_str(" -no-pie -lm -lpthread 2>/dev/null")
+    let clang_status = run_cmd(clang_cmd.as_ptr() as str)
+    if clang_status == 0 {
+        return 0
+    }
+
+    // Tier 4: GCC Fallback
+    var gcc_cmd = String.new()
+    gcc_cmd.push_str("gcc -x ir ")
+    gcc_cmd.push_str(ir)
+    gcc_cmd.push_str(" -o ")
+    gcc_cmd.push_str(out)
+    gcc_cmd.push_str(" -O")
+    gcc_cmd.push_str(opt)
+    gcc_cmd.push_str(" -no-pie -lm -lpthread 2>/dev/null")
+    let gcc_status = run_cmd(gcc_cmd.as_ptr() as str)
+    if gcc_status == 0 {
+        return 0
+    }
+
+    // Tier 5: System LLC + LD / LLD Direct Backend
+    var sys_obj = String.new()
+    sys_obj.push_str(out)
+    sys_obj.push_str(".o")
+
+    var sys_llc_cmd = String.new()
+    sys_llc_cmd.push_str("llc -filetype=obj -relocation-model=pic ")
+    sys_llc_cmd.push_str(ir)
+    sys_llc_cmd.push_str(" -o ")
+    sys_llc_cmd.push_str(sys_obj.as_ptr() as str)
+    let sys_llc_status = run_cmd(sys_llc_cmd.as_ptr() as str)
+
+    if sys_llc_status != 0 {
+        return sys_llc_status
+    }
+
+    var sys_ld_cmd = String.new()
+    sys_ld_cmd.push_str("ld.lld ")
+    sys_ld_cmd.push_str(sys_obj.as_ptr() as str)
+    sys_ld_cmd.push_str(" -o ")
+    sys_ld_cmd.push_str(out)
+    sys_ld_cmd.push_str(" -dynamic-linker /lib64/ld-linux-x86-64.so.2 /usr/lib/x86_64-linux-gnu/crt1.o /usr/lib/x86_64-linux-gnu/crti.o -lc -lm -lpthread /usr/lib/x86_64-linux-gnu/crtn.o 2>/dev/null")
+    let sys_ld_status = run_cmd(sys_ld_cmd.as_ptr() as str)
+    if sys_ld_status == 0 {
+        var rm_cmd = String.new()
+        rm_cmd.push_str("rm -f ")
+        rm_cmd.push_str(sys_obj.as_ptr() as str)
+        system(rm_cmd.as_ptr() as str)
+        return 0
+    }
+
+    // Try standard GNU ld
+    var gnu_ld = String.new()
+    gnu_ld.push_str("ld ")
+    gnu_ld.push_str(sys_obj.as_ptr() as str)
+    gnu_ld.push_str(" -o ")
+    gnu_ld.push_str(out)
+    gnu_ld.push_str(" -dynamic-linker /lib64/ld-linux-x86-64.so.2 /usr/lib/x86_64-linux-gnu/crt1.o /usr/lib/x86_64-linux-gnu/crti.o -lc -lm -lpthread /usr/lib/x86_64-linux-gnu/crtn.o 2>/dev/null")
+    let gnu_status = run_cmd(gnu_ld.as_ptr() as str)
+    var rm_obj = String.new()
+    rm_obj.push_str("rm -f ")
+    rm_obj.push_str(sys_obj.as_ptr() as str)
+    system(rm_obj.as_ptr() as str)
+
+    if gnu_status != 0 {
+        return gnu_status
+    }
+    return 0
+}

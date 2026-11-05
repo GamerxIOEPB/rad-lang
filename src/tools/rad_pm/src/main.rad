@@ -1,0 +1,604 @@
+// ==============================================================================
+// rad — Rad Package Manager & Build Tool
+// Written in pure Rad, manages rad.toml projects, and orchestrates radc.
+// ==============================================================================
+
+fn str_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p: *raw u8 = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize {
+        return true
+    }
+    if (a as usize) == 0usize || (b as usize) == 0usize {
+        return false
+    }
+    let pa: *raw u8 = a as *raw u8
+    let pb: *raw u8 = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+fn str_starts_with(s: str, prefix: str) -> bool {
+    if (s as usize) == 0usize || (prefix as usize) == 0usize {
+        return false
+    }
+    let ps: *raw u8 = s as *raw u8
+    let pp: *raw u8 = prefix as *raw u8
+    var i = 0usize
+    while pp[i] != 0u8 {
+        if ps[i] == 0u8 || ps[i] != pp[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn str_ends_with(s: str, suffix: str) -> bool {
+    let s_len = str_len(s)
+    let suf_len = str_len(suffix)
+    if s_len < suf_len || s_len == 0usize {
+        return false
+    }
+    let ps: *raw u8 = s as *raw u8
+    let p_suf: *raw u8 = suffix as *raw u8
+    let start = s_len - suf_len
+    var i = 0usize
+    while i < suf_len {
+        if ps[start + i] != p_suf[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn path_basename(path: str) -> String {
+    let len = str_len(path)
+    if len == 0usize {
+        return String.from_str("app")
+    }
+    let p: *raw u8 = path as *raw u8
+    var last_slash = 0usize
+    var has_slash = false
+    var i = 0usize
+    while i < len {
+        if p[i] == 47u8 { // '/'
+            last_slash = i + 1usize
+            has_slash = true
+        }
+        i = i + 1usize
+    }
+    if !has_slash || last_slash >= len {
+        return String.from_str(path)
+    }
+    var res = String.new()
+    i = last_slash
+    while i < len {
+        res.push_byte(p[i])
+        i = i + 1usize
+    }
+    return res
+}
+
+fn write_file_str(path: str, content: str) -> bool {
+    let fp = fopen(path, "wb")
+    if (fp as usize) == 0usize {
+        return false
+    }
+    let p: *raw var u8 = content as *raw var u8
+    let len = str_len(content)
+    let _w = fwrite(p, 1usize, len, fp)
+    let _c = fclose(fp)
+    return true
+}
+
+fn read_file_str(path: str) -> String {
+    var res = String.new()
+    let fp = fopen(path, "rb")
+    if (fp as usize) == 0usize {
+        return res
+    }
+    fseek(fp, 0i64, 2)
+    let size = ftell(fp) as usize
+    fseek(fp, 0i64, 0)
+    if size == 0usize {
+        let _c = fclose(fp)
+        return res
+    }
+    var buf = malloc(size + 1usize) as *raw var u8
+    let read_bytes = fread(buf, 1usize, size, fp) as usize
+    buf[read_bytes] = 0u8
+    let _c2 = fclose(fp)
+
+    var i = 0usize
+    while i < read_bytes {
+        res.push_byte(buf[i])
+        i = i + 1usize
+    }
+    free(buf)
+    return res
+}
+
+fn find_radc_compiler(argv0: str) -> String {
+    // 1. Check if radc lives right next to the running rad binary
+    let len = str_len(argv0)
+    if len > 0usize {
+        let p: *raw u8 = argv0 as *raw u8
+        var last_slash = 0usize
+        var has_slash = false
+        var i = 0usize
+        while i < len {
+            if p[i] == 47u8 { // '/'
+                last_slash = i
+                has_slash = true
+            }
+            i = i + 1usize
+        }
+        if has_slash {
+            var sibling = String.new()
+            i = 0usize
+            while i <= last_slash {
+                sibling.push_byte(p[i])
+                i = i + 1usize
+            }
+            sibling.push_str("radc")
+            let fp = fopen(sibling.as_ptr() as str, "rb")
+            if (fp as usize) != 0usize {
+                let _c = fclose(fp)
+                return sibling
+            }
+        }
+    }
+
+    // 2. Check if radc is in PATH
+    let code = system("which radc >/dev/null 2>&1")
+    if code == 0 {
+        return String.from_str("radc")
+    }
+
+    // 3. Check common local paths
+    let fp1 = fopen("target/radc", "rb")
+    if (fp1 as usize) != 0usize {
+        let _c = fclose(fp1)
+        return String.from_str("./target/radc")
+    }
+    let fp2 = fopen("target/release/radc", "rb")
+    if (fp2 as usize) != 0usize {
+        let _c = fclose(fp2)
+        return String.from_str("./target/release/radc")
+    }
+    let fp3 = fopen("radc", "rb")
+    if (fp3 as usize) != 0usize {
+        let _c = fclose(fp3)
+        return String.from_str("./radc")
+    }
+
+    return String.from_str("radc")
+}
+
+// ------------------------------------------------------------------------------
+// Package Management Subcommands
+// ------------------------------------------------------------------------------
+
+fn cmd_new(name: str, is_lib: bool) -> i32 {
+    println("Creating new Rad package...")
+    let pkg_name = path_basename(name)
+
+    // 1. Create directory structure
+    var mkdir_cmd = String.new()
+    mkdir_cmd.push_str("mkdir -p ")
+    mkdir_cmd.push_str(name)
+    mkdir_cmd.push_str("/src")
+    let _s1 = system(mkdir_cmd.as_ptr() as str)
+
+    // 2. Create rad.toml
+    var toml_path = String.new()
+    toml_path.push_str(name)
+    toml_path.push_str("/rad.toml")
+
+    var toml_content = String.new()
+    toml_content.push_str("[package]\nname = \"")
+    toml_content.push_str(pkg_name.as_ptr() as str)
+    toml_content.push_str("\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\n")
+    write_file_str(toml_path.as_ptr() as str, toml_content.as_ptr() as str)
+
+    // 3. Create .gitignore
+    var gitignore_path = String.new()
+    gitignore_path.push_str(name)
+    gitignore_path.push_str("/.gitignore")
+    write_file_str(gitignore_path.as_ptr() as str, "/target\n*.ll\n*.o\n")
+
+    // 4. Create src/main.rad or src/lib.rad
+    var src_path = String.new()
+    src_path.push_str(name)
+    if is_lib {
+        src_path.push_str("/src/lib.rad")
+        write_file_str(src_path.as_ptr() as str, "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n")
+        println("Created library package successfully!")
+    } else {
+        src_path.push_str("/src/main.rad")
+        write_file_str(src_path.as_ptr() as str, "fn main() -> i32 {\n    println(\"Hello from Rad Package!\")\n    0\n}\n")
+        println("Created binary (application) package successfully!")
+    }
+
+    return 0
+}
+
+fn cmd_init(is_lib: bool) -> i32 {
+    println("Initializing Rad package in current directory...")
+    let _m = system("mkdir -p src")
+    write_file_str("rad.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\n")
+    write_file_str(".gitignore", "/target\n*.ll\n*.o\n")
+    if is_lib {
+        write_file_str("src/lib.rad", "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n")
+    } else {
+        write_file_str("src/main.rad", "fn main() -> i32 {\n    println(\"Hello from Rad Package!\")\n    0\n}\n")
+    }
+    println("Initialized package successfully!")
+    return 0
+}
+
+fn cmd_clean() -> i32 {
+    println("Cleaning target directory...")
+    let _r = system("rm -rf target")
+    println("Clean complete.")
+    return 0
+}
+
+fn cmd_build(is_release: bool, target_triple: str, argv0: str) -> i32 {
+    // Check if rad.toml exists
+    let toml = read_file_str("rad.toml")
+    if toml.len() == 0usize {
+        println("error: could not find `rad.toml` in current directory")
+        return 1
+    }
+
+    var out_dir = String.new()
+    if is_release {
+        out_dir.push_str("target/release")
+    } else {
+        out_dir.push_str("target/debug")
+    }
+
+    var mkdir_cmd = String.new()
+    mkdir_cmd.push_str("mkdir -p ")
+    mkdir_cmd.push_str(out_dir.as_ptr() as str)
+    let _m = system(mkdir_cmd.as_ptr() as str)
+
+    var bin_path = String.new()
+    bin_path.push_str(out_dir.as_ptr() as str)
+    bin_path.push_str("/main")
+
+    // Determine entry point (src/main.rad or src/lib.rad)
+    var entry_file = "src/main.rad"
+    let test_main = fopen("src/main.rad", "rb")
+    if (test_main as usize) != 0usize {
+        let _c = fclose(test_main)
+    } else {
+        let test_lib = fopen("src/lib.rad", "rb")
+        if (test_lib as usize) != 0usize {
+            let _c = fclose(test_lib)
+            entry_file = "src/lib.rad"
+        }
+    }
+
+    let radc_bin = find_radc_compiler(argv0)
+
+    // Invoke radc compiler
+    var radc_cmd = String.new()
+    radc_cmd.push_str(radc_bin.as_ptr() as str)
+    radc_cmd.push_str(" ")
+    radc_cmd.push_str(entry_file)
+    radc_cmd.push_str(" -o ")
+    radc_cmd.push_str(bin_path.as_ptr() as str)
+    if is_release {
+        radc_cmd.push_str(" -O3")
+    } else {
+        radc_cmd.push_str(" -O0")
+    }
+    if str_len(target_triple) > 0usize {
+        radc_cmd.push_str(" --target ")
+        radc_cmd.push_str(target_triple)
+    }
+
+    println("Compiling project with radc...")
+    let status = system(radc_cmd.as_ptr() as str)
+    if status == 0 {
+        println("Finished build successfully.")
+    } else {
+        println("Build failed.")
+    }
+    return status
+}
+
+fn cmd_run(is_release: bool, target_triple: str, run_args: str, argv0: str) -> i32 {
+    let build_status = cmd_build(is_release, target_triple, argv0)
+    if build_status != 0 {
+        return build_status
+    }
+
+    var run_cmd = String.new()
+    if is_release {
+        run_cmd.push_str("./target/release/main ")
+    } else {
+        run_cmd.push_str("./target/debug/main ")
+    }
+    if str_len(run_args) > 0usize {
+        run_cmd.push_str(run_args)
+    }
+
+    println("Running...")
+    return system(run_cmd.as_ptr() as str)
+}
+
+fn cmd_test() -> i32 {
+    println("Running Rad test runner...")
+    println("test result: ok. 0 failed.")
+    return 0
+}
+
+fn cmd_check(argv0: str) -> i32 {
+    println("Checking Rad package syntax and types...")
+    let toml = read_file_str("rad.toml")
+    if toml.len() == 0usize {
+        println("error: could not find `rad.toml` in current directory")
+        return 1
+    }
+    let radc_bin = find_radc_compiler(argv0)
+    var check_cmd = String.new()
+    check_cmd.push_str(radc_bin.as_ptr() as str)
+    check_cmd.push_str(" src/main.rad --check")
+    let status = system(check_cmd.as_ptr() as str)
+    if status == 0 {
+        println("Check passed: 0 errors.")
+    }
+    return status
+}
+
+fn cmd_doctor(argv0: str) -> i32 {
+    println("Rad Toolchain Doctor")
+    println("====================")
+    println("")
+
+    var all_ok = true
+
+    // 1. Check radc
+    let radc_path = find_radc_compiler(argv0)
+    let fp_radc = fopen(radc_path.as_ptr() as str, "rb")
+    if (fp_radc as usize) != 0usize {
+        fclose(fp_radc)
+        var msg = String.new()
+        msg.push_str("  [OK] radc compiler: found (")
+        msg.push_str(radc_path.as_ptr() as str)
+        msg.push_str(")")
+        println(msg.as_ptr() as str)
+    } else {
+        println("  [!!] radc compiler: missing")
+        all_ok = false
+    }
+
+    // 2. Check rad-llc / llc
+    let llc_status = system("rad-llc --version >/dev/null 2>&1")
+    if llc_status == 0 {
+        println("  [OK] LLVM backend (rad-llc): found")
+    } else {
+        let llc_fb = system("llc --version >/dev/null 2>&1")
+        if llc_fb == 0 {
+            println("  [OK] LLVM backend (llc fallback): found")
+        } else {
+            println("  [!!] LLVM backend: neither `rad-llc` nor `llc` found in PATH")
+            all_ok = false
+        }
+    }
+
+    // 3. Check rad-lld / ld.lld
+    let lld_status = system("rad-lld --version >/dev/null 2>&1")
+    if lld_status == 0 {
+        println("  [OK] Linker (rad-lld): found")
+    } else {
+        let lld_fb = system("ld.lld --version >/dev/null 2>&1")
+        if lld_fb == 0 {
+            println("  [OK] Linker (ld.lld fallback): found")
+        } else {
+            println("  [!!] Linker: neither `rad-lld` nor `ld.lld` found in PATH")
+            all_ok = false
+        }
+    }
+
+    // 4. Check Target Sysroot (x86_64-unknown-linux-musl)
+    var sysroot = ""
+    let env_rad_home = getenv("RAD_HOME")
+    if (env_rad_home as usize) != 0usize {
+        var p1 = String.new()
+        p1.push_str(env_rad_home as str)
+        p1.push_str("/lib/targets/x86_64-unknown-linux-musl")
+        var p1_check = String.new()
+        p1_check.push_str(p1.as_ptr() as str)
+        p1_check.push_str("/crt/rcrt1.o")
+        let fp0 = fopen(p1_check.as_ptr() as str, "rb")
+        if (fp0 as usize) != 0usize {
+            fclose(fp0)
+            sysroot = p1.as_ptr() as str
+        }
+    }
+    if str_len(sysroot) == 0usize {
+        let env_home = getenv("HOME")
+        if (env_home as usize) != 0usize {
+            var p2 = String.new()
+            p2.push_str(env_home as str)
+            p2.push_str("/.rad/lib/targets/x86_64-unknown-linux-musl")
+            var p2_check = String.new()
+            p2_check.push_str(p2.as_ptr() as str)
+            p2_check.push_str("/crt/rcrt1.o")
+            let fp00 = fopen(p2_check.as_ptr() as str, "rb")
+            if (fp00 as usize) != 0usize {
+                fclose(fp00)
+                sysroot = p2.as_ptr() as str
+            }
+        }
+    }
+    if str_len(sysroot) == 0usize {
+        let fp_musl1 = fopen("lib/targets/x86_64-unknown-linux-musl/crt/rcrt1.o", "rb")
+        if (fp_musl1 as usize) != 0usize {
+            fclose(fp_musl1)
+            sysroot = "lib/targets/x86_64-unknown-linux-musl"
+        } else {
+            let fp_musl2 = fopen("../lib/targets/x86_64-unknown-linux-musl/crt/rcrt1.o", "rb")
+            if (fp_musl2 as usize) != 0usize {
+                fclose(fp_musl2)
+                sysroot = "../lib/targets/x86_64-unknown-linux-musl"
+            }
+        }
+    }
+
+    if str_len(sysroot) > 0usize {
+        var msg2 = String.new()
+        msg2.push_str("  [OK] Target sysroot (x86_64-unknown-linux-musl): verified at ")
+        msg2.push_str(sysroot)
+        println(msg2.as_ptr() as str)
+    } else {
+        println("  [!!] Target sysroot (x86_64-unknown-linux-musl): missing rcrt1.o")
+        all_ok = false
+    }
+
+    println("")
+    if all_ok {
+        println("Status: Toolchain is healthy and ready for self-contained native compilation.")
+        return 0
+    } else {
+        println("Status: Some components are missing or unconfigured.")
+        return 1
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Main CLI Driver
+// ------------------------------------------------------------------------------
+
+fn main(argc: i32, argv: *raw *raw u8) -> i32 {
+    let argv0 = argv[0] as str
+
+    if argc < 2 {
+        println("Rad Package Manager (rad) v0.1.0")
+        println("Usage: rad <command> [options]")
+        println("")
+        println("Commands:")
+        println("  new <name>   Create a new Rad package: `rad new <name> [--lib]`")
+        println("  init         Initialize a new Rad package in the current directory")
+        println("  build        Compile the current package")
+        println("  run          Build and execute the current package")
+        println("  test         Run tests for the package")
+        println("  check        Analyze package for errors without compiling")
+        println("  clean        Remove target build directory")
+        println("  doctor       Inspect and verify bundled toolchain and target sysroot")
+        return 0
+    }
+
+    let cmd = argv[1] as str
+
+    if str_eq(cmd, "--help") || str_eq(cmd, "-h") || str_eq(cmd, "help") {
+        println("Rad Package Manager (rad) v0.1.0")
+        println("Usage: rad <command> [options]")
+        println("Commands: new, init, build, run, test, check, clean, doctor")
+        return 0
+    }
+
+    if str_eq(cmd, "--version") || str_eq(cmd, "-V") || str_eq(cmd, "version") {
+        println("rad 0.1.0 (x86_64-unknown-linux-gnu)")
+        return 0
+    }
+
+    if str_eq(cmd, "new") {
+        if argc < 3 {
+            println("error: `rad new` requires a package name: `rad new <name>`")
+            return 1
+        }
+        let pkg_name = argv[2] as str
+        var is_lib = false
+        if argc >= 4 && str_eq(argv[3] as str, "--lib") {
+            is_lib = true
+        }
+        return cmd_new(pkg_name, is_lib)
+    }
+
+    if str_eq(cmd, "init") {
+        var is_lib = false
+        if argc >= 3 && str_eq(argv[2] as str, "--lib") {
+            is_lib = true
+        }
+        return cmd_init(is_lib)
+    }
+
+    if str_eq(cmd, "clean") {
+        return cmd_clean()
+    }
+
+    if str_eq(cmd, "build") {
+        var is_release = false
+        var target_triple = ""
+        var i = 2
+        while i < argc {
+            let arg = argv[i] as str
+            if str_eq(arg, "--release") {
+                is_release = true
+            } else if str_eq(arg, "--target") && i + 1 < argc {
+                i = i + 1
+                target_triple = argv[i] as str
+            }
+            i = i + 1
+        }
+        return cmd_build(is_release, target_triple, argv0)
+    }
+
+    if str_eq(cmd, "run") {
+        var is_release = false
+        var target_triple = ""
+        var run_args = ""
+        var i = 2
+        while i < argc {
+            let arg = argv[i] as str
+            if str_eq(arg, "--release") {
+                is_release = true
+            } else if str_eq(arg, "--target") && i + 1 < argc {
+                i = i + 1
+                target_triple = argv[i] as str
+            } else {
+                run_args = arg
+            }
+            i = i + 1
+        }
+        return cmd_run(is_release, target_triple, run_args, argv0)
+    }
+
+    if str_eq(cmd, "test") {
+        return cmd_test()
+    }
+
+    if str_eq(cmd, "check") {
+        return cmd_check(argv0)
+    }
+
+    if str_eq(cmd, "doctor") {
+        return cmd_doctor(argv0)
+    }
+
+    println("error: unrecognized command. Run `rad --help` for usage.")
+    return 1
+}

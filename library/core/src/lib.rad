@@ -1,0 +1,12 @@
+// Rad Core Library Root
+// Zero allocation, zero OS dependencies.
+// Freestanding runtime for bare metal, embedded systems, and foundational types.
+
+import marker
+import mem
+import option
+import result
+import math
+import panic
+import ffi
+import ptr

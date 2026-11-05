@@ -1,0 +1,138 @@
+// Rad Alloc Library: HashMap and HashSet (Open-Addressing Hash Collections)
+
+pub struct Entry<K, V> {
+    pub key: K,
+    pub val: V,
+    pub occupied: bool,
+}
+
+pub struct HashMap<K, V> {
+    pub entries: *raw var Entry<K, V>,
+    pub cap: usize,
+    pub len: usize,
+}
+
+impl<K, V> HashMap<K, V> {
+    pub fn new() -> HashMap<K, V> {
+        HashMap {
+            entries: 0 as *raw var Entry<K, V>,
+            cap: 0usize,
+            len: 0usize,
+        }
+    }
+
+    pub fn len(self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0usize
+    }
+
+    pub fn insert(var self, key: K, val: V) -> Option<V> {
+        if self.cap == 0usize {
+            let initial_cap = 16usize
+            let entry_size = size_of_val(key) + size_of_val(val) + 8usize
+            let raw = malloc(initial_cap * entry_size)
+            self.entries = raw as *raw var Entry<K, V>
+            self.cap = initial_cap
+            var i = 0usize
+            while i < initial_cap {
+                self.entries[i].occupied = false
+                i = i + 1usize
+            }
+        }
+
+        var idx = (key as usize) % self.cap
+        var count = 0usize
+        while count < self.cap {
+            if !self.entries[idx].occupied {
+                self.entries[idx].key = key
+                self.entries[idx].val = val
+                self.entries[idx].occupied = true
+                self.len = self.len + 1usize
+                return Option.None
+            }
+            if self.entries[idx].key == key {
+                let old_val = self.entries[idx].val
+                self.entries[idx].val = val
+                return Option.Some(old_val)
+            }
+            idx = (idx + 1usize) % self.cap
+            count = count + 1usize
+        }
+
+        Option.None
+    }
+
+    pub fn get(self, key: K) -> Option<V> {
+        if self.cap == 0usize {
+            return Option.None
+        }
+        var idx = (key as usize) % self.cap
+        var count = 0usize
+        while count < self.cap {
+            if !self.entries[idx].occupied {
+                return Option.None
+            }
+            if self.entries[idx].key == key {
+                return Option.Some(self.entries[idx].val)
+            }
+            idx = (idx + 1usize) % self.cap
+            count = count + 1usize
+        }
+        Option.None
+    }
+
+    pub fn contains_key(self, key: K) -> bool {
+        match self.get(key) {
+            Option.Some(_) => true,
+            Option.None => false,
+            _ => false,
+        }
+    }
+
+    pub fn drop(var self) {
+        if self.cap > 0usize {
+            free(self.entries as *raw var u8)
+            self.cap = 0usize
+            self.len = 0usize
+        }
+    }
+}
+
+pub struct HashSet<T> {
+    pub map: HashMap<T, bool>,
+}
+
+impl<T> HashSet<T> {
+    pub fn new() -> HashSet<T> {
+        HashSet {
+            map: HashMap.new(),
+        }
+    }
+
+    pub fn len(self) -> usize {
+        self.map.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.map.is_empty()
+    }
+
+    pub fn insert(var self, item: T) -> bool {
+        match self.map.insert(item, true) {
+            Option.Some(_) => false,
+            Option.None => true,
+            _ => false,
+        }
+    }
+
+    pub fn contains(self, item: T) -> bool {
+        self.map.contains_key(item)
+    }
+
+    pub fn drop(var self) {
+        self.map.drop()
+    }
+}
