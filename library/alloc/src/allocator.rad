@@ -1,0 +1,27 @@
+// Rad Alloc Library: Memory Allocator Interface and Global Allocator
+
+fn malloc(size: usize) -> *raw var u8
+fn free(ptr: *raw var u8)
+fn realloc(ptr: *raw var u8, new_size: usize) -> *raw var u8
+
+pub trait Allocator {
+    fn allocate(var self, size: usize) -> *raw var u8
+    fn deallocate(var self, ptr: *raw var u8, size: usize)
+    fn reallocate(var self, ptr: *raw var u8, old_size: usize, new_size: usize) -> *raw var u8
+}
+
+pub struct GlobalAllocator {}
+
+impl Allocator for GlobalAllocator {
+    fn allocate(var self, size: usize) -> *raw var u8 {
+        malloc(size)
+    }
+
+    fn deallocate(var self, ptr: *raw var u8, size: usize) {
+        free(ptr)
+    }
+
+    fn reallocate(var self, ptr: *raw var u8, old_size: usize, new_size: usize) -> *raw var u8 {
+        realloc(ptr, new_size)
+    }
+}

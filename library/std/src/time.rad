@@ -1,0 +1,63 @@
+// Rad Standard Library: Time and Clocks
+
+pub struct Duration {
+    pub secs: u64,
+    pub nanos: u32,
+}
+
+impl Duration {
+    pub fn from_secs(secs: u64) -> Duration {
+        Duration { secs: secs, nanos: 0u32 }
+    }
+
+    pub fn from_millis(millis: u64) -> Duration {
+        let secs = millis / 1000u64
+        let rem_ms = millis % 1000u64
+        let nanos = (rem_ms as u32) * 1000000u32
+        Duration { secs: secs, nanos: nanos }
+    }
+
+    pub fn as_millis(self) -> u64 {
+        (self.secs * 1000u64) + ((self.nanos as u64) / 1000000u64)
+    }
+
+    pub fn as_secs(self) -> u64 {
+        self.secs
+    }
+}
+
+pub struct Instant {
+    pub secs: i64,
+    pub nanos: i64,
+}
+
+impl Instant {
+    pub fn now() -> Instant {
+        let raw = malloc(16usize)
+        clock_gettime(1, raw)
+        let p = raw as *raw var i64
+        let s = p[0]
+        let ns = p[1]
+        free(raw)
+        Instant { secs: s, nanos: ns }
+    }
+
+    pub fn elapsed(self) -> Duration {
+        let now = Instant.now()
+        var total_s = now.secs - self.secs
+        var total_ns = now.nanos - self.nanos
+        if total_ns < 0i64 {
+            total_s = total_s - 1i64
+            total_ns = total_ns + 1000000000i64
+        }
+        Duration {
+            secs: total_s as u64,
+            nanos: total_ns as u32,
+        }
+    }
+}
+
+pub fn sleep_ms(millis: u64) {
+    let usecs = (millis * 1000u64) as i32
+    usleep(usecs)
+}

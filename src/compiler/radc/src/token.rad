@@ -1,0 +1,346 @@
+// ==============================================================================
+// radc/src/token.rad — Token Constants, Token Structure & Lexer Engine
+// ==============================================================================
+
+const TOK_EOF: i32 = 0
+const TOK_IDENT: i32 = 1
+const TOK_INT: i32 = 2
+const TOK_STR: i32 = 3
+
+// Keywords
+const TOK_FN: i32 = 10
+const TOK_LET: i32 = 11
+const TOK_VAR: i32 = 12
+const TOK_STRUCT: i32 = 13
+const TOK_IF: i32 = 14
+const TOK_ELSE: i32 = 15
+const TOK_WHILE: i32 = 16
+const TOK_RETURN: i32 = 17
+const TOK_AS: i32 = 18
+const TOK_TRUE: i32 = 19
+const TOK_FALSE: i32 = 20
+const TOK_PUB: i32 = 21
+const TOK_BREAK: i32 = 22
+const TOK_CONTINUE: i32 = 23
+
+// Delimiters
+const TOK_LPAREN: i32 = 30    // (
+const TOK_RPAREN: i32 = 31    // )
+const TOK_LBRACE: i32 = 32    // {
+const TOK_RBRACE: i32 = 33    // }
+const TOK_LBRACKET: i32 = 34  // [
+const TOK_RBRACKET: i32 = 35  // ]
+const TOK_COMMA: i32 = 36     // ,
+const TOK_COLON: i32 = 37     // :
+const TOK_SEMI: i32 = 38      // ;
+const TOK_ARROW: i32 = 39     // ->
+const TOK_DOT: i32 = 40       // .
+
+// Operators
+const TOK_PLUS: i32 = 50      // +
+const TOK_MINUS: i32 = 51     // -
+const TOK_STAR: i32 = 52      // *
+const TOK_SLASH: i32 = 53     // /
+const TOK_PERCENT: i32 = 54   // %
+const TOK_EQ: i32 = 55        // =
+const TOK_EQEQ: i32 = 56      // ==
+const TOK_NEQ: i32 = 57       // !=
+const TOK_LT: i32 = 58        // <
+const TOK_LEQ: i32 = 59       // <=
+const TOK_GT: i32 = 60        // >
+const TOK_GEQ: i32 = 61       // >=
+const TOK_ANDAND: i32 = 62    // &&
+const TOK_OROR: i32 = 63      // ||
+const TOK_NOT: i32 = 64       // !
+
+struct Token {
+    kind: i32,
+    text: String,
+    int_val: i64,
+    line: i64,
+    col: i64,
+}
+
+fn lex_source(src: String) -> Vec<Token> {
+    var tokens = Vec.new()
+    let p: *raw u8 = src.as_ptr()
+    let len = src.len()
+    var i = 0usize
+    var cur_line = 1i64
+    var cur_col = 1i64
+
+    while i < len {
+        let ch = p[i]
+        if ch == 10u8 { // '\n'
+            cur_line = cur_line + 1i64
+            cur_col = 1i64
+            i = i + 1usize
+        } else if ch == 32u8 || ch == 9u8 || ch == 13u8 {
+            cur_col = cur_col + 1i64
+            i = i + 1usize
+        } else if ch == 47u8 && i + 1usize < len && p[i + 1usize] == 47u8 {
+            // Line comment // ...
+            while i < len && p[i] != 10u8 {
+                i = i + 1usize
+                cur_col = cur_col + 1i64
+            }
+        } else if ch == 47u8 && i + 1usize < len && p[i + 1usize] == 42u8 {
+            // Block comment /* ... */
+            i = i + 2usize
+            cur_col = cur_col + 2i64
+            while i + 1usize < len && !(p[i] == 42u8 && p[i + 1usize] == 47u8) {
+                if p[i] == 10u8 {
+                    cur_line = cur_line + 1i64
+                    cur_col = 1i64
+                } else {
+                    cur_col = cur_col + 1i64
+                }
+                i = i + 1usize
+            }
+            if i + 1usize < len {
+                i = i + 2usize
+                cur_col = cur_col + 2i64
+            }
+        } else {
+            let tok_line = cur_line
+            let tok_col = cur_col
+
+            if is_alpha(ch) {
+                var id = String.new()
+                while i < len && is_alnum(p[i]) {
+                    id.push_byte(p[i])
+                    i = i + 1usize
+                    cur_col = cur_col + 1i64
+                }
+                id.push_byte(0u8)
+                let s = id.as_ptr() as str
+                var k = TOK_IDENT
+                if str_eq(s, "fn") {
+                    k = TOK_FN
+                } else if str_eq(s, "let") {
+                    k = TOK_LET
+                } else if str_eq(s, "var") {
+                    k = TOK_VAR
+                } else if str_eq(s, "struct") {
+                    k = TOK_STRUCT
+                } else if str_eq(s, "if") {
+                    k = TOK_IF
+                } else if str_eq(s, "else") {
+                    k = TOK_ELSE
+                } else if str_eq(s, "while") {
+                    k = TOK_WHILE
+                } else if str_eq(s, "return") {
+                    k = TOK_RETURN
+                } else if str_eq(s, "as") {
+                    k = TOK_AS
+                } else if str_eq(s, "true") {
+                    k = TOK_TRUE
+                } else if str_eq(s, "false") {
+                    k = TOK_FALSE
+                } else if str_eq(s, "pub") {
+                    k = TOK_PUB
+                } else if str_eq(s, "break") {
+                    k = TOK_BREAK
+                } else if str_eq(s, "continue") {
+                    k = TOK_CONTINUE
+                }
+
+                tokens.push(Token {
+                    kind: k,
+                    text: id,
+                    int_val: 0i64,
+                    line: tok_line,
+                    col: tok_col,
+                })
+            } else if is_digit(ch) {
+                var num_str = String.new()
+                while i < len && is_digit(p[i]) {
+                    num_str.push_byte(p[i])
+                    i = i + 1usize
+                    cur_col = cur_col + 1i64
+                }
+                num_str.push_byte(0u8)
+                let tok_val = parse_int(num_str.as_ptr() as str)
+
+                // Consume optional type suffix
+                if i < len && (p[i] == 105u8 || p[i] == 117u8 || p[i] == 102u8) {
+                    var s_end = i
+                    while s_end < len && is_alnum(p[s_end]) {
+                        s_end = s_end + 1usize
+                    }
+                    var suf = String.new()
+                    var si = i
+                    while si < s_end {
+                        suf.push_byte(p[si])
+                        si = si + 1usize
+                    }
+                    suf.push_byte(0u8)
+                    let s_str = suf.as_ptr() as str
+                    if str_eq(s_str, "usize") || str_eq(s_str, "isize") ||
+                       str_eq(s_str, "u8") || str_eq(s_str, "u16") || str_eq(s_str, "u32") || str_eq(s_str, "u64") || str_eq(s_str, "u128") ||
+                       str_eq(s_str, "i8") || str_eq(s_str, "i16") || str_eq(s_str, "i32") || str_eq(s_str, "i64") || str_eq(s_str, "i128") ||
+                       str_eq(s_str, "f32") || str_eq(s_str, "f64") {
+                        cur_col = cur_col + ((s_end - i) as i64)
+                        i = s_end
+                    }
+                }
+
+                tokens.push(Token {
+                    kind: TOK_INT,
+                    text: num_str,
+                    int_val: tok_val,
+                    line: tok_line,
+                    col: tok_col,
+                })
+            } else if ch == 34u8 || (ch == 102u8 && i + 1usize < len && p[i + 1usize] == 34u8) { // '"' or 'f"'
+                if ch == 102u8 {
+                    i = i + 1usize // skip 'f'
+                    cur_col = cur_col + 1i64
+                }
+                i = i + 1usize // skip quote
+                cur_col = cur_col + 1i64
+                var str_lit = String.new()
+                while i < len && p[i] != 34u8 {
+                    if p[i] == 92u8 && i + 1usize < len { // '\\'
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                        if p[i] == 110u8 {
+                            str_lit.push_byte(10u8) // '\n'
+                        } else if p[i] == 116u8 {
+                            str_lit.push_byte(9u8)  // '\t'
+                        } else if p[i] == 114u8 {
+                            str_lit.push_byte(13u8) // '\r'
+                        } else if p[i] == 48u8 {
+                            str_lit.push_byte(0u8)  // '\0'
+                        } else {
+                            str_lit.push_byte(p[i])
+                        }
+                    } else {
+                        if p[i] == 10u8 {
+                            cur_line = cur_line + 1i64
+                            cur_col = 0i64
+                        }
+                        str_lit.push_byte(p[i])
+                    }
+                    i = i + 1usize
+                    cur_col = cur_col + 1i64
+                }
+                if i < len {
+                    i = i + 1usize // skip closing quote
+                    cur_col = cur_col + 1i64
+                }
+                str_lit.push_byte(0u8)
+                tokens.push(Token {
+                    kind: TOK_STR,
+                    text: str_lit,
+                    int_val: 0i64,
+                    line: tok_line,
+                    col: tok_col,
+                })
+            } else {
+                var k = 0
+                if ch == 40u8 {
+                    k = TOK_LPAREN
+                } else if ch == 41u8 {
+                    k = TOK_RPAREN
+                } else if ch == 123u8 {
+                    k = TOK_LBRACE
+                } else if ch == 125u8 {
+                    k = TOK_RBRACE
+                } else if ch == 91u8 {
+                    k = TOK_LBRACKET
+                } else if ch == 93u8 {
+                    k = TOK_RBRACKET
+                } else if ch == 44u8 {
+                    k = TOK_COMMA
+                } else if ch == 58u8 {
+                    k = TOK_COLON
+                } else if ch == 59u8 {
+                    k = TOK_SEMI
+                } else if ch == 46u8 {
+                    k = TOK_DOT
+                } else if ch == 43u8 {
+                    k = TOK_PLUS
+                } else if ch == 42u8 {
+                    k = TOK_STAR
+                } else if ch == 47u8 {
+                    k = TOK_SLASH
+                } else if ch == 37u8 {
+                    k = TOK_PERCENT
+                } else if ch == 45u8 {
+                    if i + 1usize < len && p[i + 1usize] == 62u8 { // ->
+                        k = TOK_ARROW
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    } else {
+                        k = TOK_MINUS
+                    }
+                } else if ch == 61u8 {
+                    if i + 1usize < len && p[i + 1usize] == 61u8 { // ==
+                        k = TOK_EQEQ
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    } else {
+                        k = TOK_EQ
+                    }
+                } else if ch == 33u8 {
+                    if i + 1usize < len && p[i + 1usize] == 61u8 { // !=
+                        k = TOK_NEQ
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    } else {
+                        k = TOK_NOT
+                    }
+                } else if ch == 60u8 {
+                    if i + 1usize < len && p[i + 1usize] == 61u8 { // <=
+                        k = TOK_LEQ
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    } else {
+                        k = TOK_LT
+                    }
+                } else if ch == 62u8 {
+                    if i + 1usize < len && p[i + 1usize] == 61u8 { // >=
+                        k = TOK_GEQ
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    } else {
+                        k = TOK_GT
+                    }
+                } else if ch == 38u8 && i + 1usize < len && p[i + 1usize] == 38u8 { // &&
+                    k = TOK_ANDAND
+                    i = i + 1usize
+                    cur_col = cur_col + 1i64
+                } else if ch == 124u8 && i + 1usize < len && p[i + 1usize] == 124u8 { // ||
+                    k = TOK_OROR
+                    i = i + 1usize
+                    cur_col = cur_col + 1i64
+                }
+                if k != 0 {
+                    var empty = String.new()
+                    empty.push_byte(0u8)
+                    tokens.push(Token {
+                        kind: k,
+                        text: empty,
+                        int_val: 0i64,
+                        line: tok_line,
+                        col: tok_col,
+                    })
+                }
+                i = i + 1usize
+                cur_col = cur_col + 1i64
+            }
+        }
+    }
+
+    var eof_str = String.new()
+    eof_str.push_byte(0u8)
+    tokens.push(Token {
+        kind: TOK_EOF,
+        text: eof_str,
+        int_val: 0i64,
+        line: cur_line,
+        col: cur_col,
+    })
+    return tokens
+}

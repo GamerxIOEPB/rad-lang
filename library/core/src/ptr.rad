@@ -1,0 +1,12 @@
+// Rad Core Library: Raw Pointer Operations & Hardware MMIO
+// Freestanding raw pointer manipulation for systems programming and bare-metal targets.
+
+fn null<T>() -> *raw const T
+fn null_var<T>() -> *raw var T
+fn is_null<T>(ptr: *raw const T) -> bool
+fn ptr_read<T>(ptr: *raw const T) -> T
+fn ptr_write<T>(ptr: *raw var T, val: T)
+fn read_volatile<T>(ptr: *raw const T) -> T
+fn write_volatile<T>(ptr: *raw var T, val: T)
+fn offset<T>(ptr: *raw const T, count: isize) -> *raw const T
+fn offset_var<T>(ptr: *raw var T, count: isize) -> *raw var T

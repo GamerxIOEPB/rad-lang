@@ -1,0 +1,35 @@
+// Rad Standard Library: Process and Environment
+
+pub struct Process {}
+
+impl Process {
+    pub fn id() -> i32 {
+        getpid()
+    }
+
+    pub fn exit(code: i32) {
+        sys_exit(code)
+    }
+
+    pub fn run_command(cmd: str) -> i32 {
+        system(cmd)
+    }
+}
+
+pub fn get_env(name: str) -> Option<String> {
+    let val_ptr = getenv(name)
+    if (val_ptr as usize) == 0usize {
+        Option.None
+    } else {
+        Option.Some(String.from_str(val_ptr as str))
+    }
+}
+
+pub fn set_env(name: str, val: str) -> bool {
+    let res = setenv(name, val, 1)
+    res == 0
+}
+
+pub fn exit(code: i32) {
+    Process.exit(code)
+}

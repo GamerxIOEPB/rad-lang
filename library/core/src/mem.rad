@@ -1,0 +1,16 @@
+// Rad Core Library: Memory Intrinsics and Operations
+
+pub fn copy(dest: *raw var u8, src: *raw u8, count: usize) {
+    // Intrinsic: memcpy
+}
+
+pub fn set(dest: *raw var u8, val: u8, count: usize) {
+    // Intrinsic: memset
+}
+
+pub fn zero(dest: *raw var u8, count: usize) {
+    set(dest, 0, count)
+}
+
+pub fn size_of_val<T>(val: T) -> usize
+pub fn size_of<T>() -> usize

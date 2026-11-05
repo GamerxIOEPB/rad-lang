@@ -1,0 +1,124 @@
+// Rad Standard Library: File System Operations
+
+pub struct File {
+    pub handle: *raw var u8,
+    pub is_open: bool,
+}
+
+impl File {
+    pub fn open(path: str, mode: str) -> Option<File> {
+        let fp = fopen(path, mode)
+        if (fp as usize) == 0usize {
+            Option.None
+        } else {
+            Option.Some(File {
+                handle: fp,
+                is_open: true,
+            })
+        }
+    }
+
+    pub fn create(path: str) -> Option<File> {
+        File.open(path, "w+")
+    }
+
+    pub fn open_read(path: str) -> Option<File> {
+        File.open(path, "r")
+    }
+
+    pub fn open_write(path: str) -> Option<File> {
+        File.open(path, "w")
+    }
+
+    pub fn open_append(path: str) -> Option<File> {
+        File.open(path, "a")
+    }
+
+    pub fn write_str(var self, s: str) -> bool {
+        if !self.is_open {
+            return false
+        }
+        let p = s as *raw u8
+        var len = 0usize
+        while p[len] != 0u8 {
+            len = len + 1usize
+        }
+        let written = fwrite(p as *raw var u8, 1usize, len, self.handle)
+        written == (len as i64)
+    }
+
+    pub fn read_to_string(var self) -> String {
+        var result = String.new()
+        if !self.is_open {
+            return result
+        }
+        fseek(self.handle, 0i64, 2)
+        let file_size = ftell(self.handle) as usize
+        fseek(self.handle, 0i64, 0)
+        if file_size == 0usize {
+            return result
+        }
+
+        let raw = malloc(file_size + 1usize)
+        let n_read = fread(raw, 1usize, file_size, self.handle) as usize
+        var p = raw as *raw var u8
+        p[n_read] = 0u8
+        var i = 0usize
+        while i < n_read {
+            result.push_byte(p[i])
+            i = i + 1usize
+        }
+        free(raw)
+        result
+    }
+
+    pub fn flush(var self) {
+        if self.is_open {
+            fflush(self.handle)
+        }
+    }
+
+    pub fn close(var self) {
+        if self.is_open {
+            fclose(self.handle)
+            self.is_open = false
+        }
+    }
+
+    pub fn drop(var self) {
+        self.close()
+    }
+}
+
+pub fn read_file(path: str) -> Option<String> {
+    var f_opt = File.open_read(path)
+    match f_opt {
+        Option.Some(f) => {
+            var file = f
+            let content = file.read_to_string()
+            file.close()
+            Option.Some(content)
+        }
+        Option.None => Option.None,
+        _ => Option.None,
+    }
+}
+
+pub fn write_file(path: str, contents: str) -> bool {
+    var f_opt = File.create(path)
+    match f_opt {
+        Option.Some(f) => {
+            var file = f
+            let ok = file.write_str(contents)
+            file.close()
+            ok
+        }
+        Option.None => false,
+        _ => false,
+    }
+}
+
+pub fn remove_file(path: str) -> bool {
+    let res = remove(path)
+    res == 0
+}

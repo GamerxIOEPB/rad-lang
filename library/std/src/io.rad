@@ -1,0 +1,77 @@
+// Rad Standard Library: I/O (Console and Streams)
+
+pub struct Stdin {}
+pub struct Stdout {}
+pub struct Stderr {}
+
+impl Stdin {
+    pub fn read_byte(self) -> Option<u8> {
+        let raw = malloc(1usize)
+        let res = read(0, raw, 1usize)
+        if res <= 0i64 {
+            free(raw)
+            Option.None
+        } else {
+            let p = raw as *raw u8
+            let b = p[0]
+            free(raw)
+            Option.Some(b)
+        }
+    }
+}
+
+impl Stdout {
+    pub fn write_str(self, s: str) -> bool {
+        let p = s as *raw u8
+        var len = 0usize
+        while p[len] != 0u8 {
+            len = len + 1usize
+        }
+        let res = write(1, p as *raw var u8, len)
+        res >= 0i64
+    }
+
+    pub fn write_line(self, s: str) -> bool {
+        let ok = self.write_str(s)
+        let nl = write(1, "\n" as *raw var u8, 1usize)
+        ok && (nl >= 0i64)
+    }
+}
+
+impl Stderr {
+    pub fn write_str(self, s: str) -> bool {
+        let p = s as *raw u8
+        var len = 0usize
+        while p[len] != 0u8 {
+            len = len + 1usize
+        }
+        let res = write(2, p as *raw var u8, len)
+        res >= 0i64
+    }
+
+    pub fn write_line(self, s: str) -> bool {
+        let ok = self.write_str(s)
+        let nl = write(2, "\n" as *raw var u8, 1usize)
+        ok && (nl >= 0i64)
+    }
+}
+
+pub fn print(s: str) {
+    let out = Stdout {}
+    out.write_str(s)
+}
+
+pub fn println(s: str) {
+    let out = Stdout {}
+    out.write_line(s)
+}
+
+pub fn eprint(s: str) {
+    let err = Stderr {}
+    let _ = err.write_str(s)
+}
+
+pub fn eprintln(s: str) {
+    let err = Stderr {}
+    let _ = err.write_line(s)
+}

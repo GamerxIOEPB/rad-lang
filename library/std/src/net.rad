@@ -1,0 +1,65 @@
+// Rad Standard Library: Networking (TCP / UDP)
+
+pub struct TcpStream {
+    pub fd: i32,
+    pub is_connected: bool,
+}
+
+impl TcpStream {
+    pub fn connect(host_ip: str, port: u16) -> Option<TcpStream> {
+        let sock = socket(2, 1, 0)
+        if sock < 0 {
+            return Option.None
+        }
+
+        let raw = malloc(16usize)
+        var p = raw as *raw var u8
+        var i = 0usize
+        while i < 16usize {
+            p[i] = 0u8
+            i = i + 1usize
+        }
+
+        var p16 = raw as *raw var u16
+        p16[0] = 2u16
+        let p_be = ((port >> 8u16) | (port << 8u16)) as u16
+        p16[1] = p_be
+
+        let res = sys_connect(sock, raw, 16)
+        free(raw)
+
+        if res < 0 {
+            sys_close(sock)
+            Option.None
+        } else {
+            Option.Some(TcpStream {
+                fd: sock,
+                is_connected: true,
+            })
+        }
+    }
+
+    pub fn write_str(var self, s: str) -> bool {
+        if !self.is_connected {
+            return false
+        }
+        let p = s as *raw u8
+        var len = 0usize
+        while p[len] != 0u8 {
+            len = len + 1usize
+        }
+        let sent = send(self.fd, p as *raw var u8, len, 0)
+        sent == (len as i64)
+    }
+
+    pub fn close(var self) {
+        if self.is_connected {
+            sys_close(self.fd)
+            self.is_connected = false
+        }
+    }
+
+    pub fn drop(var self) {
+        self.close()
+    }
+}

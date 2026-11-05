@@ -1,0 +1,29 @@
+// Rad Core Library: Option<T>
+
+pub enum Option<T> {
+    None,
+    Some(T),
+}
+
+impl Option<T> {
+    pub fn is_some(opt: Option<T>) -> bool {
+        match opt {
+            Option.Some(_) => true,
+            Option.None => false,
+        }
+    }
+
+    pub fn is_none(opt: Option<T>) -> bool {
+        match opt {
+            Option.Some(_) => false,
+            Option.None => true,
+        }
+    }
+
+    pub fn unwrap_or(opt: Option<T>, default_val: T) -> T {
+        match opt {
+            Option.Some(val) => val,
+            Option.None => default_val,
+        }
+    }
+}

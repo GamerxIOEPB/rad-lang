@@ -1,0 +1,412 @@
+// Rad Standard Library: Concurrency Primitives and Synchronization
+
+pub fn sched_yield() -> i32
+pub fn pthread_create(thread: *raw var u64, attr: *raw var u8, routine: *raw var u8, arg: *raw var u8) -> i32
+pub fn pthread_join(thread: u64, retval: *raw var u8) -> i32
+pub fn pthread_mutex_init(mutex: *raw var u8, attr: *raw var u8) -> i32
+pub fn pthread_mutex_lock(mutex: *raw var u8) -> i32
+pub fn pthread_mutex_unlock(mutex: *raw var u8) -> i32
+pub fn pthread_mutex_destroy(mutex: *raw var u8) -> i32
+pub fn pthread_cond_init(cond: *raw var u8, attr: *raw var u8) -> i32
+pub fn pthread_cond_wait(cond: *raw var u8, mutex: *raw var u8) -> i32
+pub fn pthread_cond_signal(cond: *raw var u8) -> i32
+pub fn pthread_cond_broadcast(cond: *raw var u8) -> i32
+pub fn pthread_cond_destroy(cond: *raw var u8) -> i32
+pub fn pthread_rwlock_init(rwlock: *raw var u8, attr: *raw var u8) -> i32
+pub fn pthread_rwlock_rdlock(rwlock: *raw var u8) -> i32
+pub fn pthread_rwlock_wrlock(rwlock: *raw var u8) -> i32
+pub fn pthread_rwlock_unlock(rwlock: *raw var u8) -> i32
+pub fn pthread_rwlock_destroy(rwlock: *raw var u8) -> i32
+
+pub fn atomic_load_i32(ptr: *raw i32) -> i32
+pub fn atomic_load_i64(ptr: *raw i64) -> i64
+pub fn atomic_store_i32(ptr: *raw var i32, val: i32)
+pub fn atomic_store_i64(ptr: *raw var i64, val: i64)
+pub fn atomic_fetch_add_i32(ptr: *raw var i32, val: i32) -> i32
+pub fn atomic_fetch_add_i64(ptr: *raw var i64, val: i64) -> i64
+pub fn atomic_fetch_sub_i32(ptr: *raw var i32, val: i32) -> i32
+pub fn atomic_fetch_sub_i64(ptr: *raw var i64, val: i64) -> i64
+pub fn atomic_swap_i32(ptr: *raw var i32, val: i32) -> i32
+pub fn atomic_swap_i64(ptr: *raw var i64, val: i64) -> i64
+pub fn atomic_compare_exchange_i32(ptr: *raw var i32, expected: i32, desired: i32) -> i32
+pub fn atomic_compare_exchange_i64(ptr: *raw var i64, expected: i64, desired: i64) -> i64
+pub fn atomic_fence()
+
+pub struct AtomicI32 {
+    pub ptr: *raw var i32,
+}
+
+impl AtomicI32 {
+    pub fn new(val: i32) -> AtomicI32 {
+        let p = malloc(4usize) as *raw var i32
+        atomic_store_i32(p, val)
+        AtomicI32 { ptr: p }
+    }
+
+    pub fn load(self) -> i32 {
+        atomic_load_i32(self.ptr as *raw i32)
+    }
+
+    pub fn store(self, val: i32) {
+        atomic_store_i32(self.ptr, val)
+    }
+
+    pub fn swap(self, val: i32) -> i32 {
+        atomic_swap_i32(self.ptr, val)
+    }
+
+    pub fn compare_exchange(self, expected: i32, desired: i32) -> i32 {
+        atomic_compare_exchange_i32(self.ptr, expected, desired)
+    }
+
+    pub fn fetch_add(self, val: i32) -> i32 {
+        atomic_fetch_add_i32(self.ptr, val)
+    }
+
+    pub fn fetch_sub(self, val: i32) -> i32 {
+        atomic_fetch_sub_i32(self.ptr, val)
+    }
+
+    pub fn destroy(self) {
+        free(self.ptr as *raw var u8)
+    }
+}
+
+pub struct AtomicI64 {
+    pub ptr: *raw var i64,
+}
+
+impl AtomicI64 {
+    pub fn new(val: i64) -> AtomicI64 {
+        let p = malloc(8usize) as *raw var i64
+        atomic_store_i64(p, val)
+        AtomicI64 { ptr: p }
+    }
+
+    pub fn load(self) -> i64 {
+        atomic_load_i64(self.ptr as *raw i64)
+    }
+
+    pub fn store(self, val: i64) {
+        atomic_store_i64(self.ptr, val)
+    }
+
+    pub fn swap(self, val: i64) -> i64 {
+        atomic_swap_i64(self.ptr, val)
+    }
+
+    pub fn compare_exchange(self, expected: i64, desired: i64) -> i64 {
+        atomic_compare_exchange_i64(self.ptr, expected, desired)
+    }
+
+    pub fn fetch_add(self, val: i64) -> i64 {
+        atomic_fetch_add_i64(self.ptr, val)
+    }
+
+    pub fn fetch_sub(self, val: i64) -> i64 {
+        atomic_fetch_sub_i64(self.ptr, val)
+    }
+
+    pub fn destroy(self) {
+        free(self.ptr as *raw var u8)
+    }
+}
+
+pub struct AtomicUsize {
+    pub ptr: *raw var i64,
+}
+
+impl AtomicUsize {
+    pub fn new(val: usize) -> AtomicUsize {
+        let p = malloc(8usize) as *raw var i64
+        atomic_store_i64(p, val as i64)
+        AtomicUsize { ptr: p }
+    }
+
+    pub fn load(self) -> usize {
+        atomic_load_i64(self.ptr as *raw i64) as usize
+    }
+
+    pub fn store(self, val: usize) {
+        atomic_store_i64(self.ptr, val as i64)
+    }
+
+    pub fn swap(self, val: usize) -> usize {
+        atomic_swap_i64(self.ptr, val as i64) as usize
+    }
+
+    pub fn compare_exchange(self, expected: usize, desired: usize) -> usize {
+        atomic_compare_exchange_i64(self.ptr, expected as i64, desired as i64) as usize
+    }
+
+    pub fn fetch_add(self, val: usize) -> usize {
+        atomic_fetch_add_i64(self.ptr, val as i64) as usize
+    }
+
+    pub fn fetch_sub(self, val: usize) -> usize {
+        atomic_fetch_sub_i64(self.ptr, val as i64) as usize
+    }
+
+    pub fn destroy(self) {
+        free(self.ptr as *raw var u8)
+    }
+}
+
+pub struct AtomicBool {
+    pub ptr: *raw var i32,
+}
+
+impl AtomicBool {
+    pub fn new(val: bool) -> AtomicBool {
+        let p = malloc(4usize) as *raw var i32
+        let int_val = if val { 1 } else { 0 }
+        atomic_store_i32(p, int_val)
+        AtomicBool { ptr: p }
+    }
+
+    pub fn load(self) -> bool {
+        let v = atomic_load_i32(self.ptr as *raw i32)
+        v != 0
+    }
+
+    pub fn store(self, val: bool) {
+        let int_val = if val { 1 } else { 0 }
+        atomic_store_i32(self.ptr, int_val)
+    }
+
+    pub fn swap(self, val: bool) -> bool {
+        let int_val = if val { 1 } else { 0 }
+        let old = atomic_swap_i32(self.ptr, int_val)
+        old != 0
+    }
+
+    pub fn compare_exchange(self, expected: bool, desired: bool) -> bool {
+        let exp = if expected { 1 } else { 0 }
+        let des = if desired { 1 } else { 0 }
+        let old = atomic_compare_exchange_i32(self.ptr, exp, des)
+        old != 0
+    }
+
+    pub fn destroy(self) {
+        free(self.ptr as *raw var u8)
+    }
+}
+
+pub struct MutexGuard<T> {
+    pub mutex_ptr: *raw var u8,
+    pub data_ptr: *raw var T,
+}
+
+impl<T> MutexGuard<T> {
+    pub fn get(self) -> T {
+        ptr_read(self.data_ptr)
+    }
+
+    pub fn set(var self, val: T) {
+        ptr_write(self.data_ptr, val)
+    }
+
+    pub fn unlock(self) {
+        pthread_mutex_unlock(self.mutex_ptr)
+    }
+
+    pub fn drop(var self) {
+        pthread_mutex_unlock(self.mutex_ptr)
+    }
+}
+
+pub struct Mutex<T> {
+    pub mutex_ptr: *raw var u8,
+    pub data_ptr: *raw var T,
+}
+
+impl<T> Mutex<T> {
+    pub fn new(val: T) -> Mutex<T> {
+        let m = malloc(64usize)
+        pthread_mutex_init(m, 0usize as *raw var u8)
+        let sz = size_of_val(val)
+        let d = malloc(sz) as *raw var T
+        ptr_write(d, val)
+        Mutex { mutex_ptr: m, data_ptr: d }
+    }
+
+    pub fn lock(self) -> MutexGuard<T> {
+        pthread_mutex_lock(self.mutex_ptr)
+        MutexGuard { mutex_ptr: self.mutex_ptr, data_ptr: self.data_ptr }
+    }
+
+    pub fn unlock(self) {
+        pthread_mutex_unlock(self.mutex_ptr)
+    }
+
+    pub fn destroy(self) {
+        pthread_mutex_destroy(self.mutex_ptr)
+        free(self.mutex_ptr)
+        free(self.data_ptr as *raw var u8)
+    }
+}
+
+pub struct RwLockReadGuard<T> {
+    pub rwlock_ptr: *raw var u8,
+    pub data_ptr: *raw var T,
+}
+
+impl<T> RwLockReadGuard<T> {
+    pub fn get(self) -> T {
+        ptr_read(self.data_ptr)
+    }
+
+    pub fn unlock(self) {
+        pthread_rwlock_unlock(self.rwlock_ptr)
+    }
+
+    pub fn drop(var self) {
+        pthread_rwlock_unlock(self.rwlock_ptr)
+    }
+}
+
+pub struct RwLockWriteGuard<T> {
+    pub rwlock_ptr: *raw var u8,
+    pub data_ptr: *raw var T,
+}
+
+impl<T> RwLockWriteGuard<T> {
+    pub fn get(self) -> T {
+        ptr_read(self.data_ptr)
+    }
+
+    pub fn set(var self, val: T) {
+        ptr_write(self.data_ptr, val)
+    }
+
+    pub fn unlock(self) {
+        pthread_rwlock_unlock(self.rwlock_ptr)
+    }
+
+    pub fn drop(var self) {
+        pthread_rwlock_unlock(self.rwlock_ptr)
+    }
+}
+
+pub struct RwLock<T> {
+    pub rwlock_ptr: *raw var u8,
+    pub data_ptr: *raw var T,
+}
+
+impl<T> RwLock<T> {
+    pub fn new(val: T) -> RwLock<T> {
+        let rw = malloc(64usize)
+        pthread_rwlock_init(rw, 0usize as *raw var u8)
+        let sz = size_of_val(val)
+        let d = malloc(sz) as *raw var T
+        ptr_write(d, val)
+        RwLock { rwlock_ptr: rw, data_ptr: d }
+    }
+
+    pub fn read(self) -> RwLockReadGuard<T> {
+        pthread_rwlock_rdlock(self.rwlock_ptr)
+        RwLockReadGuard { rwlock_ptr: self.rwlock_ptr, data_ptr: self.data_ptr }
+    }
+
+    pub fn write(self) -> RwLockWriteGuard<T> {
+        pthread_rwlock_wrlock(self.rwlock_ptr)
+        RwLockWriteGuard { rwlock_ptr: self.rwlock_ptr, data_ptr: self.data_ptr }
+    }
+
+    pub fn destroy(self) {
+        pthread_rwlock_destroy(self.rwlock_ptr)
+        free(self.rwlock_ptr)
+        free(self.data_ptr as *raw var u8)
+    }
+}
+
+pub struct ChannelState<T> {
+    pub mutex: *raw var u8,
+    pub cond: *raw var u8,
+    pub queue: Vec<T>,
+    pub head: usize,
+    pub closed: bool,
+}
+
+pub struct Sender<T> {
+    pub state: *raw var ChannelState<T>,
+}
+
+impl<T> Sender<T> {
+    pub fn send(self, item: T) -> bool {
+        var s = self.state
+        pthread_mutex_lock(s.mutex)
+        if s.closed {
+            pthread_mutex_unlock(s.mutex)
+            return false
+        }
+        s.queue.push(item)
+        pthread_cond_signal(s.cond)
+        pthread_mutex_unlock(s.mutex)
+        true
+    }
+
+    pub fn close(self) {
+        var s = self.state
+        pthread_mutex_lock(s.mutex)
+        s.closed = true
+        pthread_cond_broadcast(s.cond)
+        pthread_mutex_unlock(s.mutex)
+    }
+}
+
+pub struct Receiver<T> {
+    pub state: *raw var ChannelState<T>,
+}
+
+impl<T> Receiver<T> {
+    pub fn recv(self) -> Option<T> {
+        var s = self.state
+        pthread_mutex_lock(s.mutex)
+        while (s.head >= s.queue.len()) && !s.closed {
+            pthread_cond_wait(s.cond, s.mutex)
+        }
+        if s.head < s.queue.len() {
+            let item = s.queue.get(s.head)
+            s.head = s.head + 1usize
+            pthread_mutex_unlock(s.mutex)
+            item
+        } else {
+            pthread_mutex_unlock(s.mutex)
+            Option.None
+        }
+    }
+
+    pub fn try_recv(self) -> Option<T> {
+        var s = self.state
+        pthread_mutex_lock(s.mutex)
+        if s.head < s.queue.len() {
+            let item = s.queue.get(s.head)
+            s.head = s.head + 1usize
+            pthread_mutex_unlock(s.mutex)
+            item
+        } else {
+            pthread_mutex_unlock(s.mutex)
+            Option.None
+        }
+    }
+}
+
+pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
+    let m = malloc(64usize)
+    pthread_mutex_init(m, 0usize as *raw var u8)
+    let c = malloc(64usize)
+    pthread_cond_init(c, 0usize as *raw var u8)
+    let dummy = ChannelState {
+        mutex: m,
+        cond: c,
+        queue: Vec.new(),
+        head: 0usize,
+        closed: false,
+    }
+    let sz = size_of_val(dummy)
+    let s_ptr = malloc(sz) as *raw var ChannelState<T>
+    ptr_write(s_ptr, dummy)
+    let res = (Sender { state: s_ptr }, Receiver { state: s_ptr })
+    res
+}
