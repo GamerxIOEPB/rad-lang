@@ -1,0 +1,11 @@
+// [ptr] Aliasing a Vec's backing pointer: store, load, arithmetic.
+fn main() {
+    var v = Vec.new();
+    v.push(5);
+    v.push(6);
+    let p = v.ptr;
+    p[0] = 50;
+    p[1] = 60;
+    let s = p[0] + p[1];
+    printf("s=%d\n", s);
+}

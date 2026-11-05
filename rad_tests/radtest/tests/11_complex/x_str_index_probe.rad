@@ -1,0 +1,6 @@
+// [str-index] Probe: indexing into a str literal.
+fn main() {
+    let s = "abc";
+    let ch = s[1];
+    printf("got\n");
+}

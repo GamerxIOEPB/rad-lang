@@ -1,0 +1,12 @@
+fn main() {
+    var v = Vec.new();
+    v.push(7i64);
+    v.push(8i64);
+    let p = v.ptr;
+    let a = p[0];
+    let b = p[1];
+    println("a={a} b={b}");
+    p[1] = 99i64;
+    let changed = v.ptr[1];
+    println("changed={changed}");
+}

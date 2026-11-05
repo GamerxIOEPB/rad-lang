@@ -1,0 +1,5 @@
+// [builtin?] Probe: fopen without extern declaration (prelude?).
+fn main() {
+    let fp = fopen("/tmp/radtest_probe.txt", "w");
+    printf("fopen-ok\n");
+}

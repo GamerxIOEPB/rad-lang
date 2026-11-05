@@ -1,0 +1,11 @@
+// [i64-storage] Spec: Vec<i64> stores 64-bit values.
+// Runtime-built value 3221225472 must round-trip.
+fn main() {
+    var v = Vec.new();
+    var big = 1073741824;
+    big = big + big + big;
+    v.push(big);
+    let p = v.ptr;
+    let back = p[0];
+    printf("back=%d\n", back);
+}

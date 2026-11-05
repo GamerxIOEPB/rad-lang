@@ -1,0 +1,11 @@
+// [mod-sum] x_k = (3k+7) % 100 for k in 0..199; two full residue cycles sum to 9900.
+fn main() {
+    var k = 0;
+    var total = 0;
+    while k < 200 {
+        let x = (3 * k + 7) % 100;
+        total = total + x;
+        k = k + 1;
+    }
+    printf("total=%d\n", total);
+}

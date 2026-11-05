@@ -1,0 +1,86 @@
+{
+  "name": "rad-lang",
+  "displayName": "Rad Programming Language",
+  "description": "Rich language support, syntax highlighting, and Language Server Protocol integration for Rad.",
+  "version": "0.1.0",
+  "publisher": "rad-lang",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rad-lang/rad"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "rad",
+    "systems",
+    "compiler",
+    "lsp"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:rad"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "rad",
+        "aliases": [
+          "Rad",
+          "rad"
+        ],
+        "extensions": [
+          ".rad"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "rad",
+        "scopeName": "source.rad",
+        "path": "./syntaxes/rad.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "rad.restartLsp",
+        "title": "Rad: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Rad Configuration",
+      "properties": {
+        "rad.lsp.path": {
+          "type": "string",
+          "default": "rad",
+          "description": "Path to the `rad` binary executable."
+        },
+        "rad.lsp.arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lsp"
+          ],
+          "description": "Arguments passed to the rad binary to start the language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.4.0",
+    "vscode-languageclient": "^9.0.1"
+  }
+}

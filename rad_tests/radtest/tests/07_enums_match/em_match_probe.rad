@@ -1,0 +1,19 @@
+// [match] Spec: match over enum variants with payload binding.
+enum State {
+    Off,
+    On(i32),
+}
+fn handle(s: State) {
+    match s {
+        State::Off => {
+            println("off");
+        },
+        State::On(n) => {
+            println("payload seen");
+        },
+    }
+}
+fn main() {
+    let st = State::On(3);
+    handle(st);
+}

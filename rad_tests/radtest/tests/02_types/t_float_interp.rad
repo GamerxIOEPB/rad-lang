@@ -1,0 +1,5 @@
+// [float] Spec: interpolated f64 printing.
+fn main() {
+    let f = 1.5f64;
+    println("f={f}");
+}

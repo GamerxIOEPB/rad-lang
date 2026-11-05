@@ -1,0 +1,5 @@
+// Rad Core Library: Panic Handler
+
+pub fn panic(msg: str) {
+    // In bare-metal or standard runtime, terminates execution with diagnostic message
+}

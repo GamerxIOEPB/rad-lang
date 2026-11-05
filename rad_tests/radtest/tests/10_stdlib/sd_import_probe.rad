@@ -1,0 +1,5 @@
+// [import] Grammar: import <Ident>;
+import std;
+fn main() {
+    println("imported");
+}

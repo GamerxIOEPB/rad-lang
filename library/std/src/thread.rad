@@ -1,0 +1,34 @@
+// Rad Standard Library: Thread Management and Execution
+
+pub struct JoinHandle {
+    pub thread_id: u64,
+}
+
+impl JoinHandle {
+    pub fn join(self) -> *raw var u8 {
+        let ret_buf = malloc(8usize)
+        let _ = pthread_join(self.thread_id, ret_buf)
+        let p = ret_buf as *raw var *raw var u8
+        let val = p[0]
+        free(ret_buf)
+        val
+    }
+}
+
+pub fn thread_spawn(func: *raw var u8, arg: *raw var u8) -> JoinHandle {
+    let tid_buf = malloc(8usize)
+    let null_attr = 0usize as *raw var u8
+    let res = pthread_create(tid_buf as *raw var u64, null_attr, func, arg)
+    let p = tid_buf as *raw var u64
+    let tid = p[0]
+    free(tid_buf)
+    JoinHandle { thread_id: tid }
+}
+
+pub fn thread_yield() -> i32 {
+    sched_yield()
+}
+
+pub fn thread_sleep_ms(ms: u32) {
+    sleep_ms(ms as u64)
+}

@@ -1,0 +1,23 @@
+// [impl] Instance methods: self and var self.
+struct Rect {
+    w: i32,
+    h: i32,
+}
+impl Rect {
+    fn area(self) -> i32 {
+        let prod = self.w * self.h;
+        return prod;
+    }
+    fn scale(var self, f: i32) {
+        self.w = self.w * f;
+        self.h = self.h * f;
+    }
+}
+fn main() {
+    var r = Rect { w: 3, h: 4 };
+    let a = r.area();
+    printf("area=%d\n", a);
+    r.scale(2);
+    let b = r.area();
+    printf("area2=%d\n", b);
+}

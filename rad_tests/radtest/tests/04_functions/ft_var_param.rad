@@ -1,0 +1,9 @@
+// [var-param] Mutable parameters (documented).
+fn bump(var counter: i32) -> i32 {
+    counter = counter + 1;
+    return counter;
+}
+fn main() {
+    let a = bump(5);
+    printf("a=%d\n", a);
+}

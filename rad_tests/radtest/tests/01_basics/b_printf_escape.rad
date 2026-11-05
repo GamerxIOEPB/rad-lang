@@ -1,0 +1,6 @@
+// [printf+escapes] C-style formatted printing and escape sequences.
+fn main() {
+    printf("tab:\there\n");
+    printf("quotes:\"quoted\"\n");
+    printf("backslash:\\ done\n");
+}

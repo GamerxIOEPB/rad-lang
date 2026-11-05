@@ -1,0 +1,6 @@
+// [builtin?] Probe: exit without extern declaration (prelude?).
+fn main() {
+    printf("exiting\n");
+    let rc = exit(2);
+    printf("unreachable\n");
+}

@@ -1,0 +1,4 @@
+// Spec E0002: undefined identifier.
+fn main() {
+    let y = unknown_variable;
+}

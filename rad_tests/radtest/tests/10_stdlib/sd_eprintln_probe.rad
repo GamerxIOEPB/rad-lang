@@ -1,0 +1,5 @@
+// [std::io] Spec: eprintln writes to stderr.
+fn main() {
+    println("out-line");
+    eprintln("err-line");
+}

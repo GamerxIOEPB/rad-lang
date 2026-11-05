@@ -1,0 +1,7 @@
+// [c-lib] C library functions are integrated; no extern "C" declaration needed.
+fn main() {
+    puts("via-integrated-puts");
+    let p = malloc(8usize);
+    free(p);
+    printf("c-lib-ok\n");
+}

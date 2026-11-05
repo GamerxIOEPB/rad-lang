@@ -1,0 +1,4 @@
+fn main() {
+    var xi: i32 = "string";
+    println("dead");
+}

@@ -1,0 +1,9 @@
+// [Vec] new/push and the len field.
+fn main() {
+    var v = Vec.new();
+    v.push(10);
+    v.push(20);
+    v.push(30);
+    let n = v.len;
+    println("len={n}");
+}

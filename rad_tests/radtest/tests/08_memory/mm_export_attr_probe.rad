@@ -1,0 +1,9 @@
+// [export] Spec: #[export_name = "..."] symbol renaming.
+#[export_name = "my_rad_sum"]
+pub extern "C" fn sum3(a: i32, b: i32) -> i32 {
+    return a + b;
+}
+fn main() {
+    let s = sum3(1, 2);
+    printf("s=%d\n", s);
+}

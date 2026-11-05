@@ -1,0 +1,16 @@
+// [while-true]break/continue] while true with break and continue.
+fn main() {
+    var i = 0;
+    var out = 0;
+    while true {
+        i = i + 1;
+        if i > 10 {
+            break;
+        }
+        if i % 2 == 0 {
+            continue;
+        }
+        out = out + i;
+    }
+    printf("i=%d out=%d\n", i, out);
+}

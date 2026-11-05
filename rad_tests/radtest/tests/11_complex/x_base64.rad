@@ -1,0 +1,92 @@
+// [base64] RFC 4648 vectors: f/fo/foo/foob/fooba/foobar, no bit shifts (use *256).
+fn push_b64(s: String, code: i32) {
+    // char code from 6-bit index 0..63 without table indexing
+    let idx = code;
+    var ch = 65;
+    if idx < 26 {
+        ch = 65 + idx;
+    } else {
+        if idx < 52 {
+            ch = 71 + idx;
+        } else {
+            if idx < 62 {
+                ch = idx - 4;
+            } else {
+                if idx == 62 {
+                    ch = 43;
+                } else {
+                    ch = 47;
+                }
+            }
+        }
+    }
+    s.push_byte(ch as u8);
+}
+fn enc_all(input: Vec, s: String) {
+    let pin = input.ptr;
+    let n = input.len;
+    var i = 0;
+    while i < n {
+        let b0 = pin[i];
+        var b1 = 0;
+        var b2 = 0;
+        if i + 1 < n {
+            b1 = pin[i + 1];
+        }
+        if i + 2 < n {
+            b2 = pin[i + 2];
+        }
+        let trip = b0 * 65536 + b1 * 256 + b2;
+        let c0 = trip / 262144;
+        let c1 = (trip / 4096) % 64;
+        let c2 = (trip / 64) % 64;
+        let c3 = trip % 64;
+        push_b64(s, c0);
+        push_b64(s, c1);
+        if i + 1 < n {
+            push_b64(s, c2);
+        } else {
+            s.push_str("=");
+            s.push_str("=");
+        }
+        if i + 2 < n {
+            push_b64(s, c3);
+        } else {
+            if i + 1 < n {
+                s.push_str("=");
+            }
+        }
+        i = i + 3;
+    }
+}
+fn test_word(a: i32, b: i32, c: i32, d: i32, e: i32, f: i32, cnt: i32) {
+    var input = Vec.new();
+    input.push(a);
+    if cnt > 1 {
+        input.push(b);
+    }
+    if cnt > 2 {
+        input.push(c);
+    }
+    if cnt > 3 {
+        input.push(d);
+    }
+    if cnt > 4 {
+        input.push(e);
+    }
+    if cnt > 5 {
+        input.push(f);
+    }
+    var s = String.new();
+    enc_all(input, s);
+    printf("%s\n", s.as_ptr());
+}
+fn main() {
+    // "f" = 102, "o" = 111, "b" = 98, "a" = 97, "r" = 114
+    test_word(102, 111, 111, 98, 97, 114, 1);
+    test_word(102, 111, 111, 98, 97, 114, 2);
+    test_word(102, 111, 111, 98, 97, 114, 3);
+    test_word(102, 111, 111, 98, 97, 114, 4);
+    test_word(102, 111, 111, 98, 97, 114, 5);
+    test_word(102, 111, 111, 98, 97, 114, 6);
+}

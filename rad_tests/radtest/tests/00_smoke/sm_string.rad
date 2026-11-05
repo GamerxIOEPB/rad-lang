@@ -1,0 +1,11 @@
+fn main() {
+    let s = String.from_str("hello");
+    let n = s.len();
+    println("len={n}");
+    var t = String.new();
+    t.push_str("rad ");
+    t.push_str("lang");
+    printf("built: %s\n", t.as_ptr());
+    let n2 = t.len();
+    println("built_len={n2}");
+}

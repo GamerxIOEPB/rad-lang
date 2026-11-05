@@ -1,0 +1,24 @@
+// [primes] Trial division to 50.
+fn is_prime(n: i32) -> bool {
+    if n < 2 {
+        return false;
+    }
+    var d = 2;
+    while d * d <= n {
+        if n % d == 0 {
+            return false;
+        }
+        d = d + 1;
+    }
+    return true;
+}
+fn main() {
+    var p = 2;
+    while p < 50 {
+        if is_prime(p) {
+            printf("%d ", p);
+        }
+        p = p + 1;
+    }
+    printf("\n");
+}

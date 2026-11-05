@@ -1,0 +1,10 @@
+fn main() {
+    let a = 3000000000i64;
+    println("a={a}");
+    let b = 1234567890123i64;
+    println("b={b}");
+    let c = 255u8;
+    println("c={c}");
+    let d = 4294967295u32;
+    println("d={d}");
+}

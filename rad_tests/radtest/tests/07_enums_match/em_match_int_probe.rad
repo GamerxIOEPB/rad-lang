@@ -1,0 +1,20 @@
+// [match] Spec: match over integer values.
+fn code_of(status: i32) -> str {
+    match status {
+        0 => {
+            return "ok";
+        },
+        1 => {
+            return "err";
+        },
+        _ => {
+            return "unknown";
+        },
+    }
+}
+fn main() {
+    let a = code_of(0);
+    let b = code_of(1);
+    let c = code_of(99);
+    printf("%s %s %s\n", a, b, c);
+}

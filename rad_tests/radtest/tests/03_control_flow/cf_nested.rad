@@ -1,0 +1,16 @@
+// [nested] Nested loops.
+fn main() {
+    let rows = 3;
+    let cols = 3;
+    var i = 1;
+    while i <= rows {
+        var j = 1;
+        while j <= cols {
+            let prod = i * j;
+            printf("%d ", prod);
+            j = j + 1;
+        }
+        printf("\n");
+        i = i + 1;
+    }
+}

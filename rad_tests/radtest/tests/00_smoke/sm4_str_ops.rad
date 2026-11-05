@@ -1,0 +1,12 @@
+fn main() {
+    let a = "apple";
+    let b = "apple";
+    if a == b {
+        println("eq");
+    }
+    printf("%s %s\n", a, b);
+    let n = 2;
+    printf("n=%d\n", n);
+    let s = "tab\tnew\nquote\"end";
+    printf("%s", s);
+}

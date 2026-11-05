@@ -1,0 +1,8 @@
+// [charcodes] Printing characters via a code point through %c.
+fn main() {
+    let h = 72;
+    printf("%c", h);
+    let i = 105;
+    printf("%c", i);
+    printf("\n");
+}

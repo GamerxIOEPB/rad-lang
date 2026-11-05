@@ -1,0 +1,6 @@
+start=100
+after-deposit=150
+withdraw-ok
+after-withdraw=120
+overdraft-rejected
+final=120

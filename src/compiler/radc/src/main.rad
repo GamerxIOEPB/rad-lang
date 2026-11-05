@@ -1,0 +1,283 @@
+// ==============================================================================
+// radc/src/main.rad - Self-Hosted Rad Compiler Entry Point & CLI Driver
+// ==============================================================================
+
+import util;
+import token;
+import ast;
+import parser;
+import codegen;
+import linker;
+
+struct CompilerOptions {
+    input_paths: Vec<String>,
+    output_path: String,
+    emit_llvm: bool,
+    check_only: bool,
+    opt_level: String,
+    target_triple: String,
+    linker_cmd: String,
+    show_version: bool,
+}
+
+fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
+    var input_paths = Vec.new()
+    var output_path = String.new()
+    var emit_llvm = false
+    var check_only = false
+    var opt_level = String.from_str("2")
+    var target_triple = String.from_str("x86_64-unknown-linux-gnu")
+    var linker_cmd = String.new()
+    var show_version = false
+
+    var i = 1usize
+    let total = argc as usize
+
+    while i < total {
+        let arg = argv[i] as str
+        if str_eq(arg, "-V") || str_eq(arg, "--version") {
+            show_version = true
+        } else if str_eq(arg, "-o") && i + 1usize < total {
+            i = i + 1usize
+            output_path = String.from_str(argv[i] as str)
+        } else if str_eq(arg, "--emit-llvm") || str_eq(arg, "--emit-ir") {
+            emit_llvm = true
+        } else if str_eq(arg, "--check") {
+            check_only = true
+        } else if str_starts_with(arg, "-O") {
+            let p = arg as *raw u8
+            opt_level = String.new()
+            if str_len(arg) >= 3usize {
+                opt_level.push_byte(p[2usize])
+            } else {
+                opt_level.push_byte(50u8) // '2'
+            }
+            opt_level.push_byte(0u8)
+        } else if str_eq(arg, "--target") && i + 1usize < total {
+            i = i + 1usize
+            target_triple = String.from_str(argv[i] as str)
+        } else if str_eq(arg, "--linker") && i + 1usize < total {
+            i = i + 1usize
+            linker_cmd = String.from_str(argv[i] as str)
+        } else if !str_starts_with(arg, "-") {
+            var path_str = String.from_str(arg)
+            input_paths.push(path_str)
+        }
+        i = i + 1usize
+    }
+
+    if output_path.len() == 0usize {
+        if input_paths.len > 0usize {
+            let first = input_paths.ptr[0usize].as_ptr() as str
+            var stem = String.new()
+            let slen = str_len(first)
+            var end_pos = str_len(first)
+            if str_ends_with(first, ".rad") && slen >= 4usize {
+                end_pos = slen - 4usize
+            }
+            let p = first as *raw u8
+            var k = 0usize
+            while k < end_pos {
+                stem.push_byte(p[k])
+                k = k + 1usize
+            }
+            stem.push_byte(0u8)
+            output_path = stem
+        } else {
+            output_path = String.from_str("a.out")
+        }
+    }
+
+    return CompilerOptions {
+        input_paths: input_paths,
+        output_path: output_path,
+        emit_llvm: emit_llvm,
+        check_only: check_only,
+        opt_level: opt_level,
+        target_triple: target_triple,
+        linker_cmd: linker_cmd,
+        show_version: show_version,
+    }
+}
+
+fn main(argc: i32, argv: *raw *raw u8) -> i32 {
+    let opts = parse_cli_args(argc, argv)
+
+    if opts.show_version {
+        println("radc 0.1.0 (self-hosted x86_64-unknown-linux-gnu)")
+        return 0
+    }
+
+    if opts.input_paths.len == 0usize {
+        println("radc - Rad Compiler")
+        println("Usage: radc <file1.rad> [file2.rad ...] [options]")
+        println("")
+        println("Options:")
+        println("  -o <path>       Set output binary path")
+        println("  --emit-llvm     Emit textual LLVM IR (.ll) without linking")
+        println("  --check         Check source syntax and structure without code generation")
+        println("  -O0, -O2, -O3   Set optimization level (default: -O2)")
+        println("  --target <t>    Target triple (default: x86_64-unknown-linux-gnu)")
+        println("  --linker <cmd>  Custom linker command override")
+        println("  -V, --version   Print compiler version")
+        return 0
+    }
+
+    // Step 1: Lex and Parse all input files into a unified AST arena
+    var parser = Parser {
+        tokens: Vec.new(),
+        pos: 0usize,
+        exprs: Vec.new(),
+        stmts: Vec.new(),
+        functions: Vec.new(),
+        structs: Vec.new(),
+        const_names: Vec.new(),
+        const_values: Vec.new(),
+        filename: String.new(),
+        error_count: 0i64,
+        source: String.new(),
+        moved_vars: Vec.new(),
+    }
+    parser.const_names.push(String.from_str("Option::None"))
+    parser.const_values.push(0i64)
+    parser.const_names.push(String.from_str("Option::Some"))
+    parser.const_values.push(1i64)
+    parser.const_names.push(String.from_str("Result::Ok"))
+    parser.const_values.push(0i64)
+    parser.const_names.push(String.from_str("Result::Err"))
+    parser.const_values.push(1i64)
+    // Reserve index 0 as sentinel NULL_EXPR and NULL_STMT so expr_id/stmt_id > 0
+    parser.exprs.push(Expr {
+        kind: 0,
+        op: 0,
+        int_val: 0i64,
+        str_val: String.new(),
+        target_type: String.new(),
+        left: 0usize,
+        right: 0usize,
+        args: Vec.new(),
+        field_name: String.new(),
+    })
+    parser.stmts.push(Stmt {
+        kind: 0,
+        name: String.new(),
+        type_name: String.new(),
+        expr_id: 0usize,
+        index_expr: 0usize,
+        then_stmts: Vec.new(),
+        else_stmts: Vec.new(),
+        body_stmts: Vec.new(),
+    })
+
+    var file_idx = 0usize
+    while file_idx < opts.input_paths.len {
+        let fpath = opts.input_paths.ptr[file_idx].as_ptr() as str
+        let fp = fopen(fpath, "rb")
+        if (fp as usize) == 0usize {
+            var err = String.new()
+            err.push_str("error: cannot read input file '")
+            err.push_str(fpath)
+            err.push_str("'")
+            println(err.as_ptr() as str)
+            return 1
+        }
+        fseek(fp, 0i64, 2)
+        let fsize = ftell(fp) as usize
+        fclose(fp)
+        if fsize == 0usize {
+            var err = String.new()
+            err.push_str("error: source file is empty: '")
+            err.push_str(fpath)
+            err.push_str("'")
+            println(err.as_ptr() as str)
+            return 1
+        }
+        let source = read_file_string(fpath)
+        let tokens = lex_source(source)
+        parser.tokens = tokens
+        parser.pos = 0usize
+        parser.filename = String.from_str(fpath)
+        parser.source = source
+        parser.parse_program()
+        if parser.error_count > 0i64 {
+            return 1
+        }
+        file_idx = file_idx + 1usize
+    }
+
+    if parser.error_count > 0i64 {
+        return 1
+    }
+
+    if opts.check_only {
+        println("Check complete: 0 errors.")
+        return 0
+    }
+
+    // Step 2: Direct SSA LLVM IR Generation
+    var codegen = Codegen {
+        parser: parser,
+        target: opts.target_triple,
+        ir: String.new(),
+        fn_allocas: String.new(),
+        allocated_vars: Vec.new(),
+        ssa_counter: 1,
+        label_counter: 0,
+        strings: Vec.new(),
+        current_ret_type: String.new(),
+        loop_cond_labels: Vec.new(),
+        loop_end_labels: Vec.new(),
+        current_func_idx: 0usize,
+    }
+    let ir = codegen.generate()
+    if ir.len() == 0usize {
+        return 1
+    }
+
+    if opts.output_path.len() > 0usize {
+        var chk_path = String.new()
+        chk_path.push_str(opts.output_path.as_ptr() as str)
+        chk_path.push_str("/.")
+        chk_path.push_byte(0u8)
+        let fp_dir = fopen(chk_path.as_ptr() as str, "rb")
+        if (fp_dir as usize) != 0usize {
+            fclose(fp_dir)
+            var err = String.new()
+            err.push_str("error: output path '")
+            err.push_str(opts.output_path.as_ptr() as str)
+            err.push_str("' is an existing directory")
+            println(err.as_ptr() as str)
+            return 1
+        }
+    }
+
+    if opts.emit_llvm {
+        var ll_path = String.new()
+        ll_path.push_str(opts.output_path.as_ptr() as str)
+        if !str_ends_with(ll_path.as_ptr() as str, ".ll") {
+            ll_path.push_str(".ll")
+        }
+        write_file_string(ll_path.as_ptr() as str, ir)
+        return 0
+    }
+
+    // Step 3: Write temporary IR and invoke Mode A Linker Cascade
+    var tmp_ir_path = String.new()
+    tmp_ir_path.push_str(opts.output_path.as_ptr() as str)
+    tmp_ir_path.push_str(".tmp.ll")
+
+    if !write_file_string(tmp_ir_path.as_ptr() as str, ir) {
+        println("error: cannot write temporary LLVM IR file")
+        return 1
+    }
+
+    let link_status = invoke_linker(tmp_ir_path, opts.output_path, opts.opt_level, opts.linker_cmd)
+
+    // Clean up temporary LLVM IR
+    var rm_cmd = String.new()
+    rm_cmd.push_str("rm -f ")
+    rm_cmd.push_str(tmp_ir_path.as_ptr() as str)
+    system(rm_cmd.as_ptr() as str)
+
+    return link_status
+}

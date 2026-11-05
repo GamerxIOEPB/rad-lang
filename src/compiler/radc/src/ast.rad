@@ -1,0 +1,72 @@
+// ==============================================================================
+// radc/src/ast.rad — Arena AST Definitions
+// ==============================================================================
+
+const EXPR_INT: i32 = 1
+const EXPR_STR: i32 = 2
+const EXPR_BOOL: i32 = 3
+const EXPR_IDENT: i32 = 4
+const EXPR_BINARY: i32 = 5
+const EXPR_UNARY: i32 = 6
+const EXPR_CALL: i32 = 7
+const EXPR_METHOD_CALL: i32 = 8
+const EXPR_FIELD_ACCESS: i32 = 9
+const EXPR_INDEX: i32 = 10
+const EXPR_CAST: i32 = 11
+const EXPR_FLOAT: i32 = 12
+
+struct Expr {
+    kind: i32,
+    op: i32,
+    int_val: i64,
+    str_val: String,
+    target_type: String,
+    left: usize,
+    right: usize,
+    args: Vec<usize>,
+    field_name: String,
+}
+
+const STMT_LET: i32 = 1
+const STMT_VAR: i32 = 2
+const STMT_ASSIGN: i32 = 3
+const STMT_ASSIGN_INDEX: i32 = 4
+const STMT_IF: i32 = 5
+const STMT_WHILE: i32 = 6
+const STMT_RETURN: i32 = 7
+const STMT_EXPR: i32 = 8
+const STMT_BREAK: i32 = 9
+const STMT_CONTINUE: i32 = 10
+const STMT_ASSIGN_FIELD: i32 = 11
+
+struct Stmt {
+    kind: i32,
+    name: String,
+    type_name: String,
+    expr_id: usize,
+    index_expr: usize,
+    then_stmts: Vec<usize>,
+    else_stmts: Vec<usize>,
+    body_stmts: Vec<usize>,
+}
+
+struct FunctionDef {
+    fn_name: String,
+    param_names: Vec<String>,
+    param_types: Vec<String>,
+    ret_type: String,
+    body: Vec<usize>,
+}
+
+struct StructDef {
+    struct_name: String,
+    field_names: Vec<String>,
+    field_types: Vec<String>,
+}
+
+struct MatchArm {
+    is_wildcard: bool,
+    cond_expr: usize,
+    bound_var: String,
+    stmts: Vec<usize>,
+}

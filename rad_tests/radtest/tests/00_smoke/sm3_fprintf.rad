@@ -1,0 +1,5 @@
+fn main() {
+    printf("%.2f\n", 3.5);
+    let f = 2.5f64;
+    printf("%.2f\n", f);
+}

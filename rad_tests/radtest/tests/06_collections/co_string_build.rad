@@ -1,0 +1,9 @@
+// [String] new/push_str/len/as_ptr.
+fn main() {
+    var s = String.new();
+    s.push_str("rad");
+    s.push_str("-");
+    s.push_str("test");
+    let n = s.len();
+    printf("%s len=%d\n", s.as_ptr(), n);
+}

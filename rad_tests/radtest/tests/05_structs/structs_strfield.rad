@@ -1,0 +1,10 @@
+// [str-field] Struct holding a str field.
+struct Named {
+    id: i32,
+    tag: str,
+}
+fn main() {
+    let x = Named { id: 7, tag: "rad" };
+    let t = x.tag;
+    printf("%d=%s\n", x.id, t);
+}

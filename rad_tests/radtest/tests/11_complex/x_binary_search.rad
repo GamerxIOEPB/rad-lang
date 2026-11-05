@@ -1,0 +1,42 @@
+// [binary-search] Sorted 10-element array, four queries.
+fn bsearch(p: *raw var i32, n: i32, target: i32) -> i32 {
+    var lo = 0;
+    var hi = n - 1;
+    var found = -1;
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let val = p[mid];
+        if val == target {
+            found = mid;
+            lo = hi + 1;
+        } else if val < target {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return found;
+}
+fn main() {
+    var v = Vec.new();
+    v.push(2);
+    v.push(5);
+    v.push(8);
+    v.push(12);
+    v.push(16);
+    v.push(23);
+    v.push(38);
+    v.push(56);
+    v.push(72);
+    v.push(91);
+    let p = v.ptr;
+    let n = 10;
+    let q1 = bsearch(p, n, 23);
+    let q2 = bsearch(p, n, 2);
+    let q3 = bsearch(p, n, 91);
+    let q4 = bsearch(p, n, 3);
+    printf("23 at %d\n", q1);
+    printf("2 at %d\n", q2);
+    printf("91 at %d\n", q3);
+    printf("3 at %d\n", q4);
+}

@@ -1,0 +1,41 @@
+// [bank] Structs + methods simulating an account with manual checks.
+struct Account {
+    id: i32,
+    balance: i32,
+}
+impl Account {
+    fn deposit(var self, amt: i32) {
+        self.balance = self.balance + amt;
+    }
+    fn withdraw(var self, amt: i32) -> bool {
+        if amt > self.balance {
+            return false;
+        }
+        self.balance = self.balance - amt;
+        return true;
+    }
+}
+fn main() {
+    var acct = Account { id: 1, balance: 100 };
+    let show = acct.balance;
+    println("start={show}");
+    acct.deposit(50);
+    let show2 = acct.balance;
+    println("after-deposit={show2}");
+    let ok = acct.withdraw(30);
+    if ok {
+        println("withdraw-ok");
+    } else {
+        println("withdraw-failed");
+    }
+    let show3 = acct.balance;
+    println("after-withdraw={show3}");
+    let bad = acct.withdraw(9999);
+    if bad {
+        println("BUG");
+    } else {
+        println("overdraft-rejected");
+    }
+    let show4 = acct.balance;
+    println("final={show4}");
+}

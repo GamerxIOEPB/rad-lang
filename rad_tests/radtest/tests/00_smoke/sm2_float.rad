@@ -1,0 +1,7 @@
+fn main() {
+    let f = 1.5f64;
+    println("f={f}");
+    let g = 2.25f32;
+    println("g={g}");
+    printf("pf=%.2f\n", g);
+}

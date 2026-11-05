@@ -1,0 +1,3 @@
+// Spec E0001: missing closing brace.
+fn main() {
+    let x = 1;

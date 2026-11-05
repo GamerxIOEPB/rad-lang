@@ -1,0 +1,6 @@
+const PI: f64 = 3.5;
+const MAX: i32 = 100;
+fn main() {
+    println("MAX={MAX}");
+    printf("PI-ish: %d\n", PI as i32);
+}

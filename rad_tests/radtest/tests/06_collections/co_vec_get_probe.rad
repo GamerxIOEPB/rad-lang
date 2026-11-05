@@ -1,0 +1,7 @@
+// [Vec.get] Spec: get(idx) -> Option<T>.
+fn main() {
+    var v = Vec.new();
+    v.push(7);
+    let opt = v.get(0usize);
+    println("get-ok");
+}

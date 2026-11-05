@@ -1,0 +1,12 @@
+// [repr-C] Spec: #[repr(C)] attribute.
+#[repr(C)]
+struct CPair {
+    a: i32,
+    b: i32,
+}
+fn main() {
+    var z = CPair { a: 7, b: 8 };
+    let aa = z.a;
+    let bb = z.b;
+    printf("%d+%d\n", aa, bb);
+}

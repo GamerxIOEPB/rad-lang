@@ -1,0 +1,19 @@
+// [recursion] fib(20)=6765, fact(10)=3628800.
+fn fib(n: i32) -> i32 {
+    if n < 2 {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+fn fact(n: i32) -> i32 {
+    if n <= 1 {
+        return 1;
+    }
+    return n * fact(n - 1);
+}
+fn main() {
+    let f = fib(20);
+    printf("fib20=%d\n", f);
+    let m = fact(10);
+    printf("fact10=%d\n", m);
+}

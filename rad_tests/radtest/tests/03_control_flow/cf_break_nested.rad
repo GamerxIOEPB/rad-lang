@@ -1,0 +1,17 @@
+// [break] Inner-loop break only affects inner loop.
+fn main() {
+    var i = 0;
+    var hits = 0;
+    while i < 5 {
+        var j = 0;
+        while j < 5 {
+            if j == i {
+                break;
+            }
+            j = j + 1;
+        }
+        hits = hits + j;
+        i = i + 1;
+    }
+    println("hits={hits}");
+}

@@ -1,0 +1,12 @@
+// [fn-str-return] Functions returning str.
+fn pick(flag: bool) -> str {
+    if flag {
+        return "yes";
+    }
+    return "no";
+}
+fn main() {
+    let a = pick(true);
+    let b = pick(false);
+    printf("%s %s\n", a, b);
+}

@@ -1,0 +1,10 @@
+// [string-compare] Spec: str comparison works.
+fn main() {
+    let a = "apple";
+    let b = "apple";
+    if a == b {
+        println("eq");
+    } else {
+        println("ne");
+    }
+}

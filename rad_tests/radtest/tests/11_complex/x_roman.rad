@@ -1,0 +1,67 @@
+// [roman] Decode Roman numerals from a byte list. MCMXCIV = 1994.
+fn letter_value(code: i32) -> i32 {
+    if code == 73 {
+        return 1;
+    }
+    if code == 86 {
+        return 5;
+    }
+    if code == 88 {
+        return 10;
+    }
+    if code == 76 {
+        return 50;
+    }
+    if code == 67 {
+        return 100;
+    }
+    if code == 68 {
+        return 500;
+    }
+    if code == 77 {
+        return 1000;
+    }
+    return 0;
+}
+fn decode(p: *raw var i32, n: i32) -> i32 {
+    var total = 0;
+    var i = 0;
+    while i < n {
+        let cur = letter_value(p[i]);
+        if i + 1 < n {
+            let nxt = letter_value(p[i + 1]);
+            if cur < nxt {
+                total = total - cur;
+            } else {
+                total = total + cur;
+            }
+        } else {
+            total = total + cur;
+        }
+        i = i + 1;
+    }
+    return total;
+}
+fn main() {
+    var letters = Vec.new();
+    // "MCMXCIV": M=77 C=67 X=88 I=73 V=86
+    letters.push(77);
+    letters.push(67);
+    letters.push(77);
+    letters.push(88);
+    letters.push(67);
+    letters.push(73);
+    letters.push(86);
+    let p = letters.ptr;
+    let n = letters.len;
+    let value = decode(p, n);
+    printf("value=%d\n", value);
+    // also test a plain numeral: III = 76? no, I I I = 73 73 73
+    var three = Vec.new();
+    three.push(73);
+    three.push(73);
+    three.push(73);
+    let p3 = three.ptr;
+    let v3 = decode(p3, 3);
+    printf("iii=%d\n", v3);
+}

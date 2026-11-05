@@ -1,0 +1,4 @@
+// E0002-family: calling an undeclared function must be an error.
+fn main() {
+    foo();
+}

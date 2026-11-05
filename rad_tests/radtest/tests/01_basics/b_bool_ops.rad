@@ -1,0 +1,17 @@
+// [bool] Logical operators &&, ||, ! and boolean conditions.
+fn main() {
+    let a = true;
+    let b = false;
+    if a && true {
+        println("and-ok");
+    }
+    if true && b {
+        println("bug");
+    }
+    if a || b {
+        println("or-ok");
+    }
+    if !b {
+        println("not-ok");
+    }
+}

@@ -1,0 +1,8 @@
+// [ptr] Spec: pointers can be cast with expr as usize.
+fn main() {
+    var v = Vec.new();
+    v.push(1);
+    let p = v.ptr;
+    let addr = p as usize;
+    println("cast-ok");
+}

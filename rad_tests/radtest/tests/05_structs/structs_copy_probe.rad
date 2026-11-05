@@ -1,0 +1,14 @@
+// [ownership] Spec: assignment moves owned values; after move the
+// source must be unusable. Structs here are probed for copy vs move.
+struct Point {
+    x: i64,
+    y: i64,
+}
+fn main() {
+    var p = Point { x: 1i64, y: 2i64 };
+    var q = p;
+    q.x = 99i64;
+    let px = p.x;
+    let qx = q.x;
+    println("px={px} qx={qx}");
+}

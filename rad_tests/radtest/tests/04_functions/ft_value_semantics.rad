@@ -1,0 +1,9 @@
+// [value-semantics] Callee mutation does not affect caller variable.
+fn try_mutate(var n: i32) {
+    n = 999;
+}
+fn main() {
+    let val = 7;
+    try_mutate(val);
+    printf("val=%d\n", val);
+}

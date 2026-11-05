@@ -1,0 +1,6 @@
+// [String] Probe: len as field (spec uses s.len() with parens).
+fn main() {
+    let s = String.from_str("hello");
+    let n = s.len;
+    println("n={n}");
+}

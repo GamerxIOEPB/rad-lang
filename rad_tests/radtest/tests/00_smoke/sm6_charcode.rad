@@ -1,0 +1,6 @@
+fn main() {
+    let a = 65;
+    printf("%c\n", a);
+    let z = 90;
+    printf("%c=%d\n", z, z);
+}

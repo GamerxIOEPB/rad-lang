@@ -1,0 +1,67 @@
+name: Build & Release Toolchain
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Git Tag (default: v0.1.0)'
+        required: false
+        default: 'v0.1.0'
+      title:
+        description: 'Release Title (leave empty for UTC timestamp e.g. 11/8/2026 12:00 P.M.)'
+        required: false
+        default: ''
+      notes:
+        description: 'Release Notes (leave empty for default)'
+        required: false
+        default: ''
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download & Extract Previous Release (Bootstrap)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p ~/.rad /tmp/bootstrap
+          gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap
+          tar -xzf /tmp/bootstrap/*.tar.gz -C ~/.rad --strip-components=1
+          echo "$HOME/.rad/bin" >> $GITHUB_PATH
+          # Clean up any lingering timestamp tags so only clean version tags like v0.1.0 exist
+          for tag in $(gh release list --repo GamerxIOEPB/rad-lang | awk '{print $3}' | grep -E '^v0\.1\.0-'); do
+            echo "Deleting test tag $tag..."
+            gh release delete "$tag" --yes --cleanup-tag --repo GamerxIOEPB/rad-lang || true
+          done
+
+      - name: Verify Bootstrap Environment
+        run: |
+          radc --version || true
+          rad --version || true
+          ls -la ~/.rad/bin/
+
+      - name: Build & Publish Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--upload --yes"
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            ARGS="$ARGS --tag ${{ github.event.inputs.tag }}"
+          fi
+          if [ -n "${{ github.event.inputs.title }}" ]; then
+            ARGS="$ARGS --title \"${{ github.event.inputs.title }}\""
+          fi
+          if [ -n "${{ github.event.inputs.notes }}" ]; then
+            ARGS="$ARGS --notes \"${{ github.event.inputs.notes }}\""
+          fi
+          bash scripts/build_distribution.sh $ARGS

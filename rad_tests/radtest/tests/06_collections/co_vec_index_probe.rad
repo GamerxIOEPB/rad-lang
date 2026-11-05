@@ -1,0 +1,7 @@
+// [Vec-index] Probe: v[i] direct indexing (undocumented sugar).
+fn main() {
+    var v = Vec.new();
+    v.push(42);
+    let x = v[0];
+    printf("x=%d\n", x);
+}

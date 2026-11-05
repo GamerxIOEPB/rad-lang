@@ -1,0 +1,8 @@
+// [const] Compile-time constants.
+const WIDTH: i32 = 64;
+const HEIGHT: i32 = 32;
+
+fn main() {
+    let area = WIDTH * HEIGHT;
+    println("area={area}");
+}

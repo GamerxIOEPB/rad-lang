@@ -1,0 +1,8 @@
+// [export] pub extern "C" fn exports to the C ABI.
+pub extern "C" fn rad_compute(a: i32, b: i32) -> i32 {
+    return a + b;
+}
+fn main() {
+    let s = rad_compute(20, 22);
+    printf("s=%d\n", s);
+}

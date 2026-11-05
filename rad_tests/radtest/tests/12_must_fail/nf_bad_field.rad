@@ -1,0 +1,8 @@
+// Spec: nonexistent struct field access must be rejected.
+struct Point {
+    x: i64,
+}
+fn main() {
+    let p = Point { x: 1i64 };
+    let w = p.nope;
+}

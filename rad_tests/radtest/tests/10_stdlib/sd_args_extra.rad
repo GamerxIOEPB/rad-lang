@@ -1,0 +1,5 @@
+// [env] argv with extra command line arguments.
+fn main(argc: i32, argv: *raw *raw u8) -> i32 {
+    printf("argc=%d\n", argc);
+    return 0;
+}

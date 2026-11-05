@@ -1,0 +1,16 @@
+fn main() {
+    let b = true;
+    let f2 = false;
+    let c = 'A';
+    let f = 1.5f64;
+    let big = 9223372036854775807i64;
+    println("bool_t={b}");
+    println("bool_f={f2}");
+    println("char={c}");
+    println("float={f}");
+    println("i64max={big}");
+    let umax = 18446744073709551615u64;
+    println("u64max={umax}");
+    let n = -42i64;
+    println("neg={n}");
+}

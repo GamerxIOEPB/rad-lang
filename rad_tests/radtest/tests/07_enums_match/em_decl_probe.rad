@@ -1,0 +1,9 @@
+// [enum] Spec: enum declaration and variant construction.
+enum State {
+    Off,
+    On,
+}
+fn main() {
+    let s = State::On;
+    println("made");
+}

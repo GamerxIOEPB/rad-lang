@@ -1,0 +1,12 @@
+// [String] Repeated append grows correctly.
+fn main() {
+    var s = String.new();
+    var k = 0;
+    while k < 5 {
+        s.push_str("ab");
+        k = k + 1;
+    }
+    let n = s.len();
+    printf("n=%d\n", n);
+    printf("%s\n", s.as_ptr());
+}

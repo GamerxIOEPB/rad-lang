@@ -1,0 +1,7 @@
+bool_t=1
+bool_f=0
+char=65
+float=1.500000
+i64max=9223372036854775807
+u64max=-1
+neg=-42

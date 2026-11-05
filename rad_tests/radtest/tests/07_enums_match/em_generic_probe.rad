@@ -1,0 +1,12 @@
+// [generics] Spec: user-defined generic enums.
+enum Maybe<T> {
+    Just(T),
+    Nothing,
+}
+fn wrap(x: i32) -> Maybe<i32> {
+    return Maybe::Just(x);
+}
+fn main() {
+    let w = wrap(9);
+    println("wrapped");
+}

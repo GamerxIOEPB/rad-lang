@@ -1,0 +1,5 @@
+// [char] Spec: char literals are part of the language.
+fn main() {
+    let c = 'A';
+    printf("%c\n", c);
+}

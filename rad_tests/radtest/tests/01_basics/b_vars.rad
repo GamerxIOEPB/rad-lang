@@ -1,0 +1,9 @@
+// [let/var] Immutable and mutable variables.
+fn main() {
+    let immutable_val = 42;
+    var counter = 0;
+    counter = counter + 1;
+    counter = counter * 10;
+    println("immut={immutable_val}");
+    println("counter={counter}");
+}

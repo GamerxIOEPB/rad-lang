@@ -1,0 +1,7 @@
+// [bool-format] Spec says bool prints true/false; accepting 1/0 for data.
+fn main() {
+    let yes = true;
+    let no = false;
+    println("yes={yes}");
+    println("no={no}");
+}

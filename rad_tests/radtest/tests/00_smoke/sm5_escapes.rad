@@ -1,0 +1,5 @@
+fn main() {
+    printf("tab:\there\n");
+    printf("dquote:\"q\"\n");
+    printf("backslash:\\ slash\n");
+}

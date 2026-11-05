@@ -1,0 +1,7 @@
+// [interp] String interpolation with multiple variables.
+fn main() {
+    let name = "Rad";
+    let major = 0;
+    let minor = 1;
+    println("Welcome to {name} version {major}.{minor}!");
+}

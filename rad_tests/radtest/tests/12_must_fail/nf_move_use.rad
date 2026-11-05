@@ -1,0 +1,6 @@
+// Spec (ownership sec 1): after `let s2 = s1;` s1 must be unusable.
+fn main() {
+    let s1 = String.from_str("abc");
+    let s2 = s1;
+    let n = s1.len();
+}

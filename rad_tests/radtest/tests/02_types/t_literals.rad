@@ -1,0 +1,20 @@
+// [literals] Every integer suffix, values that fit in 32 bits.
+fn main() {
+    let a8 = 100i8;
+    let a16 = 3000i16;
+    let a32 = 123456;
+    let a64 = 2000000i64;
+    let u8v = 200u8;
+    let u16v = 60000u16;
+    let u32v = 2000000000u32;
+    let u64v = 1000000u64;
+    let szv = 123usize;
+    let izv = 321isize;
+    printf("%d %d %d\n", a8, a16, a32);
+    printf("%d\n", a64);
+    printf("%d\n", u8v);
+    printf("%d\n", u16v);
+    printf("%d\n", u32v);
+    printf("%d\n", u64v);
+    printf("%d %d\n", szv, izv);
+}

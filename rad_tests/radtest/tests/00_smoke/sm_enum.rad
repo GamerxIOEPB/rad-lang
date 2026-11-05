@@ -1,0 +1,11 @@
+enum State {
+    Off,
+    On(i32),
+}
+fn main() {
+    let s = State::On(7);
+    match s {
+        State::Off => { println("off"); },
+        State::On(n) => { println("on with {n}"); },
+    }
+}

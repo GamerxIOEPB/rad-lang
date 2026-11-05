@@ -1,0 +1,11 @@
+// [struct] Fields and construction.
+struct Point {
+    x: i64,
+    y: i64,
+}
+fn main() {
+    let p = Point { x: 3i64, y: 4i64 };
+    let ax = p.x;
+    let ay = p.y;
+    println("p=({ax},{ay})");
+}

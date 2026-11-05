@@ -1,0 +1,5 @@
+// [builtin?] Probe: malloc without extern declaration (prelude?).
+fn main() {
+    let p = malloc(8usize);
+    printf("malloc-ok\n");
+}

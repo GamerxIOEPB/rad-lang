@@ -1,0 +1,6 @@
+fn main() {
+    var v = Vec.new();
+    v.push(5i64);
+    let x = v[0];
+    println("x={x}");
+}

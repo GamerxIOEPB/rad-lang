@@ -1,0 +1,4 @@
+// [builtin?] Probe: puts without extern declaration (prelude?).
+fn main() {
+    puts("probe-puts");
+}

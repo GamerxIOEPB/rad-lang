@@ -1,0 +1,53 @@
+// [nqueens] Backtracking solver; 8-queens has 92 solutions, 4-queens 2.
+fn place_ok(p: *raw var i32, row: i32, col: i32) -> bool {
+    var r = 0;
+    while r < row {
+        let c = p[r];
+        if c == col {
+            return false;
+        }
+        let dz = c - col;
+        let span = row - r;
+        if dz < 0 {
+            let neg = 0 - dz;
+            if neg == span {
+                return false;
+            }
+        } else {
+            if dz == span {
+                return false;
+            }
+        }
+        r = r + 1;
+    }
+    return true;
+}
+fn count_solutions(p: *raw var i32, n: i32, row: i32) -> i32 {
+    if row == n {
+        return 1;
+    }
+    var total = 0;
+    var col = 0;
+    while col < n {
+        if place_ok(p, row, col) {
+            p[row] = col;
+            let got = count_solutions(p, n, row + 1);
+            total = total + got;
+        }
+        col = col + 1;
+    }
+    return total;
+}
+fn main() {
+    var v = Vec.new();
+    var z = 0;
+    while z < 8 {
+        v.push(0);
+        z = z + 1;
+    }
+    let p = v.ptr;
+    let big = count_solutions(p, 8, 0);
+    let small = count_solutions(p, 4, 0);
+    printf("n8=%d\n", big);
+    printf("n4=%d\n", small);
+}

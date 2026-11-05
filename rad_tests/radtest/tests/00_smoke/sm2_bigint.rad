@@ -1,0 +1,6 @@
+fn main() {
+    let big = 9223372036854775807i64;
+    println("big={big}");
+    let u = 18446744073709551615u64;
+    println("u={u}");
+}

@@ -1,0 +1,30 @@
+{
+  "name": "tree-sitter-rad",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Rad Programming Language",
+  "main": "bindings/node",
+  "keywords": [
+    "parser",
+    "lexer",
+    "tree-sitter",
+    "rad"
+  ],
+  "author": "The Rad Authors",
+  "license": "MIT",
+  "dependencies": {
+    "nan": "^2.19.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.22.6"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.rad",
+      "file-types": ["rad"],
+      "injection-regex": "^rad$",
+      "highlights": ["queries/highlights.scm"],
+      "locals": ["queries/locals.scm"],
+      "indents": ["queries/indents.scm"]
+    }
+  ]
+}

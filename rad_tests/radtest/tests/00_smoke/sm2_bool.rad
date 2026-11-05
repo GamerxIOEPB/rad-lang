@@ -1,0 +1,5 @@
+fn main() {
+    let b = true;
+    println("b={b}");
+    if b { println("is-true"); }
+}

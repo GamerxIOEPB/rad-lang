@@ -1,0 +1,126 @@
+// Rad Asynchronous Concurrency Runtime (`std.async`)
+// Cooperative task scheduling, Futures, Epoll reactor, and non-blocking I/O.
+
+enum Poll<T> {
+    Pending,
+    Ready(T),
+}
+
+impl<T> Poll<T> {
+    pub fn is_ready(self) -> bool {
+        match self {
+            Poll.Ready(_) => true,
+            Poll.Pending => false,
+        }
+    }
+
+    pub fn is_pending(self) -> bool {
+        match self {
+            Poll.Pending => true,
+            Poll.Ready(_) => false,
+        }
+    }
+}
+
+pub struct Waker {
+    pipe_write_fd: i32,
+}
+
+impl Waker {
+    pub fn new(pipe_write_fd: i32) -> Waker {
+        Waker { pipe_write_fd: pipe_write_fd }
+    }
+
+    pub fn wake(self) {
+        if self.pipe_write_fd >= 0 {
+            let buf = 1u8
+            let _ = write(self.pipe_write_fd, (&buf) as *raw const u8, 1usize)
+        }
+    }
+}
+
+pub struct Context {
+    waker: Waker,
+}
+
+impl Context {
+    pub fn from_waker(waker: Waker) -> Context {
+        Context { waker: waker }
+    }
+
+    pub fn waker(self) -> Waker {
+        self.waker
+    }
+}
+
+pub struct EpollReactor {
+    epfd: i32,
+}
+
+impl EpollReactor {
+    pub fn new() -> EpollReactor {
+        let fd = epoll_create1(0)
+        EpollReactor { epfd: fd }
+    }
+
+    pub fn poll(self, timeout_ms: i32) -> i32 {
+        let events_buf = [0u8; 128]
+        epoll_wait(self.epfd, (&events_buf) as *raw const u8, 10, timeout_ms)
+    }
+
+    pub fn close(self) {
+        if self.epfd >= 0 {
+            close(self.epfd)
+        }
+    }
+}
+
+pub struct Task<T> {
+    func: fn() -> T,
+    completed: bool,
+}
+
+impl<T> Task<T> {
+    pub fn new(f: fn() -> T) -> Task<T> {
+        Task {
+            func: f,
+            completed: false,
+        }
+    }
+
+    pub fn poll(var self) -> Poll<T> {
+        if self.completed {
+            Poll.Pending
+        } else {
+            let res = (self.func)()
+            self.completed = true
+            Poll.Ready(res)
+        }
+    }
+}
+
+pub fn yield_now() {
+    sched_yield()
+}
+
+pub fn block_on<T>(f: fn() -> T) -> T {
+    var task = Task.new(f)
+    var result = (f)()
+    var done = false
+    while !done {
+        match task.poll() {
+            Poll.Ready(val) => {
+                result = val
+                done = true
+            }
+            Poll.Pending => {
+                let _ = sched_yield()
+            }
+        }
+    }
+    result
+}
+
+pub fn sleep_async_ms(ms: u64) {
+    usleep((ms * 1000u64) as u32)
+}

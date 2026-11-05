@@ -1,0 +1,5 @@
+// [u32-width] Spec: u32 full 32-bit range 4000000000.
+fn main() {
+    let big = 4000000000u32;
+    printf("big=%d\n", big);
+}

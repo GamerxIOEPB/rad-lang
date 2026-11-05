@@ -1,0 +1,21 @@
+struct Counter {
+    val: i64,
+}
+impl Counter {
+    fn new(start: i64) -> Counter {
+        return Counter { val: start };
+    }
+    fn get(self) -> i64 {
+        return self.val;
+    }
+    fn bump(var self) {
+        self.val = self.val + 1i64;
+    }
+}
+fn main() {
+    var c = Counter::new(0i64);
+    c.bump();
+    c.bump();
+    let v = c.get();
+    println("count={v}");
+}

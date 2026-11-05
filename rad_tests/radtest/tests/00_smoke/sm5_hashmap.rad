@@ -1,0 +1,5 @@
+fn main() {
+    var d = HashMap.new();
+    d.insert("k", 1);
+    println("mapped");
+}

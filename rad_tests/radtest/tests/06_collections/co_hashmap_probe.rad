@@ -1,0 +1,6 @@
+// [HashMap] Spec: HashMap.new() plus insert (migration guide).
+fn main() {
+    var d = HashMap.new();
+    d.insert("k", 1);
+    println("after-insert");
+}

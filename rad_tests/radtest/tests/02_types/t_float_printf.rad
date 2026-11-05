@@ -1,0 +1,4 @@
+// [float] Spec: C-style %f formatted printing.
+fn main() {
+    printf("%.2f\n", 3.5);
+}

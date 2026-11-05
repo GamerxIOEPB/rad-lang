@@ -1,0 +1,4 @@
+// Spec: a program needs an entry point.
+fn not_main() {
+    println("dead");
+}

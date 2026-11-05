@@ -1,0 +1,11 @@
+// [if] if / else if / else chain.
+fn main() {
+    let score = 85;
+    if score > 90 {
+        println("A");
+    } else if score > 80 {
+        println("B");
+    } else {
+        println("C");
+    }
+}

@@ -1,0 +1,6 @@
+// [i64-literal] Spec: i64 stores up to 9223372036854775807.
+// Expected 5000000000. (Known probe of 64-bit literal handling.)
+fn main() {
+    let big = 5000000000i64;
+    printf("big=%d\n", big);
+}

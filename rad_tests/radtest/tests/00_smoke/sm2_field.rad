@@ -1,0 +1,13 @@
+struct P {
+    x: i64,
+    y: i64,
+}
+fn main() {
+    let p = P { x: 3i64, y: 4i64 };
+    let ax = p.x;
+    println("ax={ax}");
+    var q = P { x: 1i64, y: 2i64 };
+    q.y = 9i64;
+    let qy = q.y;
+    println("qy={qy}");
+}

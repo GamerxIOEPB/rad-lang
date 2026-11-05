@@ -1,0 +1,4 @@
+// Spec E0003: type mismatch on assignment.
+fn main() {
+    var xi: i32 = "string";
+}

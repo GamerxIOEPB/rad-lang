@@ -1,0 +1,101 @@
+// [conway] 6x6 torus-free grid; blinker oscillates with period 2.
+fn alive(p: *raw var i32, w: i32, x: i32, xxx: i32) -> i32 {
+    if x < 0 {
+        return 0;
+    }
+    if x >= w {
+        return 0;
+    }
+    if xxx < 0 {
+        return 0;
+    }
+    if xxx >= w {
+        return 0;
+    }
+    return p[x * w + xxx];
+}
+fn step(p: *raw var i32, q: *raw var i32, w: i32) {
+    var x = 0;
+    while x < w {
+        var xxx = 0;
+        while xxx < w {
+            var near = 0;
+            var dx = 0 - 1;
+            while dx <= 1 {
+                var dy = 0 - 1;
+                while dy <= 1 {
+                    if dx != 0 {
+                        let a = alive(p, w, x + dx, xxx + dy);
+                        near = near + a;
+                    } else {
+                        if dy != 0 {
+                            let a = alive(p, w, x + dx, xxx + dy);
+                            near = near + a;
+                        }
+                    }
+                    dy = dy + 1;
+                }
+                dx = dx + 1;
+            }
+            let cur = p[x * w + xxx];
+            var nxt = 0;
+            if cur == 1 {
+                if near == 2 {
+                    nxt = 1;
+                } else {
+                    if near == 3 {
+                        nxt = 1;
+                    }
+                }
+            } else {
+                if near == 3 {
+                    nxt = 1;
+                }
+            }
+            q[x * w + xxx] = nxt;
+            xxx = xxx + 1;
+        }
+        x = x + 1;
+    }
+}
+fn show(p: *raw var i32, w: i32) {
+    var x = 0;
+    while x < w {
+        var xxx = 0;
+        while xxx < w {
+            let v = p[x * w + xxx];
+            if v == 1 {
+                printf("#");
+            } else {
+                printf(".");
+            }
+            xxx = xxx + 1;
+        }
+        printf("\n");
+        x = x + 1;
+    }
+}
+fn main() {
+    let w = 6;
+    var now = Vec.new();
+    var other = Vec.new();
+    var k = 0;
+    while k < w * w {
+        now.push(0);
+        other.push(0);
+        k = k + 1;
+    }
+    // blinker horizontal at row 2, cols 2..4
+    now.ptr[2 * w + 2] = 1;
+    now.ptr[2 * w + 3] = 1;
+    now.ptr[2 * w + 4] = 1;
+    let pa = now.ptr;
+    let pb = other.ptr;
+    show(pa, w);
+    printf("gen1\n");
+    step(pa, pb, w);
+    show(pb, w);
+    printf("gen2\n");
+    step(pb, pa, w);
+    show(pa, w);
+}

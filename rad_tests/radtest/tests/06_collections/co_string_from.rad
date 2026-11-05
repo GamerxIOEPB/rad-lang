@@ -1,0 +1,6 @@
+// [String] from_str constructor.
+fn main() {
+    let s = String.from_str("hello");
+    let n = s.len();
+    printf("%s %d\n", s.as_ptr(), n);
+}

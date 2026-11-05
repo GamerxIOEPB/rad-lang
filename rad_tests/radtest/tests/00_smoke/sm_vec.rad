@@ -1,0 +1,21 @@
+fn main() {
+    var v = Vec.new();
+    v.push(10);
+    v.push(20);
+    v.push(30);
+    println("len={v.len}");
+    let first = v.ptr[0];
+    let last = v.ptr[2];
+    println("first={first} last={last}");
+    let g = v.get(1usize);
+    match g {
+        Option::Some(x) => { println("got={x}"); },
+        Option::None => { println("none"); },
+    }
+    let p = v.pop();
+    match p {
+        Option::Some(y) => { println("popped={y}"); },
+        Option::None => { println("none"); },
+    }
+    println("len2={v.len}");
+}

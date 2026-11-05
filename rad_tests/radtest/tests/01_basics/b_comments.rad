@@ -1,0 +1,7 @@
+// [comments] Line comments before, inside and after code.
+fn main() {
+    // here we set x
+    let x = 5; // trailing comment
+    println("x={x}");
+    // done
+}

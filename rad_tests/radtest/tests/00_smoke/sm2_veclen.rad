@@ -1,0 +1,6 @@
+fn main() {
+    var v = Vec.new();
+    v.push(10);
+    let L = v.len;
+    println("L={L}");
+}

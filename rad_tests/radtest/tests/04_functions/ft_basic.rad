@@ -1,0 +1,12 @@
+// [fn] Basic functions, params and returns.
+fn add(a: i32, b: i32) -> i32 {
+    return a + b;
+}
+fn greet(name: str) {
+    printf("hi=%s\n", name);
+}
+fn main() {
+    let s = add(2, 3);
+    println("s={s}");
+    greet("rad");
+}

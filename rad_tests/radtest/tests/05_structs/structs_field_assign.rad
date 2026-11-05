@@ -1,0 +1,11 @@
+// [struct] Mutable field assignment.
+struct Point {
+    x: i64,
+    y: i64,
+}
+fn main() {
+    var p = Point { x: 1i64, y: 2i64 };
+    p.x = 42i64;
+    let nx = p.x;
+    println("nx={nx}");
+}

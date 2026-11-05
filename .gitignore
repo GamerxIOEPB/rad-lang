@@ -1,0 +1,9 @@
+/bin
+/target
+old_rad
+rad_tests/radtest/build
+rad_tests/radtest/results
+rad_tests/radtest/.tmp*
+**/*.rs.bk
+*.log
+.DS_Store

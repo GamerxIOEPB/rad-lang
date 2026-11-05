@@ -1,0 +1,8 @@
+enum Colour {
+    Red,
+    Green,
+}
+fn main() {
+    let c = Colour::Red;
+    println("made c");
+}

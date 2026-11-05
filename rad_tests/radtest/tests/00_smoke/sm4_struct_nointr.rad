@@ -1,0 +1,8 @@
+struct Counter {
+    val: i64,
+}
+fn main() {
+    var c = Counter { val: 5i64 };
+    let g = c.val;
+    println("g={g}");
+}

@@ -1,0 +1,11 @@
+// [Vec] Writing through the ptr field updates storage.
+fn main() {
+    var v = Vec.new();
+    v.push(1);
+    v.push(2);
+    v.push(3);
+    v.ptr[1] = 99;
+    let mid = v.ptr[1];
+    let n = v.len;
+    printf("mid=%d len=%d\n", mid, n);
+}

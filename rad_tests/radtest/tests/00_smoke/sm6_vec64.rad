@@ -1,0 +1,9 @@
+fn main() {
+    var v = Vec.new();
+    var big = 1073741824;
+    big = big + big + big; // 3221225472 > i32max at runtime
+    v.push(big);
+    let p = v.ptr;
+    let back = p[0];
+    println("back={back}");
+}

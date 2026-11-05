@@ -1,0 +1,5 @@
+// [Option] Spec: Option::Some / Option::None available in prelude.
+fn main() {
+    let maybe = Option::Some(3);
+    printf("made\n");
+}

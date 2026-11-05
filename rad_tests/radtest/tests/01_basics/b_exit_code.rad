@@ -1,0 +1,5 @@
+// [main->i32] main returning an explicit exit code.
+fn main() -> i32 {
+    println("bye");
+    return 3;
+}

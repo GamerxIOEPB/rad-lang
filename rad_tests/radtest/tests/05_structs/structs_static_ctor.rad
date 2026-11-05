@@ -1,0 +1,17 @@
+// [impl-new] Spec: static constructor fn new() called as Counter::new(...)
+struct Counter {
+    val: i64,
+}
+impl Counter {
+    fn new(start: i64) -> Counter {
+        return Counter { val: start };
+    }
+    fn get(self) -> i64 {
+        return self.val;
+    }
+}
+fn main() {
+    var c = Counter::new(0i64);
+    let g = c.get();
+    printf("g=%d\n", g);
+}

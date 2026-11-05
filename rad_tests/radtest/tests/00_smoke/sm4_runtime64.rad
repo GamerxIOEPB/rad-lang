@@ -1,0 +1,16 @@
+fn main() {
+    var i: i64 = 0i64;
+    var s: i64 = 0i64;
+    while i < 1000000i64 {
+        s = s + i;
+        i = i + 1i64;
+    }
+    println("sum={s}");
+    var a = 1073741824i64;
+    a = a + a;
+    println("dbl={a}");
+    var u = 1u64;
+    u = u + u;
+    u = u + u;
+    println("u4={u}");
+}

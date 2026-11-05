@@ -1,0 +1,5 @@
+// [std::time] Spec: Instant::now() availability.
+fn main() {
+    let t = Instant::now();
+    printf("ticked\n");
+}

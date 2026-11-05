@@ -1,0 +1,5 @@
+// [println-arg] println taking a string variable directly.
+fn main() {
+    let literal = "hello world";
+    println(literal);
+}
