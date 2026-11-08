@@ -1,0 +1,592 @@
+// ==============================================================================
+// Rad Arcade: Dungeon Crawler (Roguelike)
+// Procedural multi-room dungeon, monsters, combat, FOV, items, stairs, and HUD.
+// Zero external dependencies — pure syscalls, terminal, and console rendering.
+// ==============================================================================
+
+import terminal;
+import keyboard;
+import console;
+import time;
+
+const MAP_W: usize = 60usize
+const MAP_H: usize = 20usize
+const MAX_MONSTERS: usize = 16usize
+const MAX_ITEMS: usize = 12usize
+
+// Monster slot stride: 8 i64 entries
+// 0: x, 1: y, 2: hp, 3: max_hp, 4: atk, 5: def, 6: kind, 7: alive (0/1)
+
+// Item slot stride: 5 i64 entries
+// 0: x, 1: y, 2: kind, 3: val, 4: collected (0/1)
+
+struct DungeonGame {
+    map: *raw var i64,       // MAP_W * MAP_H (0 = empty, 1 = wall '#', 2 = floor '.')
+    explored: *raw var i64,  // 0 = unseen, 1 = explored, 2 = visible now
+    player_x: i32,
+    player_y: i32,
+    player_hp: i32,
+    player_max_hp: i32,
+    player_atk: i32,
+    player_def: i32,
+    player_level: i32,
+    player_xp: i32,
+    player_gold: i32,
+    player_potions: i32,
+    dungeon_floor: i32,
+    stairs_x: i32,
+    stairs_y: i32,
+    monsters: *raw var i64,
+    items: *raw var i64,
+    log_msg1: str,
+    log_msg2: str,
+    game_over: bool,
+    won: bool,
+}
+
+impl DungeonGame {
+    fn new(floor_num: i32) -> DungeonGame {
+        let total = MAP_W * MAP_H
+        let m = malloc(total * 8usize) as *raw var i64
+        let exp = malloc(total * 8usize) as *raw var i64
+        let mon = malloc(MAX_MONSTERS * 64usize) as *raw var i64
+        let itm = malloc(MAX_ITEMS * 40usize) as *raw var i64
+
+        var g = DungeonGame {
+            map: m,
+            explored: exp,
+            player_x: 10,
+            player_y: 10,
+            player_hp: 30,
+            player_max_hp: 30,
+            player_atk: 8,
+            player_def: 2,
+            player_level: 1,
+            player_xp: 0,
+            player_gold: 0,
+            player_potions: 2,
+            dungeon_floor: floor_num,
+            stairs_x: 20,
+            stairs_y: 10,
+            monsters: mon,
+            items: itm,
+            log_msg1: "Welcome to Rad Dungeon! Arrow keys / WASD to move.",
+            log_msg2: "Bump into monsters to attack. Reach '>' stairs to descend!",
+            game_over: false,
+            won: false,
+        }
+        g.generate_floor(floor_num)
+        g.compute_fov()
+        g
+    }
+
+    fn generate_floor(var self, floor_num: i32) {
+        let total = MAP_W * MAP_H
+
+        // Reset map and fog
+        var i = 0usize
+        while i < total {
+            self.map[i] = 1i64 // fill with rock '#'
+            self.explored[i] = 0i64
+            i = i + 1usize
+        }
+
+        // Initialize monsters and items
+        var mi = 0usize
+        while mi < MAX_MONSTERS {
+            self.monsters[mi * 8usize + 7usize] = 0i64 // alive = 0
+            mi = mi + 1usize
+        }
+        var ii = 0usize
+        while ii < MAX_ITEMS {
+            self.items[ii * 5usize + 4usize] = 1i64 // collected = 1
+            ii = ii + 1usize
+        }
+
+        // Carve rooms
+        self.carve_room(6, 4, 12, 6)
+        self.player_x = 10
+        self.player_y = 6
+
+        self.carve_room(24, 3, 10, 7)
+        self.carve_h_corridor(18, 24, 6)
+
+        self.carve_room(40, 5, 14, 7)
+        self.carve_h_corridor(34, 40, 6)
+
+        self.carve_room(10, 12, 14, 6)
+        self.carve_v_corridor(6, 12, 12)
+
+        self.carve_room(32, 12, 16, 6)
+        self.carve_h_corridor(24, 32, 14)
+        self.stairs_x = 42
+        self.stairs_y = 14
+
+        // Spawn monsters
+        self.spawn_monster(0usize, 28, 5, 12, 12, 4, 1, 103i64) // Goblin 'g'
+        self.spawn_monster(1usize, 44, 7, 20, 20, 6, 2, 111i64) // Orc 'o'
+        self.spawn_monster(2usize, 16, 14, 14, 14, 5, 1, 103i64) // Goblin 'g'
+        if floor_num >= 3 {
+            self.spawn_monster(3usize, 38, 14, 45, 45, 12, 4, 68i64) // Dragon 'D' boss
+        } else {
+            self.spawn_monster(3usize, 38, 14, 22, 22, 7, 2, 111i64) // Orc 'o'
+        }
+
+        // Spawn items
+        self.spawn_item(0usize, 26, 6, 33i64, 15) // Potion '!' (+15 HP)
+        self.spawn_item(1usize, 46, 8, 36i64, 25) // Gold '$' (+25)
+        self.spawn_item(2usize, 14, 14, 36i64, 15)
+        self.spawn_item(3usize, 35, 15, 33i64, 20)
+    }
+
+    fn carve_room(var self, rx: i32, ry: i32, rw: i32, rh: i32) {
+        var y = ry
+        let max_y = ry + rh
+        let max_x = rx + rw
+        while y < max_y && y < (MAP_H as i32) - 1 {
+            var x = rx
+            while x < max_x && x < (MAP_W as i32) - 1 {
+                let off = (y as usize) * MAP_W + (x as usize)
+                self.map[off] = 2i64 // floor '.'
+                x = x + 1
+            }
+            y = y + 1
+        }
+    }
+
+    fn carve_h_corridor(var self, x1: i32, x2: i32, y: i32) {
+        var start = x1
+        var end = x2
+        if start > end {
+            start = x2
+            end = x1
+        }
+        while start <= end && start < (MAP_W as i32) - 1 {
+            let off = (y as usize) * MAP_W + (start as usize)
+            self.map[off] = 2i64
+            start = start + 1
+        }
+    }
+
+    fn carve_v_corridor(var self, y1: i32, y2: i32, x: i32) {
+        var start = y1
+        var end = y2
+        if start > end {
+            start = y2
+            end = y1
+        }
+        while start <= end && start < (MAP_H as i32) - 1 {
+            let off = (start as usize) * MAP_W + (x as usize)
+            self.map[off] = 2i64
+            start = start + 1
+        }
+    }
+
+    fn spawn_monster(var self, idx: usize, x: i32, y: i32, hp: i32, max_hp: i32, atk: i32, def: i32, kind: i64) {
+        let base = idx * 8usize
+        self.monsters[base + 0usize] = x as i64
+        self.monsters[base + 1usize] = y as i64
+        self.monsters[base + 2usize] = hp as i64
+        self.monsters[base + 3usize] = max_hp as i64
+        self.monsters[base + 4usize] = atk as i64
+        self.monsters[base + 5usize] = def as i64
+        self.monsters[base + 6usize] = kind
+        self.monsters[base + 7usize] = 1i64 // alive
+    }
+
+    fn spawn_item(var self, idx: usize, x: i32, y: i32, kind: i64, val: i32) {
+        let base = idx * 5usize
+        self.items[base + 0usize] = x as i64
+        self.items[base + 1usize] = y as i64
+        self.items[base + 2usize] = kind
+        self.items[base + 3usize] = val as i64
+        self.items[base + 4usize] = 0i64 // not collected
+    }
+
+    fn compute_fov(var self) {
+        let total = MAP_W * MAP_H
+
+        var i = 0usize
+        while i < total {
+            if self.explored[i] == 2i64 {
+                self.explored[i] = 1i64
+            }
+            i = i + 1usize
+        }
+
+        let px = self.player_x
+        let py = self.player_y
+        var dy = -7
+        while dy <= 7 {
+            var dx = -7
+            while dx <= 7 {
+                let dist_sq = dx * dx + dy * dy
+                if dist_sq <= 49 {
+                    let tx = px + dx
+                    let ty = py + dy
+                    if tx >= 0 && tx < (MAP_W as i32) && ty >= 0 && ty < (MAP_H as i32) {
+                        let off = (ty as usize) * MAP_W + (tx as usize)
+                        self.explored[off] = 2i64 // visible now
+                    }
+                }
+                dx = dx + 1
+            }
+            dy = dy + 1
+        }
+    }
+
+    fn try_move(var self, dx: i32, dy: i32) {
+        let nx = self.player_x + dx
+        let ny = self.player_y + dy
+
+        if nx < 0 || nx >= (MAP_W as i32) || ny < 0 || ny >= (MAP_H as i32) {
+            return
+        }
+
+        let off = (ny as usize) * MAP_W + (nx as usize)
+        if self.map[off] == 1i64 { // wall '#'
+            self.set_log("You bump into solid rock.")
+            return
+        }
+
+        // Check monster collision
+        var mi = 0usize
+        while mi < MAX_MONSTERS {
+            let base = mi * 8usize
+            let alive = self.monsters[base + 7usize]
+            let mx = self.monsters[base + 0usize] as i32
+            let my = self.monsters[base + 1usize] as i32
+            if alive == 1i64 && mx == nx && my == ny {
+                self.attack_monster(mi)
+                self.monster_turns()
+                return
+            }
+            mi = mi + 1usize
+        }
+
+        // Move player
+        self.player_x = nx
+        self.player_y = ny
+        self.compute_fov()
+
+        // Check items on floor
+        var ii = 0usize
+        while ii < MAX_ITEMS {
+            let ibase = ii * 5usize
+            let collected = self.items[ibase + 4usize]
+            let ix = self.items[ibase + 0usize] as i32
+            let iy = self.items[ibase + 1usize] as i32
+            if collected == 0i64 && ix == nx && iy == ny {
+                self.items[ibase + 4usize] = 1i64 // collected
+                let ikind = self.items[ibase + 2usize]
+                let ival = self.items[ibase + 3usize] as i32
+                if ikind == 33i64 { // Potion '!'
+                    self.player_potions = self.player_potions + 1
+                    self.set_log("Picked up a Health Potion! (Press 'H' to use)")
+                } else if ikind == 36i64 { // Gold '$'
+                    self.player_gold = self.player_gold + ival
+                    var gmsg = String.new()
+                    gmsg.push_str("Found ")
+                    gmsg.push_str(int_to_str(ival as i64).as_ptr() as str)
+                    gmsg.push_str(" gold coins!")
+                    self.set_log(gmsg.as_ptr() as str)
+                }
+            }
+            ii = ii + 1usize
+        }
+
+        // Check stairs
+        if nx == self.stairs_x && ny == self.stairs_y {
+            self.set_log("You stand before the stairs down (Press '>' to descend).")
+        }
+
+        self.monster_turns()
+    }
+
+    fn attack_monster(var self, mi: usize) {
+        let base = mi * 8usize
+        let mdef = self.monsters[base + 5usize] as i32
+        var dmg = self.player_atk - mdef
+        if dmg < 1 { dmg = 1 }
+        let cur_hp = (self.monsters[base + 2usize] as i32) - dmg
+        self.monsters[base + 2usize] = cur_hp as i64
+
+        var msg = String.new()
+        msg.push_str("You hit the monster for ")
+        msg.push_str(int_to_str(dmg as i64).as_ptr() as str)
+        msg.push_str(" damage!")
+        self.set_log(msg.as_ptr() as str)
+
+        if cur_hp <= 0 {
+            self.monsters[base + 7usize] = 0i64 // dead
+            self.player_xp = self.player_xp + 10
+            let mkind = self.monsters[base + 6usize]
+            if mkind == 68i64 { // Dragon killed!
+                self.won = true
+                self.set_log("VICTORY! You slew the Dragon of the Rad Depths!")
+            } else {
+                self.set_log("The monster collapses in defeat! +10 XP")
+            }
+
+            // Level up check
+            if self.player_xp >= self.player_level * 25 {
+                self.player_level = self.player_level + 1
+                self.player_max_hp = self.player_max_hp + 8
+                self.player_hp = self.player_max_hp
+                self.player_atk = self.player_atk + 3
+                self.player_def = self.player_def + 1
+                self.set_log("LEVEL UP! Your strength and vitality increase!")
+            }
+        }
+    }
+
+    fn monster_turns(var self) {
+        if self.game_over || self.won {
+            return
+        }
+        var mi = 0usize
+        while mi < MAX_MONSTERS {
+            let base = mi * 8usize
+            let alive = self.monsters[base + 7usize]
+            if alive == 1i64 {
+                let mx = self.monsters[base + 0usize] as i32
+                let my = self.monsters[base + 1usize] as i32
+                let dx = self.player_x - mx
+                let dy = self.player_y - my
+                let dist_sq = dx * dx + dy * dy
+
+                // Adjacent to player -> attack
+                if (dx == 0 && (dy == 1 || dy == -1)) || (dy == 0 && (dx == 1 || dx == -1)) {
+                    let matk = self.monsters[base + 4usize] as i32
+                    var mdmg = matk - self.player_def
+                    if mdmg < 1 { mdmg = 1 }
+                    self.player_hp = self.player_hp - mdmg
+
+                    var amsg = String.new()
+                    amsg.push_str("Monster attacks you for ")
+                    amsg.push_str(int_to_str(mdmg as i64).as_ptr() as str)
+                    amsg.push_str(" damage!")
+                    self.set_log(amsg.as_ptr() as str)
+
+                    if self.player_hp <= 0 {
+                        self.player_hp = 0
+                        self.game_over = true
+                        self.set_log("You were slain in the dungeon... Game Over.")
+                    }
+                } else if dist_sq <= 36 {
+                    var step_x = 0
+                    var step_y = 0
+                    if dx > 0 { step_x = 1 } else if dx < 0 { step_x = -1 }
+                    if dy > 0 { step_y = 1 } else if dy < 0 { step_y = -1 }
+
+                    let next_mx = mx + step_x
+                    let next_my = my + step_y
+                    if next_mx >= 0 && next_mx < (MAP_W as i32) && next_my >= 0 && next_my < (MAP_H as i32) {
+                        let try_off = (next_my as usize) * MAP_W + (next_mx as usize)
+                        if self.map[try_off] == 2i64 {
+                            self.monsters[base + 0usize] = next_mx as i64
+                            self.monsters[base + 1usize] = next_my as i64
+                        }
+                    }
+                }
+            }
+            mi = mi + 1usize
+        }
+    }
+
+    fn drink_potion(var self) {
+        if self.player_potions > 0 && self.player_hp < self.player_max_hp {
+            self.player_potions = self.player_potions - 1
+            self.player_hp = self.player_hp + 20
+            if self.player_hp > self.player_max_hp {
+                self.player_hp = self.player_max_hp
+            }
+            self.set_log("You quaff a potion. Restored 20 HP!")
+        } else if self.player_potions == 0 {
+            self.set_log("No potions remaining!")
+        } else {
+            self.set_log("Your health is already full.")
+        }
+    }
+
+    fn descend_stairs(var self) {
+        if self.player_x == self.stairs_x && self.player_y == self.stairs_y {
+            self.dungeon_floor = self.dungeon_floor + 1
+            self.generate_floor(self.dungeon_floor)
+            self.compute_fov()
+            var fmsg = String.new()
+            fmsg.push_str("Descended to Dungeon Floor ")
+            fmsg.push_str(int_to_str(self.dungeon_floor as i64).as_ptr() as str)
+            fmsg.push_str("!")
+            self.set_log(fmsg.as_ptr() as str)
+        } else {
+            self.set_log("There are no stairs here.")
+        }
+    }
+
+    fn set_log(var self, msg: str) {
+        self.log_msg1 = self.log_msg2
+        self.log_msg2 = msg
+    }
+
+    fn render(self, var con: Console) {
+        con.clear()
+
+        // Top Status HUD
+        con.print_str(2usize, 0usize, "Floor:", Color.yellow(), Color.default())
+        con.print_str(9usize, 0usize, int_to_str(self.dungeon_floor as i64).as_ptr() as str, Color.bright_white(), Color.default())
+
+        con.print_str(15usize, 0usize, "HP:", Color.red(), Color.default())
+        var hp_s = String.new()
+        hp_s.push_str(int_to_str(self.player_hp as i64).as_ptr() as str)
+        hp_s.push_byte(47u8) // '/'
+        hp_s.push_str(int_to_str(self.player_max_hp as i64).as_ptr() as str)
+        con.print_str(19usize, 0usize, hp_s.as_ptr() as str, Color.bright_white(), Color.default())
+
+        con.print_str(30usize, 0usize, "Lvl:", Color.yellow(), Color.default())
+        con.print_str(35usize, 0usize, int_to_str(self.player_level as i64).as_ptr() as str, Color.bright_white(), Color.default())
+
+        con.print_str(42usize, 0usize, "Gold:", Color.bright_yellow(), Color.default())
+        con.print_str(48usize, 0usize, int_to_str(self.player_gold as i64).as_ptr() as str, Color.bright_white(), Color.default())
+
+        con.print_str(56usize, 0usize, "Potions:", Color.magenta(), Color.default())
+        con.print_str(65usize, 0usize, int_to_str(self.player_potions as i64).as_ptr() as str, Color.bright_white(), Color.default())
+
+        // Map rendering
+        var y = 0usize
+        while y < MAP_H {
+            var x = 0usize
+            while x < MAP_W {
+                let off = y * MAP_W + x
+                let vis = self.explored[off]
+                let tile = self.map[off]
+
+                if vis == 2i64 { // Visible now
+                    if tile == 1i64 {
+                        con.set_cell(x + 2usize, y + 2usize, 35u8, Color.bright_black(), Color.default()) // '#' wall
+                    } else if tile == 2i64 {
+                        con.set_cell(x + 2usize, y + 2usize, 46u8, Color.yellow(), Color.default()) // '.' floor
+                    }
+                } else if vis == 1i64 { // Explored (fog)
+                    if tile == 1i64 {
+                        con.set_cell(x + 2usize, y + 2usize, 35u8, Color.ansi(8u8), Color.default())
+                    } else if tile == 2i64 {
+                        con.set_cell(x + 2usize, y + 2usize, 46u8, Color.ansi(8u8), Color.default())
+                    }
+                }
+                x = x + 1usize
+            }
+            y = y + 1usize
+        }
+
+        // Render Stairs (if visible or explored)
+        let st_off = (self.stairs_y as usize) * MAP_W + (self.stairs_x as usize)
+        if self.explored[st_off] > 0i64 {
+            con.set_cell((self.stairs_x as usize) + 2usize, (self.stairs_y as usize) + 2usize, 62u8, Color.bright_cyan(), Color.default()) // '>'
+        }
+
+        // Render Items (if visible)
+        var ii = 0usize
+        while ii < MAX_ITEMS {
+            let ibase = ii * 5usize
+            let collected = self.items[ibase + 4usize]
+            if collected == 0i64 {
+                let ix = self.items[ibase + 0usize] as usize
+                let iy = self.items[ibase + 1usize] as usize
+                let off = iy * MAP_W + ix
+                if self.explored[off] == 2i64 {
+                    let ikind = self.items[ibase + 2usize] as u8
+                    let icol = if ikind == 33u8 { Color.bright_magenta() } else { Color.bright_yellow() }
+                    con.set_cell(ix + 2usize, iy + 2usize, ikind, icol, Color.default())
+                }
+            }
+            ii = ii + 1usize
+        }
+
+        // Render Monsters (if visible)
+        var mi = 0usize
+        while mi < MAX_MONSTERS {
+            let mbase = mi * 8usize
+            let alive = self.monsters[mbase + 7usize]
+            if alive == 1i64 {
+                let mx = self.monsters[mbase + 0usize] as usize
+                let my = self.monsters[mbase + 1usize] as usize
+                let off = my * MAP_W + mx
+                if self.explored[off] == 2i64 {
+                    let mkind = self.monsters[mbase + 6usize] as u8
+                    let mcol = if mkind == 68u8 { Color.bright_red() }
+                               else if mkind == 111u8 { Color.red() }
+                               else { Color.green() }
+                    con.set_cell(mx + 2usize, my + 2usize, mkind, mcol, Color.default())
+                }
+            }
+            mi = mi + 1usize
+        }
+
+        // Render Player
+        con.set_cell((self.player_x as usize) + 2usize, (self.player_y as usize) + 2usize, 64u8, Color.bright_yellow(), Color.default()) // '@'
+
+        // Bottom Event Log
+        con.print_str(2usize, 23usize, self.log_msg1, Color.ansi(8u8), Color.default())
+        con.print_str(2usize, 24usize, self.log_msg2, Color.bright_white(), Color.default())
+
+        if self.game_over {
+            con.print_str(24usize, 11usize, " YOU HAVE DIED ", Color.bright_white(), Color.red())
+            con.print_str(22usize, 13usize, "Press 'Q' to quit", Color.bright_yellow(), Color.default())
+        }
+        if self.won {
+            con.print_str(22usize, 11usize, " DUNGEON CONQUERED! ", Color.bright_yellow(), Color.blue())
+            con.print_str(22usize, 13usize, "Press 'Q' to quit", Color.bright_white(), Color.default())
+        }
+
+        con.present()
+    }
+
+    fn destroy(var self) {
+        if (self.map as usize) != 0usize { free(self.map as *raw u8); self.map = 0usize as *raw var i64 }
+        if (self.explored as usize) != 0usize { free(self.explored as *raw u8); self.explored = 0usize as *raw var i64 }
+        if (self.monsters as usize) != 0usize { free(self.monsters as *raw u8); self.monsters = 0usize as *raw var i64 }
+        if (self.items as usize) != 0usize { free(self.items as *raw u8); self.items = 0usize as *raw var i64 }
+    }
+}
+
+fn main() {
+    var term = TerminalSession.new()
+    term.enable_raw_mode()
+    term.enter_alternate_screen()
+    term.hide_cursor()
+
+    var kbd = KeyboardReader.new()
+    var con = Console.new(78usize, 26usize)
+    var game = DungeonGame.new(1)
+
+    var running = true
+    while running {
+        game.render(con)
+
+        // Turn-based input: wait for keypress
+        let evt = kbd.read_key(50)
+        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
+            running = false
+        } else if !game.game_over && !game.won {
+            if evt.code == KEY_UP || evt.is_char(119u8) || evt.is_char(107u8) { // Up / 'w' / 'k'
+                game.try_move(0, -1)
+            } else if evt.code == KEY_DOWN || evt.is_char(115u8) || evt.is_char(106u8) { // Down / 's' / 'j'
+                game.try_move(0, 1)
+            } else if evt.code == KEY_LEFT || evt.is_char(97u8) || evt.is_char(104u8) { // Left / 'a' / 'h'
+                game.try_move(-1, 0)
+            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) || evt.is_char(108u8) { // Right / 'd' / 'l'
+                game.try_move(1, 0)
+            } else if evt.is_char(101u8) || evt.is_char(112u8) { // 'e' or 'p' potion
+                game.drink_potion()
+            } else if evt.is_char(62u8) { // '>' descend stairs
+                game.descend_stairs()
+            }
+        }
+    }
+
+    game.destroy()
+    con.close_console()
+    kbd.close_reader()
+    term.close()
+}

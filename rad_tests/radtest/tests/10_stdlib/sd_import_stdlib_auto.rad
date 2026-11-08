@@ -1,0 +1,11 @@
+import time;
+import keyboard;
+
+fn main() {
+    let evt = KeyEvent.none()
+    if evt.code == KEY_NONE {
+        println("auto_import_keyboard: pass")
+    }
+    let _t = Instant.now()
+    println("auto_import_time: pass")
+}

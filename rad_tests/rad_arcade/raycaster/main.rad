@@ -1,0 +1,408 @@
+// ==============================================================================
+// Rad Arcade: 3D Raycaster
+// Real-time Wolfenstein-style DDA 3D engine with 2D minimap overlay.
+// Zero external dependencies — pure Rad math, syscalls, and console rendering.
+// ==============================================================================
+
+import terminal;
+import keyboard;
+import console;
+import time;
+
+const MAP_W: usize = 16usize
+const MAP_H: usize = 16usize
+const SCREEN_W: usize = 68usize
+const SCREEN_H: usize = 24usize
+
+const PI: f64 = 3.141592653589793
+const TWO_PI: f64 = 6.283185307179586
+const HALF_PI: f64 = 1.5707963267948966
+
+// Native pure-Rad math functions
+fn rad_abs(x: f64) -> f64 {
+    if x < 0.0 {
+        return 0.0 - x
+    }
+    return x
+}
+
+fn rad_sqrt(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0 }
+    var guess: f64 = x
+    var i = 0
+    while i < 10 {
+        guess = 0.5 * (guess + (x / guess))
+        i = i + 1
+    }
+    return guess
+}
+
+// Native pure-Rad Taylor series trigonometric functions
+fn rad_sin(x_in: f64) -> f64 {
+    var x = x_in
+    while x > PI { x = x - TWO_PI }
+    while x < (0.0 - PI) { x = x + TWO_PI }
+    let x2 = x * x
+    let t1 = x
+    let t3 = (t1 * x2) / 6.0
+    let t5 = (t3 * x2) / 20.0
+    let t7 = (t5 * x2) / 42.0
+    let t9 = (t7 * x2) / 72.0
+    return ((t1 - t3) + t5) - (t7 - t9)
+}
+
+fn rad_cos(x: f64) -> f64 {
+    return rad_sin(x + HALF_PI)
+}
+
+struct RaycasterGame {
+    pos_x: f64,
+    pos_y: f64,
+    angle: f64,       // Player angle in radians
+    fov: f64,         // Field of view in radians (e.g. 60 deg = PI / 3)
+    map: *raw var i64,
+    show_map: bool,
+}
+
+impl RaycasterGame {
+    fn new() -> RaycasterGame {
+        let m = malloc(MAP_W * MAP_H * 8usize) as *raw var i64
+
+        // 16x16 maze layout: 1 = stone wall, 2 = brick, 3 = pillar
+        var y = 0usize
+        while y < MAP_H {
+            var x = 0usize
+            while x < MAP_W {
+                var cell = 0i64
+                if x == 0usize || x == MAP_W - 1usize || y == 0usize || y == MAP_H - 1usize {
+                    cell = 1i64 // outer stone wall
+                } else if (x == 4usize && y >= 3usize && y <= 8usize) || (x == 11usize && y >= 7usize && y <= 12usize) {
+                    cell = 2i64 // brick wall
+                } else if (y == 8usize && x >= 4usize && x <= 8usize) {
+                    cell = 2i64
+                } else if (x == 8usize && y == 4usize) || (x == 7usize && y == 12usize) || (x == 12usize && y == 4usize) {
+                    cell = 3i64 // pillar
+                }
+                m[y * MAP_W + x] = cell
+                x = x + 1usize
+            }
+            y = y + 1usize
+        }
+
+        return RaycasterGame {
+            pos_x: 2.5,
+            pos_y: 2.5,
+            angle: 0.0,
+            fov: 1.0471975512, // 60 degrees
+            map: m,
+            show_map: true,
+        }
+    }
+
+    fn is_wall(self, gx: i32, gy: i32) -> bool {
+        if gx < 0 || gx >= (MAP_W as i32) || gy < 0 || gy >= (MAP_H as i32) {
+            return true
+        }
+        let cell = self.map[(gy as usize) * MAP_W + (gx as usize)]
+        return cell > 0i64
+    }
+
+    fn move_player(var self, forward: f64, strafe: f64) {
+        let dx = (rad_cos(self.angle) * forward) + (rad_cos(self.angle + HALF_PI) * strafe)
+        let dy = (rad_sin(self.angle) * forward) + (rad_sin(self.angle + HALF_PI) * strafe)
+
+        let margin: f64 = 0.2
+        var check_x = self.pos_x + dx
+        if dx > 0.0 { check_x = check_x + margin } else { check_x = check_x - margin }
+
+        if !self.is_wall(check_x as i32, self.pos_y as i32) {
+            self.pos_x = self.pos_x + dx
+        }
+
+        var check_y = self.pos_y + dy
+        if dy > 0.0 { check_y = check_y + margin } else { check_y = check_y - margin }
+
+        if !self.is_wall(self.pos_x as i32, check_y as i32) {
+            self.pos_y = self.pos_y + dy
+        }
+    }
+
+    fn rotate_player(var self, da: f64) {
+        self.angle = self.angle + da
+        while self.angle >= TWO_PI { self.angle = self.angle - TWO_PI }
+        while self.angle < 0.0 { self.angle = self.angle + TWO_PI }
+    }
+
+    fn render(self, var con: Console) {
+        con.clear()
+
+        // 3D DDA Raycasting Loop for columns 0 .. SCREEN_W - 1
+        var col = 0usize
+        while col < SCREEN_W {
+            // Ray angle interpolated across FOV
+            let col_f = col as f64
+            let scr_f = SCREEN_W as f64
+            let ray_angle = (self.angle - (self.fov * 0.5)) + ((col_f / scr_f) * self.fov)
+
+            let ray_dir_x = rad_cos(ray_angle)
+            let ray_dir_y = rad_sin(ray_angle)
+
+            // DDA Setup
+            var map_x = self.pos_x as i32
+            var map_y = self.pos_y as i32
+
+            var delta_dist_x: f64 = 1000000.0
+            if rad_abs(ray_dir_x) > 0.00001 {
+                delta_dist_x = rad_abs(1.0 / ray_dir_x)
+            }
+            var delta_dist_y: f64 = 1000000.0
+            if rad_abs(ray_dir_y) > 0.00001 {
+                delta_dist_y = rad_abs(1.0 / ray_dir_y)
+            }
+
+            var step_x = 0
+            var side_dist_x: f64 = 0.0
+            if ray_dir_x < 0.0 {
+                step_x = 0 - 1
+                side_dist_x = (self.pos_x - (map_x as f64)) * delta_dist_x
+            } else {
+                step_x = 1
+                side_dist_x = (((map_x as f64) + 1.0) - self.pos_x) * delta_dist_x
+            }
+
+            var step_y = 0
+            var side_dist_y: f64 = 0.0
+            if ray_dir_y < 0.0 {
+                step_y = 0 - 1
+                side_dist_y = (self.pos_y - (map_y as f64)) * delta_dist_y
+            } else {
+                step_y = 1
+                side_dist_y = (((map_y as f64) + 1.0) - self.pos_y) * delta_dist_y
+            }
+
+            // Perform DDA
+            var hit = false
+            var side = 0 // 0 = NS wall, 1 = EW wall
+            var hit_type = 1i64
+            var dist_traveled = 0
+
+            while !hit && dist_traveled < 25 {
+                if side_dist_x < side_dist_y {
+                    side_dist_x = side_dist_x + delta_dist_x
+                    map_x = map_x + step_x
+                    side = 0
+                } else {
+                    side_dist_y = side_dist_y + delta_dist_y
+                    map_y = map_y + step_y
+                    side = 1
+                }
+
+                if map_x >= 0 && map_x < (MAP_W as i32) && map_y >= 0 && map_y < (MAP_H as i32) {
+                    let cell = self.map[(map_y as usize) * MAP_W + (map_x as usize)]
+                    if cell > 0i64 {
+                        hit = true
+                        hit_type = cell
+                    }
+                } else {
+                    hit = true
+                }
+                dist_traveled = dist_traveled + 1
+            }
+
+            // Perpendicular wall distance (correcting fisheye)
+            var perp_dist: f64 = 1.0
+            if side == 0 {
+                perp_dist = ((map_x as f64) - self.pos_x + ((1.0 - (step_x as f64)) * 0.5)) / ray_dir_x
+            } else {
+                perp_dist = ((map_y as f64) - self.pos_y + ((1.0 - (step_y as f64)) * 0.5)) / ray_dir_y
+            }
+            if perp_dist < 0.15 { perp_dist = 0.15 }
+
+            // Fisheye correction: multiply by cos(ray_angle - player_angle)
+            let corrected_dist = perp_dist * rad_cos(ray_angle - self.angle)
+
+            // Calculate wall height on screen
+            let line_height_f = ((SCREEN_H as f64) * 0.85) / corrected_dist
+            var line_height = line_height_f as i32
+            if line_height > (SCREEN_H as i32) { line_height = SCREEN_H as i32 }
+
+            let draw_start = ((SCREEN_H as i32) - line_height) / 2
+            let draw_end = draw_start + line_height
+
+            // Choose character and color based on distance, wall type, and side
+            var ch = 35u8 // '#'
+            var fg = Color.bright_white()
+
+            if corrected_dist < 3.0 {
+                ch = 35u8 // '#'
+            } else if corrected_dist < 6.0 {
+                ch = 88u8 // 'X'
+            } else if corrected_dist < 9.0 {
+                ch = 120u8 // 'x'
+            } else if corrected_dist < 12.0 {
+                ch = 58u8 // ':'
+            } else {
+                ch = 46u8 // '.'
+            }
+
+            if hit_type == 2i64 {
+                // Brick wall: bright yellow -> yellow -> dark shadow
+                if corrected_dist < 3.5 {
+                    if side == 1 { fg = Color.yellow() } else { fg = Color.bright_yellow() }
+                } else if corrected_dist < 8.0 {
+                    if side == 1 { fg = Color.bright_black() } else { fg = Color.yellow() }
+                } else {
+                    fg = Color.bright_black()
+                }
+            } else if hit_type == 3i64 {
+                // Pillar: bright green -> green -> dark shadow
+                if corrected_dist < 3.5 {
+                    if side == 1 { fg = Color.green() } else { fg = Color.bright_green() }
+                } else if corrected_dist < 8.0 {
+                    if side == 1 { fg = Color.bright_black() } else { fg = Color.green() }
+                } else {
+                    fg = Color.bright_black()
+                }
+            } else {
+                // Stone wall: bright white -> white -> dark shadow
+                if corrected_dist < 3.5 {
+                    if side == 1 { fg = Color.white() } else { fg = Color.bright_white() }
+                } else if corrected_dist < 8.0 {
+                    if side == 1 { fg = Color.bright_black() } else { fg = Color.white() }
+                } else {
+                    fg = Color.bright_black()
+                }
+            }
+
+            // Draw Column: Ceiling, Wall, Floor
+            var y_row = 0i32
+            while y_row < (SCREEN_H as i32) {
+                let ur = y_row as usize
+                if y_row < draw_start {
+                    // Ceiling
+                    con.set_cell(col, ur, 32u8, Color.default(), Color.default())
+                } else if y_row <= draw_end {
+                    // Wall slice
+                    con.set_cell(col, ur, ch, fg, Color.default())
+                } else {
+                    // Floor (gradient dots)
+                    var floor_ch = 46u8 // '.'
+                    var floor_fg = Color.bright_black()
+                    if y_row > draw_end + 6 {
+                        floor_ch = 126u8 // '~'
+                        floor_fg = Color.bright_black()
+                    }
+                    con.set_cell(col, ur, floor_ch, floor_fg, Color.default())
+                }
+                y_row = y_row + 1
+            }
+
+            col = col + 1usize
+        }
+
+        // Draw 2D Minimap Overlay in Top-Right Corner (x=50..66, y=1..17)
+        if self.show_map {
+            let map_ox = 50usize
+            let map_oy = 1usize
+
+            // Minimap border
+            con.print_str(map_ox, map_oy, "+- RAD MAP -+", Color.bright_yellow(), Color.default())
+
+            var my = 0usize
+            while my < MAP_H {
+                var mx = 0usize
+                while mx < MAP_W {
+                    let cell = self.map[my * MAP_W + mx]
+                    let dx = map_ox + mx
+                    let dy = map_oy + 1usize + my
+
+                    let px = self.pos_x as usize
+                    let py = self.pos_y as usize
+
+                    if mx == px && my == py {
+                        // Player position and heading arrow
+                        var p_ch = 64u8 // '@'
+                        if self.angle >= 5.49 || self.angle < 0.78 { p_ch = 62u8 } // '>'
+                        else if self.angle >= 0.78 && self.angle < 2.35 { p_ch = 118u8 } // 'v'
+                        else if self.angle >= 2.35 && self.angle < 3.92 { p_ch = 60u8 } // '<'
+                        else { p_ch = 94u8 } // '^'
+                        con.set_cell(dx, dy, p_ch, Color.bright_red(), Color.default())
+                    } else if cell == 1i64 {
+                        con.set_cell(dx, dy, 35u8, Color.bright_white(), Color.default()) // Stone '#'
+                    } else if cell == 2i64 {
+                        con.set_cell(dx, dy, 66u8, Color.bright_yellow(), Color.default()) // Brick 'B'
+                    } else if cell == 3i64 {
+                        con.set_cell(dx, dy, 79u8, Color.bright_green(), Color.default()) // Pillar 'O'
+                    } else {
+                        con.set_cell(dx, dy, 46u8, Color.bright_black(), Color.default()) // Floor '.'
+                    }
+                    mx = mx + 1usize
+                }
+                my = my + 1usize
+            }
+        }
+
+        // HUD / Controls Bar at bottom
+        con.print_str(2usize, 0usize, "RAD ARCADE: 3D DDA RAYCASTER", Color.bright_cyan(), Color.default())
+        con.print_str(2usize, 23usize, "W/S: Move   A/D: Turn   Q/E: Strafe   M: Toggle Map   Esc: Quit", Color.white(), Color.default())
+
+        con.present()
+    }
+
+    fn destroy(var self) {
+        if (self.map as usize) != 0usize {
+            free(self.map as *raw u8)
+            self.map = 0usize as *raw var i64
+        }
+    }
+}
+
+fn main() {
+    var term = TerminalSession.new()
+    term.enable_raw_mode()
+    term.enter_alternate_screen()
+    term.hide_cursor()
+
+    var kbd = KeyboardReader.new()
+    var con = Console.new(SCREEN_W, SCREEN_H)
+    var timer = FrameTimer.new(30u32)
+    var game = RaycasterGame.new()
+
+    var running = true
+    while running {
+        let dt = timer.tick()
+
+        // Handle user input
+        let evt = kbd.read_key(0)
+        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
+            running = false
+        } else if evt.is_char(109u8) { // 'm': Toggle minimap
+            game.show_map = !game.show_map
+        } else {
+            let move_step: f64 = 0.35
+            let turn_step: f64 = 0.15
+
+            if evt.code == KEY_UP || evt.is_char(119u8) { // Up / 'w': Forward
+                game.move_player(move_step, 0.0)
+            } else if evt.code == KEY_DOWN || evt.is_char(115u8) { // Down / 's': Backward
+                game.move_player(0.0 - move_step, 0.0)
+            } else if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a': Turn Left
+                game.rotate_player(0.0 - turn_step)
+            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd': Turn Right
+                game.rotate_player(turn_step)
+            } else if evt.is_char(101u8) { // 'e': Strafe Right
+                game.move_player(0.0, move_step)
+            } else if evt.is_char(122u8) { // 'z': Strafe Left
+                game.move_player(0.0, 0.0 - move_step)
+            }
+        }
+
+        game.render(con)
+        timer.pace()
+    }
+
+    game.destroy()
+    con.close_console()
+    kbd.close_reader()
+    term.close()
+}

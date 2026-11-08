@@ -8,10 +8,10 @@ rad_tests/radtest/.tmp*
 *.log
 .DS_Store
 /lib/llvm
-rad_tests/rad_arcade/**/tetris
-rad_tests/rad_arcade/**/dungeon
-rad_tests/rad_arcade/**/invaders
-rad_tests/rad_arcade/**/raycaster
-rad_tests/rad_arcade/**/snake
-rad_tests/rad_arcade/**/pong
-rad_tests/rad_arcade/**/breakout
+rad_tests/rad_arcade/*/tetris
+rad_tests/rad_arcade/*/dungeon
+rad_tests/rad_arcade/*/invaders
+rad_tests/rad_arcade/*/raycaster
+rad_tests/rad_arcade/*/snake
+rad_tests/rad_arcade/*/pong
+rad_tests/rad_arcade/*/breakout

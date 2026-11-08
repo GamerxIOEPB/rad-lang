@@ -15,6 +15,7 @@ struct Parser {
     error_count: i64,
     source: String,
     moved_vars: Vec<String>,
+    imported_modules: Vec<String>,
 }
 
 fn get_source_line(source: String, target_line: i64) -> String {
@@ -1394,11 +1395,35 @@ impl Parser {
                 }
             } else if str_eq(self.peek_text(), "import") {
                 self.advance()
-                while self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_EOF && self.peek_kind() != TOK_FN && self.peek_kind() != TOK_STRUCT && self.peek_kind() != TOK_ENUM && !str_eq(self.peek_text(), "impl") && !str_eq(self.peek_text(), "const") && !str_eq(self.peek_text(), "import") {
+                var spec = String.new()
+                if self.peek_kind() == TOK_STR {
+                    spec.push_str(self.peek_text())
                     self.advance()
+                } else {
+                    while self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_EOF && self.peek_kind() != TOK_FN && self.peek_kind() != TOK_STRUCT && self.peek_kind() != TOK_ENUM && !str_eq(self.peek_text(), "impl") && !str_eq(self.peek_text(), "const") && !str_eq(self.peek_text(), "import") {
+                        let k = self.peek_kind()
+                        if k == TOK_DOT {
+                            spec.push_byte(46u8) // '.'
+                        } else if k == TOK_SLASH {
+                            spec.push_byte(47u8) // '/'
+                        } else if k == TOK_COLONCOLON {
+                            spec.push_byte(47u8) // '::' -> '/'
+                        } else {
+                            let t = self.peek_text()
+                            if str_len(t) > 0usize {
+                                spec.push_str(t)
+                            }
+                        }
+                        self.advance()
+                    }
                 }
                 if self.peek_kind() == TOK_SEMI {
                     self.advance()
+                }
+                spec.push_byte(0u8)
+                let s_str = spec.as_ptr() as str
+                if str_len(s_str) > 0usize {
+                    self.imported_modules.push(spec)
                 }
             } else if str_eq(self.peek_text(), "const") {
                 self.advance()

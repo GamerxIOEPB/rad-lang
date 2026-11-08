@@ -124,6 +124,149 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
     }
 }
 
+fn try_path_with_rad(cand: String) -> String {
+    let s = cand.as_ptr() as str
+    if file_exists(s) {
+        return cand
+    }
+    if !str_ends_with(s, ".rad") {
+        var with_rad = String.new()
+        with_rad.push_str(s)
+        with_rad.push_str(".rad")
+        with_rad.push_byte(0u8)
+        if file_exists(with_rad.as_ptr() as str) {
+            return with_rad
+        }
+    }
+    return String.new()
+}
+
+fn resolve_import(spec: str, current_file: str) -> String {
+    let cur_dir = get_dirname(current_file)
+
+    // 1. Explicit relative or absolute path (starts with "./", "../", "/")
+    if str_starts_with(spec, "./") || str_starts_with(spec, "../") || str_starts_with(spec, "/") {
+        var cand = String.new()
+        if str_starts_with(spec, "/") {
+            cand.push_str(spec)
+        } else {
+            var rel = spec
+            if str_starts_with(spec, "./") {
+                rel = (spec as usize + 2usize) as str
+            }
+            if !str_eq(cur_dir.as_ptr() as str, ".") {
+                cand.push_str(cur_dir.as_ptr() as str)
+                cand.push_byte(47u8) // '/'
+            }
+            cand.push_str(rel)
+        }
+        cand.push_byte(0u8)
+        return try_path_with_rad(cand)
+    }
+
+    // 2. Relative to current file directory: <cur_dir>/<spec> or <cur_dir>/<spec>.rad
+    var loc_cand = String.new()
+    if !str_eq(cur_dir.as_ptr() as str, ".") {
+        loc_cand.push_str(cur_dir.as_ptr() as str)
+        loc_cand.push_byte(47u8) // '/'
+    }
+    loc_cand.push_str(spec)
+    loc_cand.push_byte(0u8)
+    let loc_found = try_path_with_rad(loc_cand)
+    if loc_found.len() > 0usize {
+        return loc_found
+    }
+
+    // 3. Search Standard Library paths
+    var sub = spec
+    if str_starts_with(spec, "std/") {
+        sub = (spec as usize + 4usize) as str
+    } else if str_starts_with(spec, "core/") {
+        sub = (spec as usize + 5usize) as str
+    } else if str_starts_with(spec, "alloc/") {
+        sub = (spec as usize + 6usize) as str
+    }
+
+    var std_roots = Vec.new()
+
+    let rad_home = getenv("RAD_HOME")
+    if (rad_home as usize) != 0usize && str_len(rad_home) > 0usize {
+        std_roots.push(String.from_str(rad_home))
+    }
+
+    let home = getenv("HOME")
+    if (home as usize) != 0usize && str_len(home) > 0usize {
+        var dr = String.new()
+        dr.push_str(home)
+        dr.push_str("/.rad")
+        dr.push_byte(0u8)
+        std_roots.push(dr)
+    }
+
+    std_roots.push(String.from_str("."))
+
+    var ri = 0usize
+    while ri < std_roots.len {
+        let root = std_roots.ptr[ri].as_ptr() as str
+
+        // std/src/<sub_path>.rad
+        var p1 = String.new()
+        if !str_eq(root, ".") {
+            p1.push_str(root)
+            p1.push_str("/lib/rad/std/src/")
+        } else {
+            p1.push_str("library/std/src/")
+        }
+        p1.push_str(sub)
+        p1.push_byte(0u8)
+        let f1 = try_path_with_rad(p1)
+        if f1.len() > 0usize { return f1 }
+
+        // core/src/<sub_path>.rad
+        var p2 = String.new()
+        if !str_eq(root, ".") {
+            p2.push_str(root)
+            p2.push_str("/lib/rad/core/src/")
+        } else {
+            p2.push_str("library/core/src/")
+        }
+        p2.push_str(sub)
+        p2.push_byte(0u8)
+        let f2 = try_path_with_rad(p2)
+        if f2.len() > 0usize { return f2 }
+
+        // alloc/src/<sub_path>.rad
+        var p3 = String.new()
+        if !str_eq(root, ".") {
+            p3.push_str(root)
+            p3.push_str("/lib/rad/alloc/src/")
+        } else {
+            p3.push_str("library/alloc/src/")
+        }
+        p3.push_str(sub)
+        p3.push_byte(0u8)
+        let f3 = try_path_with_rad(p3)
+        if f3.len() > 0usize { return f3 }
+
+        // os/linux/<sub_path>.rad
+        var p4 = String.new()
+        if !str_eq(root, ".") {
+            p4.push_str(root)
+            p4.push_str("/lib/rad/std/src/os/linux/")
+        } else {
+            p4.push_str("library/std/src/os/linux/")
+        }
+        p4.push_str(sub)
+        p4.push_byte(0u8)
+        let f4 = try_path_with_rad(p4)
+        if f4.len() > 0usize { return f4 }
+
+        ri = ri + 1usize
+    }
+
+    return String.new()
+}
+
 fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let opts = parse_cli_args(argc, argv)
 
@@ -162,6 +305,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         error_count: 0i64,
         source: String.new(),
         moved_vars: Vec.new(),
+        imported_modules: Vec.new(),
     }
     parser.const_names.push(String.from_str("Option::None"))
     parser.const_values.push(0i64)
@@ -194,9 +338,26 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         body_stmts: Vec.new(),
     })
 
+    var loaded_files = Vec.new()
     var file_idx = 0usize
     while file_idx < opts.input_paths.len {
         let fpath = opts.input_paths.ptr[file_idx].as_ptr() as str
+
+        var already = false
+        var li = 0usize
+        while li < loaded_files.len {
+            if str_eq(loaded_files.ptr[li].as_ptr() as str, fpath) {
+                already = true
+                break
+            }
+            li = li + 1usize
+        }
+        if already {
+            file_idx = file_idx + 1usize
+            continue
+        }
+        loaded_files.push(String.from_str(fpath))
+
         let fp = fopen(fpath, "rb")
         if (fp as usize) == 0usize {
             var err = String.new()
@@ -223,10 +384,55 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         parser.pos = 0usize
         parser.filename = String.from_str(fpath)
         parser.source = source
+        parser.imported_modules = Vec.new()
         parser.parse_program()
         if parser.error_count > 0i64 {
             return 1
         }
+
+        // Process and queue imported modules
+        var mi = 0usize
+        while mi < parser.imported_modules.len {
+            let spec = parser.imported_modules.ptr[mi].as_ptr() as str
+            let resolved = resolve_import(spec, fpath)
+            if resolved.len() > 0usize {
+                let r_str = resolved.as_ptr() as str
+                var known = false
+                var ki = 0usize
+                while ki < loaded_files.len {
+                    if str_eq(loaded_files.ptr[ki].as_ptr() as str, r_str) {
+                        known = true
+                        break
+                    }
+                    ki = ki + 1usize
+                }
+                if !known {
+                    var qi = 0usize
+                    while qi < opts.input_paths.len {
+                        if str_eq(opts.input_paths.ptr[qi].as_ptr() as str, r_str) {
+                            known = true
+                            break
+                        }
+                        qi = qi + 1usize
+                    }
+                }
+                if !known {
+                    opts.input_paths.push(resolved)
+                }
+            } else {
+                if !str_eq(spec, "std") && !str_eq(spec, "core") && !str_eq(spec, "alloc") {
+                    var err = String.new()
+                    err.push_str("error: could not resolve import '")
+                    err.push_str(spec)
+                    err.push_str("' in ")
+                    err.push_str(fpath)
+                    println(err.as_ptr() as str)
+                    return 1
+                }
+            }
+            mi = mi + 1usize
+        }
+
         file_idx = file_idx + 1usize
     }
 

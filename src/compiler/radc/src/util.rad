@@ -205,3 +205,52 @@ fn write_file_string(path: str, content: String) -> bool {
     fclose(fp)
     return true
 }
+
+fn file_exists(path: str) -> bool {
+    if (path as usize) == 0usize || str_len(path) == 0usize {
+        return false
+    }
+    let fp = fopen(path, "rb")
+    if (fp as usize) != 0usize {
+        fclose(fp)
+        return true
+    }
+    return false
+}
+
+fn get_dirname(path: str) -> String {
+    var res = String.new()
+    let slen = str_len(path)
+    if slen == 0usize {
+        res.push_byte(46u8) // '.'
+        res.push_byte(0u8)
+        return res
+    }
+    let p = path as *raw u8
+    var last_slash: i64 = -1i64
+    var i = 0usize
+    while i < slen {
+        if p[i] == 47u8 { // '/'
+            last_slash = i as i64
+        }
+        i = i + 1usize
+    }
+    if last_slash < 0i64 {
+        res.push_byte(46u8) // '.'
+        res.push_byte(0u8)
+        return res
+    }
+    if last_slash == 0i64 {
+        res.push_byte(47u8) // '/'
+        res.push_byte(0u8)
+        return res
+    }
+    i = 0usize
+    let limit = last_slash as usize
+    while i < limit {
+        res.push_byte(p[i])
+        i = i + 1usize
+    }
+    res.push_byte(0u8)
+    return res
+}

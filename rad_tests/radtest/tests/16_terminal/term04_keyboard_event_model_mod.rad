@@ -4,6 +4,7 @@
 // Zero C, zero libc, zero external library dependencies.
 // ==============================================================================
 
+pub const KEY_EOF: i32        = -1
 pub const KEY_NONE: i32       = 0
 pub const KEY_CHAR: i32       = 1
 pub const KEY_ENTER: i32      = 2
@@ -61,6 +62,10 @@ impl KeyEvent {
     pub fn is_ctrl(self, ch: u8) -> bool {
         self.code == KEY_CHAR && self.char_val == ch && self.ctrl
     }
+
+    pub fn is_eof(self) -> bool {
+        self.code == KEY_EOF
+    }
 }
 
 // ------------------------------------------------------------------------------
@@ -117,9 +122,12 @@ impl KeyboardReader {
         }
 
         let buf = self.inbuf as *raw var u8
-        // SYS_read = 0, STDIN_FILENO = 0
-        var n = syscall3(0i64, 0i64, buf, 64i64)
-        if n <= 0i64 {
+        // SYS_read = 0, STDIN_FILENO = 0: read 1 byte first to prevent discarding queued keystrokes
+        var n = syscall3(0i64, 0i64, buf, 1i64)
+        if n == 0i64 {
+            return KeyEvent { code: KEY_EOF, char_val: 0u8, ctrl: false, alt: false, shift: false }
+        }
+        if n < 0i64 {
             return KeyEvent.none()
         }
 
@@ -127,19 +135,18 @@ impl KeyboardReader {
 
         // Escape sequence or lone Escape
         if b0 == 27u8 {
-            if n == 1i64 {
-                // Timeout disambiguation: wait up to 30ms for following escape bytes
-                let follow = self.poll(30)
-                if !follow {
-                    return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false }
-                }
-                let buf_cont = (buf as usize + 1usize) as *raw var u8
-                let n2 = syscall3(0i64, 0i64, buf_cont, 63i64)
-                if n2 <= 0i64 {
-                    return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false }
-                }
-                n = n + n2
+            // Wait up to 30ms for following escape sequence bytes
+            let follow = self.poll(30)
+            if !follow {
+                return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false }
             }
+            let buf_cont = (buf as usize + 1usize) as *raw var u8
+            let n2 = syscall3(0i64, 0i64, buf_cont, 63i64)
+            if n2 <= 0i64 {
+                return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false }
+            }
+            n = n + n2
+        }
 
             let b1 = buf[1usize]
 

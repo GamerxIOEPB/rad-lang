@@ -1,0 +1,508 @@
+// ==============================================================================
+// Rad Arcade: Space Invaders
+// Real-time retro arcade shooter with marching aliens, bunkers, and laser bombs.
+// Zero external dependencies — pure syscalls, terminal, and console rendering.
+// ==============================================================================
+
+import terminal;
+import keyboard;
+import console;
+import time;
+
+const MAX_ALIENS: usize = 24usize
+const MAX_BOMBS: usize = 8usize
+const MAX_MISSILES: usize = 4usize
+
+struct InvadersGame {
+    player_x: i32,
+    player_lives: i32,
+    score: i64,
+    wave: i32,
+    aliens_alive: i32,
+    alien_dir: i32, // 1 = right, -1 = left
+    alien_step_timer: f64,
+    alien_step_interval: f64,
+    alien_bomb_timer: f64,
+
+    // Aliens: 24 slots (4 rows x 6 cols), stride = 4 i64 (0: x, 1: y, 2: alive, 3: kind)
+    aliens: *raw var i64,
+
+    // Player missiles: 4 slots, stride = 3 i64 (0: x, 1: y, 2: active)
+    missiles: *raw var i64,
+
+    // Alien bombs: 8 slots, stride = 3 i64 (0: x, 1: y, 2: active)
+    bombs: *raw var i64,
+
+    // 3 Bunkers: each 4 cols x 2 rows = 8 blocks, 3 bunkers = 24 blocks (0: empty, 1: intact)
+    bunkers: *raw var i64,
+
+    rng_state: u64,
+    game_over: bool,
+    won: bool,
+    paused: bool,
+}
+
+impl InvadersGame {
+    fn new(wave_num: i32) -> InvadersGame {
+        let al = malloc(MAX_ALIENS * 32usize) as *raw var i64
+        let ms = malloc(MAX_MISSILES * 24usize) as *raw var i64
+        let bm = malloc(MAX_BOMBS * 24usize) as *raw var i64
+        let bk = malloc(24usize * 8usize) as *raw var i64
+
+        var g = InvadersGame {
+            player_x: 30,
+            player_lives: 3,
+            score: 0i64,
+            wave: wave_num,
+            aliens_alive: 24,
+            alien_dir: 1,
+            alien_step_timer: 0.0,
+            alien_step_interval: 0.5,
+            alien_bomb_timer: 0.0,
+            aliens: al,
+            missiles: ms,
+            bombs: bm,
+            bunkers: bk,
+            rng_state: 987654321u64,
+            game_over: false,
+            won: false,
+            paused: false,
+        }
+        g.reset_wave(wave_num)
+        g
+    }
+
+    fn rand_u32(var self) -> u32 {
+        self.rng_state = (self.rng_state * 6364136223846793005u64) + 1u64
+        return ((self.rng_state >> 32u64) & 4294967295u64) as u32
+    }
+
+    fn reset_wave(var self, wave_num: i32) {
+        self.wave = wave_num
+        self.aliens_alive = 24
+        self.alien_dir = 1
+        self.alien_step_timer = 0.0
+        self.alien_step_interval = 0.55 - ((wave_num as f64) * 0.05)
+        if self.alien_step_interval < 0.12 { self.alien_step_interval = 0.12 }
+        self.alien_bomb_timer = 0.0
+
+        // Spawn 4 rows x 6 columns of aliens
+        var idx = 0usize
+        var r = 0
+        while r < 4 {
+            var c = 0
+            while c < 6 {
+                let base = idx * 4usize
+                self.aliens[base + 0usize] = (12 + (c * 6)) as i64 // x
+                self.aliens[base + 1usize] = (4 + (r * 2)) as i64  // y
+                self.aliens[base + 2usize] = 1i64                  // alive
+                self.aliens[base + 3usize] = r as i64              // row/type
+                idx = idx + 1usize
+                c = c + 1
+            }
+            r = r + 1
+        }
+
+        // Reset missiles and bombs
+        var mi = 0usize
+        while mi < MAX_MISSILES {
+            self.missiles[mi * 3usize + 2usize] = 0i64
+            mi = mi + 1usize
+        }
+        var bi = 0usize
+        while bi < MAX_BOMBS {
+            self.bombs[bi * 3usize + 2usize] = 0i64
+            bi = bi + 1usize
+        }
+
+        // Reset bunkers: 3 bunkers at x=14, x=28, x=42
+        var bki = 0usize
+        while bki < 24usize {
+            self.bunkers[bki] = 1i64 // intact
+            bki = bki + 1usize
+        }
+    }
+
+    fn shoot(var self) {
+        var mi = 0usize
+        while mi < MAX_MISSILES {
+            let base = mi * 3usize
+            if self.missiles[base + 2usize] == 0i64 { // inactive slot
+                self.missiles[base + 0usize] = self.player_x as i64
+                self.missiles[base + 1usize] = 20i64 // just above player
+                self.missiles[base + 2usize] = 1i64  // active
+                break
+            }
+            mi = mi + 1usize
+        }
+    }
+
+    fn update(var self, dt: f64) {
+        if self.game_over || self.won || self.paused {
+            return
+        }
+
+        // 1. Update Player Missiles
+        var mi = 0usize
+        while mi < MAX_MISSILES {
+            let mbase = mi * 3usize
+            if self.missiles[mbase + 2usize] == 1i64 {
+                let my = (self.missiles[mbase + 1usize] as i32) - 1
+                self.missiles[mbase + 1usize] = my as i64
+
+                if my <= 2 {
+                    self.missiles[mbase + 2usize] = 0i64 // off screen
+                } else {
+                    let mx = self.missiles[mbase + 0usize] as i32
+
+                    // Check alien collision
+                    var ai = 0usize
+                    while ai < MAX_ALIENS {
+                        let abase = ai * 4usize
+                        if self.aliens[abase + 2usize] == 1i64 {
+                            let ax = self.aliens[abase + 0usize] as i32
+                            let ay = self.aliens[abase + 1usize] as i32
+                            if (mx >= ax - 1 && mx <= ax + 2) && my == ay {
+                                self.aliens[abase + 2usize] = 0i64 // killed
+                                self.missiles[mbase + 2usize] = 0i64 // missile consumed
+                                self.aliens_alive = self.aliens_alive - 1
+                                let akind = self.aliens[abase + 3usize]
+                                if akind == 0i64 { self.score = self.score + 30i64 }
+                                else if akind == 1i64 { self.score = self.score + 20i64 }
+                                else { self.score = self.score + 10i64 }
+
+                                // Speed up remaining aliens
+                                self.alien_step_interval = self.alien_step_interval * 0.96
+                                if self.alien_step_interval < 0.06 { self.alien_step_interval = 0.06 }
+                                break
+                            }
+                        }
+                        ai = ai + 1usize
+                    }
+
+                    // Check bunker collision with missile
+                    if self.missiles[mbase + 2usize] == 1i64 && my >= 18 && my <= 19 {
+                        var bnum = 0
+                        while bnum < 3 {
+                            let bx = 14 + (bnum * 14)
+                            if mx >= bx && mx < bx + 4 {
+                                let block_idx = (bnum * 8) + ((my - 18) * 4) + (mx - bx)
+                                if self.bunkers[block_idx as usize] == 1i64 {
+                                    self.bunkers[block_idx as usize] = 0i64 // destroy block
+                                    self.missiles[mbase + 2usize] = 0i64
+                                    break
+                                }
+                            }
+                            bnum = bnum + 1
+                        }
+                    }
+                }
+            }
+            mi = mi + 1usize
+        }
+
+        // 2. Alien March Logic
+        self.alien_step_timer = self.alien_step_timer + dt
+        if self.alien_step_timer >= self.alien_step_interval {
+            self.alien_step_timer = 0.0
+
+            // Check if any alien hit the horizontal wall
+            var hit_edge = false
+            var ai = 0usize
+            while ai < MAX_ALIENS {
+                let abase = ai * 4usize
+                if self.aliens[abase + 2usize] == 1i64 {
+                    let ax = self.aliens[abase + 0usize] as i32
+                    if (self.alien_dir == 1 && ax >= 56) || (self.alien_dir == -1 && ax <= 4) {
+                        hit_edge = true
+                        break
+                    }
+                }
+                ai = ai + 1usize
+            }
+
+            if hit_edge {
+                self.alien_dir = -self.alien_dir
+                // Move down 1 row
+                var aj = 0usize
+                while aj < MAX_ALIENS {
+                    let abase = aj * 4usize
+                    if self.aliens[abase + 2usize] == 1i64 {
+                        let ny = (self.aliens[abase + 1usize] as i32) + 1
+                        self.aliens[abase + 1usize] = ny as i64
+                        if ny >= 20 { // Aliens reached baseline!
+                            self.game_over = true
+                        }
+                    }
+                    aj = aj + 1usize
+                }
+            } else {
+                // Step horizontally
+                var aj = 0usize
+                while aj < MAX_ALIENS {
+                    let abase = aj * 4usize
+                    if self.aliens[abase + 2usize] == 1i64 {
+                        let nx = (self.aliens[abase + 0usize] as i32) + (self.alien_dir * 2)
+                        self.aliens[abase + 0usize] = nx as i64
+                    }
+                    aj = aj + 1usize
+                }
+            }
+        }
+
+        // 3. Alien Bomb Dropping Logic
+        self.alien_bomb_timer = self.alien_bomb_timer + dt
+        if self.alien_bomb_timer >= 0.75 {
+            self.alien_bomb_timer = 0.0
+            // Find an inactive bomb slot
+            var bi = 0usize
+            while bi < MAX_BOMBS {
+                let bbase = bi * 3usize
+                if self.bombs[bbase + 2usize] == 0i64 {
+                    // Pick a random starting column among the 6 columns
+                    let rnd = self.rand_u32()
+                    let start_col = (rnd as usize) % 6usize
+                    var c_try = 0usize
+                    while c_try < 6usize {
+                        let c = (start_col + c_try) % 6usize
+                        // Find bottom-most alive alien in this column (row 3 down to 0)
+                        var r = 3
+                        while r >= 0 {
+                            let ai = ((r as usize) * 6usize) + c
+                            let abase = ai * 4usize
+                            if self.aliens[abase + 2usize] == 1i64 {
+                                self.bombs[bbase + 0usize] = self.aliens[abase + 0usize]
+                                self.bombs[bbase + 1usize] = self.aliens[abase + 1usize] + 1i64
+                                self.bombs[bbase + 2usize] = 1i64
+                                r = -1 // break outer alien row search
+                                c_try = 6usize // break column loop
+                            }
+                            r = r - 1
+                        }
+                        c_try = c_try + 1usize
+                    }
+                    break
+                }
+                bi = bi + 1usize
+            }
+        }
+
+        // 4. Update Alien Bombs
+        var bi = 0usize
+        while bi < MAX_BOMBS {
+            let bbase = bi * 3usize
+            if self.bombs[bbase + 2usize] == 1i64 {
+                let by = (self.bombs[bbase + 1usize] as i32) + 1
+                self.bombs[bbase + 1usize] = by as i64
+
+                if by >= 22 {
+                    self.bombs[bbase + 2usize] = 0i64
+                } else {
+                    let bx = self.bombs[bbase + 0usize] as i32
+
+                    // Check bunker collision with bomb
+                    if by >= 18 && by <= 19 {
+                        var bnum = 0
+                        while bnum < 3 {
+                            let b_left = 14 + (bnum * 14)
+                            if bx >= b_left && bx < b_left + 4 {
+                                let block_idx = (bnum * 8) + ((by - 18) * 4) + (bx - b_left)
+                                if self.bunkers[block_idx as usize] == 1i64 {
+                                    self.bunkers[block_idx as usize] = 0i64
+                                    self.bombs[bbase + 2usize] = 0i64
+                                    break
+                                }
+                            }
+                            bnum = bnum + 1
+                        }
+                    }
+
+                    // Check player collision
+                    if self.bombs[bbase + 2usize] == 1i64 && by == 21 {
+                        if bx >= self.player_x - 1 && bx <= self.player_x + 1 {
+                            self.bombs[bbase + 2usize] = 0i64
+                            self.player_lives = self.player_lives - 1
+                            if self.player_lives <= 0 {
+                                self.player_lives = 0
+                                self.game_over = true
+                            }
+                        }
+                    }
+                }
+            }
+            bi = bi + 1usize
+        }
+
+        // Check wave victory
+        if self.aliens_alive <= 0 {
+            self.score = self.score + 500i64
+            self.reset_wave(self.wave + 1)
+        }
+    }
+
+    fn render(self, var con: Console) {
+        con.clear()
+
+        // Top Status HUD
+        con.print_str(2usize, 0usize, "SCORE:", Color.bright_yellow(), Color.default())
+        con.print_str(9usize, 0usize, int_to_str(self.score).as_ptr() as str, Color.bright_white(), Color.default())
+
+        con.print_str(26usize, 0usize, "WAVE:", Color.cyan(), Color.default())
+        con.print_str(32usize, 0usize, int_to_str(self.wave as i64).as_ptr() as str, Color.bright_white(), Color.default())
+
+        con.print_str(46usize, 0usize, "LIVES:", Color.red(), Color.default())
+        var li = 0
+        while li < self.player_lives {
+            con.print_str(53usize + ((li as usize) * 3usize), 0usize, "^A^", Color.bright_green(), Color.default())
+            li = li + 1
+        }
+
+        // Horizontal separator line
+        var col = 0usize
+        while col < 62usize {
+            con.set_cell(col, 1usize, 61u8, Color.bright_black(), Color.default()) // '='
+            col = col + 1usize
+        }
+
+        // Render Aliens
+        var ai = 0usize
+        while ai < MAX_ALIENS {
+            let abase = ai * 4usize
+            if self.aliens[abase + 2usize] == 1i64 {
+                let ax = self.aliens[abase + 0usize] as usize
+                let ay = self.aliens[abase + 1usize] as usize
+                let akind = self.aliens[abase + 3usize]
+                if akind == 0i64 {
+                    con.print_str(ax, ay, "/XX\\", Color.bright_magenta(), Color.default())
+                } else if akind == 1i64 {
+                    con.print_str(ax, ay, "{@@}", Color.bright_cyan(), Color.default())
+                } else if akind == 2i64 {
+                    con.print_str(ax, ay, "[OO]", Color.bright_yellow(), Color.default())
+                } else {
+                    con.print_str(ax, ay, "<MM>", Color.green(), Color.default())
+                }
+            }
+            ai = ai + 1usize
+        }
+
+        // Render Bunkers (3 bunkers at x=14, x=28, x=42)
+        var bnum = 0
+        while bnum < 3 {
+            let bx = 14 + (bnum * 14)
+            var by = 0
+            while by < 2 {
+                var bx_off = 0
+                while bx_off < 4 {
+                    let idx = (bnum * 8) + (by * 4) + bx_off
+                    if self.bunkers[idx as usize] == 1i64 {
+                        con.set_cell((bx + bx_off) as usize, (18 + by) as usize, 35u8, Color.bright_green(), Color.default()) // '#'
+                    }
+                    bx_off = bx_off + 1
+                }
+                by = by + 1
+            }
+            bnum = bnum + 1
+        }
+
+        // Render Player Missiles
+        var mi = 0usize
+        while mi < MAX_MISSILES {
+            let mbase = mi * 3usize
+            if self.missiles[mbase + 2usize] == 1i64 {
+                let mx = self.missiles[mbase + 0usize] as usize
+                let my = self.missiles[mbase + 1usize] as usize
+                con.set_cell(mx, my, 124u8, Color.bright_yellow(), Color.default()) // '|'
+            }
+            mi = mi + 1usize
+        }
+
+        // Render Alien Bombs
+        var bi = 0usize
+        while bi < MAX_BOMBS {
+            let bbase = bi * 3usize
+            if self.bombs[bbase + 2usize] == 1i64 {
+                let bx = self.bombs[bbase + 0usize] as usize
+                let by = self.bombs[bbase + 1usize] as usize
+                con.set_cell(bx, by, 42u8, Color.bright_red(), Color.default()) // '*'
+            }
+            bi = bi + 1usize
+        }
+
+        // Render Player Cannon
+        let px = self.player_x as usize
+        con.print_str(px - 1usize, 21usize, "^A^", Color.bright_green(), Color.default())
+
+        // Bottom baseline
+        var bc = 0usize
+        while bc < 62usize {
+            con.set_cell(bc, 22usize, 45u8, Color.bright_black(), Color.default()) // '-'
+            bc = bc + 1usize
+        }
+
+        // Footer instructions
+        con.print_str(4usize, 23usize, "Left / Right (or A/D): Move    Space: Fire Laser    Q: Quit", Color.white(), Color.default())
+
+        if self.game_over {
+            con.print_str(22usize, 10usize, " GAME OVER! INVASION COMPLETE ", Color.bright_white(), Color.red())
+            con.print_str(20usize, 12usize, "Press 'R' to Restart or 'Q' to Quit", Color.bright_yellow(), Color.default())
+        }
+
+        con.present()
+    }
+
+    fn destroy(var self) {
+        if (self.aliens as usize) != 0usize { free(self.aliens as *raw u8); self.aliens = 0usize as *raw var i64 }
+        if (self.missiles as usize) != 0usize { free(self.missiles as *raw u8); self.missiles = 0usize as *raw var i64 }
+        if (self.bombs as usize) != 0usize { free(self.bombs as *raw u8); self.bombs = 0usize as *raw var i64 }
+        if (self.bunkers as usize) != 0usize { free(self.bunkers as *raw u8); self.bunkers = 0usize as *raw var i64 }
+    }
+}
+
+fn main() {
+    var term = TerminalSession.new()
+    term.enable_raw_mode()
+    term.enter_alternate_screen()
+    term.hide_cursor()
+
+    var kbd = KeyboardReader.new()
+    var con = Console.new(62usize, 25usize)
+    var timer = FrameTimer.new(60u32)
+    var game = InvadersGame.new(1)
+
+    var running = true
+    while running {
+        let dt = timer.tick()
+
+        // Handle user input
+        let evt = kbd.read_key(0)
+        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
+            running = false
+        } else if evt.is_char(112u8) { // 'p'
+            game.paused = !game.paused
+        } else if evt.is_char(114u8) && game.game_over { // 'r'
+            game.destroy()
+            game = InvadersGame.new(1)
+        } else if !game.paused && !game.game_over {
+            if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
+                if game.player_x > 2 {
+                    game.player_x = game.player_x - 2
+                }
+            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
+                if game.player_x < 58 {
+                    game.player_x = game.player_x + 2
+                }
+            } else if evt.is_char(32u8) || evt.code == KEY_UP || evt.is_char(119u8) { // Space / Up
+                game.shoot()
+            }
+        }
+
+        game.update(dt)
+        game.render(con)
+        timer.pace()
+    }
+
+    game.destroy()
+    con.close_console()
+    kbd.close_reader()
+    term.close()
+}

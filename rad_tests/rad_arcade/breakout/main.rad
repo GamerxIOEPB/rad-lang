@@ -1,0 +1,328 @@
+// ==============================================================================
+// Rad Arcade: Breakout
+// Classic brick-breaker with color tiers, paddle deflection physics, and lives.
+// Zero external dependencies — pure syscalls, terminal, and console rendering.
+// ==============================================================================
+
+import terminal;
+import keyboard;
+import console;
+import time;
+
+const FIELD_W: usize = 52usize
+const FIELD_H: usize = 23usize
+const BRICK_ROWS: usize = 5usize
+const BRICK_COLS: usize = 10usize
+const TOTAL_BRICKS: usize = 50usize
+const PADDLE_W: i32 = 8
+
+struct BreakoutGame {
+    paddle_x: f64,
+    ball_x: f64,
+    ball_y: f64,
+    ball_vx: f64,
+    ball_vy: f64,
+    ball_speed: f64,
+
+    // Bricks: 50 slots (1 = active, 0 = broken)
+    bricks: *raw var i64,
+    bricks_left: usize,
+    score: i64,
+    lives: i32,
+
+    ball_stuck: bool, // Stuck to paddle before launch
+    game_over: bool,
+    won: bool,
+    paused: bool,
+}
+
+impl BreakoutGame {
+    fn new() -> BreakoutGame {
+        let b = malloc(TOTAL_BRICKS * 8usize) as *raw var i64
+
+        var g = BreakoutGame {
+            paddle_x: 22.0,
+            ball_x: 26.0,
+            ball_y: 19.0,
+            ball_vx: 18.0,
+            ball_vy: 0.0 - 18.0,
+            ball_speed: 24.0,
+            bricks: b,
+            bricks_left: TOTAL_BRICKS,
+            score: 0i64,
+            lives: 3,
+            ball_stuck: true,
+            game_over: false,
+            won: false,
+            paused: false,
+        }
+        g.reset_board()
+        return g
+    }
+
+    fn reset_board(var self) {
+        var i = 0usize
+        while i < TOTAL_BRICKS {
+            self.bricks[i] = 1i64
+            i = i + 1usize
+        }
+        self.bricks_left = TOTAL_BRICKS
+        self.reset_ball()
+    }
+
+    fn reset_ball(var self) {
+        self.ball_stuck = true
+        self.ball_x = self.paddle_x + ((PADDLE_W as f64) * 0.5)
+        self.ball_y = 19.0
+        self.ball_speed = 22.0
+        self.ball_vx = 16.0
+        self.ball_vy = 0.0 - 16.0
+    }
+
+    fn launch_ball(var self) {
+        if self.ball_stuck {
+            self.ball_stuck = false
+            self.ball_vx = 16.0
+            self.ball_vy = 0.0 - 16.0
+        }
+    }
+
+    fn move_paddle(var self, dx: f64) {
+        self.paddle_x = self.paddle_x + dx
+        if self.paddle_x < 2.0 { self.paddle_x = 2.0 }
+        let max_x = ((FIELD_W as f64) - 2.0) - (PADDLE_W as f64)
+        if self.paddle_x > max_x { self.paddle_x = max_x }
+
+        if self.ball_stuck {
+            self.ball_x = self.paddle_x + ((PADDLE_W as f64) * 0.5)
+        }
+    }
+
+    fn update(var self, dt: f64) {
+        if self.game_over || self.won || self.paused || self.ball_stuck {
+            return
+        }
+
+        let next_x = self.ball_x + (self.ball_vx * dt)
+        let next_y = self.ball_y + (self.ball_vy * dt)
+
+        // Left and Right Wall Collision
+        if next_x <= 1.0 {
+            self.ball_x = 1.0
+            self.ball_vx = 0.0 - self.ball_vx
+        } else if next_x >= ((FIELD_W as f64) - 2.0) {
+            self.ball_x = (FIELD_W as f64) - 2.0
+            self.ball_vx = 0.0 - self.ball_vx
+        } else {
+            self.ball_x = next_x
+        }
+
+        // Paddle Collision (Row 20, ball moving downwards)
+        let paddle_top: f64 = 20.0
+        if self.ball_vy > 0.0 && next_y >= (paddle_top - 0.5) && next_y <= (paddle_top + 1.2) {
+            if next_x >= (self.paddle_x - 0.5) && next_x <= (self.paddle_x + (PADDLE_W as f64) + 0.5) {
+                // Deflection based on where ball hits paddle (-1.0 to 1.0)
+                let paddle_center = self.paddle_x + ((PADDLE_W as f64) * 0.5)
+                let hit_ratio = (next_x - paddle_center) / ((PADDLE_W as f64) * 0.5)
+
+                self.ball_y = paddle_top - 0.5
+                self.ball_speed = self.ball_speed + 0.5
+                if self.ball_speed > 48.0 { self.ball_speed = 48.0 }
+
+                self.ball_vx = hit_ratio * self.ball_speed
+                self.ball_vy = 0.0 - 20.0
+                return
+            }
+        }
+
+        // Top Wall Collision
+        if next_y <= 2.0 {
+            self.ball_y = 2.0
+            self.ball_vy = 0.0 - self.ball_vy
+        } else {
+            self.ball_y = next_y
+        }
+
+        // Brick Collision (Rows 4 .. 8, cols 0..9, width = 5, start_x = 1)
+        if self.ball_y >= 4.0 && self.ball_y <= 9.0 {
+            let bx_i = self.ball_x as i32
+            let by_i = self.ball_y as i32
+            let row = by_i - 4
+            let col = (bx_i - 1) / 5
+
+            if row >= 0 && row < (BRICK_ROWS as i32) && col >= 0 && col < (BRICK_COLS as i32) {
+                let idx = ((row as usize) * BRICK_COLS) + (col as usize)
+                if self.bricks[idx] == 1i64 {
+                    self.bricks[idx] = 0i64
+                    self.bricks_left = self.bricks_left - 1usize
+
+                    // Points based on row tier
+                    let points = ((BRICK_ROWS as i64) - (row as i64)) * 10i64
+                    self.score = self.score + points
+
+                    self.ball_vy = 0.0 - self.ball_vy
+
+                    if self.bricks_left == 0usize {
+                        self.won = true
+                    }
+                    return
+                }
+            }
+        }
+
+        // Bottom Boundary (Ball Lost)
+        if self.ball_y >= (FIELD_H as f64) {
+            self.lives = self.lives - 1
+            if self.lives <= 0 {
+                self.game_over = true
+            } else {
+                self.reset_ball()
+            }
+        }
+    }
+
+    fn render(self, var con: Console) {
+        con.clear()
+
+        // Header: Title, Score, Lives
+        con.print_str(2usize, 0usize, "RAD ARCADE: BREAKOUT", Color.bright_cyan(), Color.default())
+        con.print_str(26usize, 0usize, "SCORE: ", Color.bright_yellow(), Color.default())
+        let s_str = int_to_str(self.score)
+        con.print_str(33usize, 0usize, s_str.as_ptr() as str, Color.bright_white(), Color.default())
+
+        con.print_str(42usize, 0usize, "LIVES: ", Color.bright_red(), Color.default())
+        var li = 0i32
+        while li < self.lives {
+            con.set_cell(49usize + (li as usize), 0usize, 64u8, Color.bright_red(), Color.default()) // '@' / heart
+            li = li + 1
+        }
+
+        // Top Border
+        var x = 0usize
+        while x < FIELD_W {
+            con.set_cell(x, 1usize, 61u8, Color.bright_white(), Color.default()) // '='
+            x = x + 1usize
+        }
+
+        // Left and Right Walls
+        var y = 2usize
+        while y < FIELD_H {
+            con.set_cell(0usize, y, 124u8, Color.bright_white(), Color.default()) // '|'
+            con.set_cell(FIELD_W - 1usize, y, 124u8, Color.bright_white(), Color.default())
+            y = y + 1usize
+        }
+
+        // Render Bricks (5 rows x 10 cols, each brick 4 chars + 1 space)
+        var r = 0usize
+        while r < BRICK_ROWS {
+            var c = 0usize
+            while c < BRICK_COLS {
+                let idx = (r * BRICK_COLS) + c
+                if self.bricks[idx] == 1i64 {
+                    let bx = 1usize + (c * 5usize)
+                    let by = 4usize + r
+
+                    var bg_col = Color.red()
+                    if r == 0usize { bg_col = Color.bright_red() }
+                    else if r == 1usize { bg_col = Color.bright_yellow() }
+                    else if r == 2usize { bg_col = Color.bright_green() }
+                    else if r == 3usize { bg_col = Color.bright_cyan() }
+                    else if r == 4usize { bg_col = Color.bright_magenta() }
+
+                    con.set_cell(bx + 0usize, by, 35u8, Color.bright_white(), bg_col) // '#'
+                    con.set_cell(bx + 1usize, by, 35u8, Color.bright_white(), bg_col)
+                    con.set_cell(bx + 2usize, by, 35u8, Color.bright_white(), bg_col)
+                    con.set_cell(bx + 3usize, by, 35u8, Color.bright_white(), bg_col)
+                }
+                c = c + 1usize
+            }
+            r = r + 1usize
+        }
+
+        // Render Paddle (Row 20, width 8)
+        let px = self.paddle_x as usize
+        con.set_cell(px, 20usize, 91u8, Color.bright_cyan(), Color.default()) // '['
+        var pdi = 1usize
+        while pdi < (PADDLE_W as usize) - 1usize {
+            con.set_cell(px + pdi, 20usize, 61u8, Color.bright_white(), Color.cyan()) // '='
+            pdi = pdi + 1usize
+        }
+        con.set_cell(px + (PADDLE_W as usize) - 1usize, 20usize, 93u8, Color.bright_cyan(), Color.default()) // ']'
+
+        // Render Ball
+        let bx = self.ball_x as usize
+        let by = self.ball_y as usize
+        if bx < FIELD_W && by < FIELD_H {
+            con.set_cell(bx, by, 79u8, Color.bright_yellow(), Color.default()) // 'O'
+        }
+
+        // Controls footer
+        con.print_str(2usize, FIELD_H, "A/D or Left/Right: Move Paddle    Space: Launch    Q: Quit", Color.white(), Color.default())
+
+        if self.game_over {
+            con.print_str(14usize, 12usize, " GAME OVER! PRESS 'R' TO RETRY ", Color.bright_white(), Color.red())
+        } else if self.won {
+            con.print_str(13usize, 12usize, " CONGRATULATIONS! ALL BRICKS CLEARED! ", Color.bright_white(), Color.green())
+        } else if self.paused {
+            con.print_str(22usize, 12usize, " PAUSED ", Color.black(), Color.yellow())
+        } else if self.ball_stuck {
+            con.print_str(18usize, 14usize, "PRESS SPACE TO LAUNCH", Color.bright_yellow(), Color.default())
+        }
+
+        con.present()
+    }
+
+    fn destroy(var self) {
+        if (self.bricks as usize) != 0usize {
+            free(self.bricks as *raw u8)
+            self.bricks = 0usize as *raw var i64
+        }
+    }
+}
+
+fn main() {
+    var term = TerminalSession.new()
+    term.enable_raw_mode()
+    term.enter_alternate_screen()
+    term.hide_cursor()
+
+    var kbd = KeyboardReader.new()
+    var con = Console.new(FIELD_W, FIELD_H + 2usize)
+    var timer = FrameTimer.new(60u32)
+    var game = BreakoutGame.new()
+
+    var running = true
+    while running {
+        let dt = timer.tick()
+
+        // Handle user input
+        let evt = kbd.read_key(0)
+        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
+            running = false
+        } else if evt.is_char(112u8) { // 'p': Pause
+            game.paused = !game.paused
+        } else if evt.is_char(114u8) && (game.game_over || game.won) { // 'r': Restart
+            game.destroy()
+            game = BreakoutGame.new()
+        } else if !game.paused && !game.game_over && !game.won {
+            let paddle_step: f64 = 2.0
+
+            if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
+                game.move_paddle(0.0 - paddle_step)
+            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
+                game.move_paddle(paddle_step)
+            } else if evt.is_char(32u8) || evt.code == KEY_UP || evt.is_char(119u8) { // Space / Up / 'w'
+                game.launch_ball()
+            }
+        }
+
+        game.update(dt)
+        game.render(con)
+        timer.pace()
+    }
+
+    game.destroy()
+    con.close_console()
+    kbd.close_reader()
+    term.close()
+}

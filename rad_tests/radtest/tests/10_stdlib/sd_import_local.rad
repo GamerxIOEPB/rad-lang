@@ -1,0 +1,10 @@
+import "./sd_import_local_helper.rad";
+
+fn main() {
+    let s = helper_sum(100i64, 42i64)
+    if s == 142i64 {
+        println("local_import: pass")
+    } else {
+        println("local_import: fail")
+    }
+}

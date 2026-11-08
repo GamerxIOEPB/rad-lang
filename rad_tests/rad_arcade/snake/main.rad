@@ -1,0 +1,322 @@
+// ==============================================================================
+// Rad Arcade: Snake
+// Classic retro snake with smooth terminal pacing, food spawning, and speed curve.
+// Zero external dependencies — pure syscalls, terminal, and double-buffered console.
+// ==============================================================================
+
+import terminal;
+import keyboard;
+import console;
+import time;
+
+const BOARD_W: usize = 36usize
+const BOARD_H: usize = 20usize
+const OFFSET_X: usize = 4usize
+const OFFSET_Y: usize = 2usize
+const MAX_SEGMENTS: usize = 700usize
+
+struct SnakeGame {
+    // Segments buffer: stride 2 i64 (0: x, 1: y)
+    segments: *raw var i64,
+    length: usize,
+    dir_x: i32,
+    dir_y: i32,
+    next_dir_x: i32,
+    next_dir_y: i32,
+
+    food_x: i32,
+    food_y: i32,
+    score: i64,
+    high_score: i64,
+    speed_timer: f64,
+    move_interval: f64,
+
+    rng_state: u64,
+    game_over: bool,
+    paused: bool,
+}
+
+impl SnakeGame {
+    fn new() -> SnakeGame {
+        let segs = malloc(MAX_SEGMENTS * 16usize) as *raw var i64
+
+        var g = SnakeGame {
+            segments: segs,
+            length: 3usize,
+            dir_x: 1,
+            dir_y: 0,
+            next_dir_x: 1,
+            next_dir_y: 0,
+            food_x: 15,
+            food_y: 10,
+            score: 0i64,
+            high_score: 0i64,
+            speed_timer: 0.0,
+            move_interval: 0.12,
+            rng_state: 987654321u64,
+            game_over: false,
+            paused: false,
+        }
+        g.reset()
+        return g
+    }
+
+    fn rand_u32(var self) -> u32 {
+        self.rng_state = (self.rng_state * 6364136223846793005u64) + 1u64
+        return ((self.rng_state >> 32u64) & 4294967295u64) as u32
+    }
+
+    fn reset(var self) {
+        self.length = 4usize
+        self.dir_x = 1
+        self.dir_y = 0
+        self.next_dir_x = 1
+        self.next_dir_y = 0
+        self.score = 0i64
+        self.move_interval = 0.12
+        self.speed_timer = 0.0
+        self.game_over = false
+        self.paused = false
+
+        // Initial snake body at center
+        let start_x: i64 = (BOARD_W as i64) / 2i64
+        let start_y: i64 = (BOARD_H as i64) / 2i64
+        var i = 0usize
+        while i < self.length {
+            let base = i * 2usize
+            self.segments[base + 0usize] = start_x - (i as i64)
+            self.segments[base + 1usize] = start_y
+            i = i + 1usize
+        }
+
+        self.spawn_food()
+    }
+
+    fn spawn_food(var self) {
+        var placed = false
+        var attempts = 0
+        while !placed && attempts < 100 {
+            let rx = ((self.rand_u32() as usize) % (BOARD_W - 2usize)) + 1usize
+            let ry = ((self.rand_u32() as usize) % (BOARD_H - 2usize)) + 1usize
+
+            // Check if cell is occupied by snake body
+            var occupied = false
+            var si = 0usize
+            while si < self.length {
+                let base = si * 2usize
+                if (self.segments[base + 0usize] as usize) == rx && (self.segments[base + 1usize] as usize) == ry {
+                    occupied = true
+                    break
+                }
+                si = si + 1usize
+            }
+
+            if !occupied {
+                self.food_x = rx as i32
+                self.food_y = ry as i32
+                placed = true
+            }
+            attempts = attempts + 1
+        }
+    }
+
+    fn set_direction(var self, dx: i32, dy: i32) {
+        // Prevent 180-degree immediate reversal
+        if (dx != 0 - self.dir_x) || (dy != 0 - self.dir_y) {
+            self.next_dir_x = dx
+            self.next_dir_y = dy
+        }
+    }
+
+    fn update(var self, dt: f64) {
+        if self.game_over || self.paused {
+            return
+        }
+
+        self.speed_timer = self.speed_timer + dt
+        if self.speed_timer < self.move_interval {
+            return
+        }
+        self.speed_timer = 0.0
+
+        // Apply validated direction
+        self.dir_x = self.next_dir_x
+        self.dir_y = self.next_dir_y
+
+        // Calculate new head position
+        let head_x = (self.segments[0usize] as i32) + self.dir_x
+        let head_y = (self.segments[1usize] as i32) + self.dir_y
+
+        // Wall collision check
+        if head_x <= 0 || head_x >= ((BOARD_W as i32) - 1) || head_y <= 0 || head_y >= ((BOARD_H as i32) - 1) {
+            self.game_over = true
+            return
+        }
+
+        // Self-collision check
+        var si = 0usize
+        while si < self.length {
+            let base = si * 2usize
+            if (self.segments[base + 0usize] as i32) == head_x && (self.segments[base + 1usize] as i32) == head_y {
+                self.game_over = true
+                return
+            }
+            si = si + 1usize
+        }
+
+        // Check food collision
+        var ate_food = false
+        if head_x == self.food_x && head_y == self.food_y {
+            ate_food = true
+            self.score = self.score + 10i64
+            if self.score > self.high_score {
+                self.high_score = self.score
+            }
+            if self.length < MAX_SEGMENTS - 2usize {
+                self.length = self.length + 1usize
+            }
+            // Speed up slightly as snake grows
+            self.move_interval = self.move_interval - 0.003
+            if self.move_interval < 0.045 {
+                self.move_interval = 0.045
+            }
+        }
+
+        // Shift body segments backwards
+        var bi = self.length - 1usize
+        while bi > 0usize {
+            let dst = bi * 2usize
+            let src = (bi - 1usize) * 2usize
+            self.segments[dst + 0usize] = self.segments[src + 0usize]
+            self.segments[dst + 1usize] = self.segments[src + 1usize]
+            bi = bi - 1usize
+        }
+
+        // Set new head
+        self.segments[0usize] = head_x as i64
+        self.segments[1usize] = head_y as i64
+
+        if ate_food {
+            self.spawn_food()
+        }
+    }
+
+    fn render(self, var con: Console) {
+        con.clear()
+
+        // Draw header
+        con.print_str(OFFSET_X, 0usize, "RAD ARCADE: SNAKE", Color.bright_green(), Color.default())
+        con.print_str(OFFSET_X + 22usize, 0usize, "SCORE: ", Color.bright_yellow(), Color.default())
+        let s_str = int_to_str(self.score)
+        con.print_str(OFFSET_X + 29usize, 0usize, s_str.as_ptr() as str, Color.bright_white(), Color.default())
+
+        // Draw Board Border
+        var x = 0usize
+        while x < BOARD_W {
+            con.set_cell(OFFSET_X + x, OFFSET_Y, 45u8, Color.bright_cyan(), Color.default()) // '-'
+            con.set_cell(OFFSET_X + x, OFFSET_Y + BOARD_H - 1usize, 45u8, Color.bright_cyan(), Color.default())
+            x = x + 1usize
+        }
+        var y = 0usize
+        while y < BOARD_H {
+            con.set_cell(OFFSET_X, OFFSET_Y + y, 124u8, Color.bright_cyan(), Color.default()) // '|'
+            con.set_cell(OFFSET_X + BOARD_W - 1usize, OFFSET_Y + y, 124u8, Color.bright_cyan(), Color.default())
+            y = y + 1usize
+        }
+        con.set_cell(OFFSET_X, OFFSET_Y, 43u8, Color.bright_cyan(), Color.default()) // '+'
+        con.set_cell(OFFSET_X + BOARD_W - 1usize, OFFSET_Y, 43u8, Color.bright_cyan(), Color.default())
+        con.set_cell(OFFSET_X, OFFSET_Y + BOARD_H - 1usize, 43u8, Color.bright_cyan(), Color.default())
+        con.set_cell(OFFSET_X + BOARD_W - 1usize, OFFSET_Y + BOARD_H - 1usize, 43u8, Color.bright_cyan(), Color.default())
+
+        // Draw Food
+        let fx = OFFSET_X + (self.food_x as usize)
+        let fy = OFFSET_Y + (self.food_y as usize)
+        con.set_cell(fx, fy, 42u8, Color.bright_red(), Color.default()) // '*'
+
+        // Draw Snake Body & Head
+        var si = 0usize
+        while si < self.length {
+            let base = si * 2usize
+            let sx = OFFSET_X + (self.segments[base + 0usize] as usize)
+            let sy = OFFSET_Y + (self.segments[base + 1usize] as usize)
+
+            if si == 0usize {
+                // Head
+                var head_ch = 64u8 // '@'
+                if self.dir_x > 0 { head_ch = 62u8 } // '>'
+                else if self.dir_x < 0 { head_ch = 60u8 } // '<'
+                else if self.dir_y > 0 { head_ch = 118u8 } // 'v'
+                else if self.dir_y < 0 { head_ch = 94u8 } // '^'
+                con.set_cell(sx, sy, head_ch, Color.bright_white(), Color.green())
+            } else {
+                // Body segment
+                con.set_cell(sx, sy, 111u8, Color.bright_green(), Color.default()) // 'o'
+            }
+            si = si + 1usize
+        }
+
+        // Footer controls
+        con.print_str(OFFSET_X, OFFSET_Y + BOARD_H + 1usize, "Arrows / WASD: Move    P: Pause    Q: Quit", Color.white(), Color.default())
+
+        if self.game_over {
+            con.print_str(OFFSET_X + 6usize, OFFSET_Y + 8usize, " GAME OVER! PRESS 'R' TO RETRY ", Color.bright_white(), Color.red())
+        } else if self.paused {
+            con.print_str(OFFSET_X + 12usize, OFFSET_Y + 8usize, " PAUSED ", Color.black(), Color.yellow())
+        }
+
+        con.present()
+    }
+
+    fn destroy(var self) {
+        if (self.segments as usize) != 0usize {
+            free(self.segments as *raw u8)
+            self.segments = 0usize as *raw var i64
+        }
+    }
+}
+
+fn main() {
+    var term = TerminalSession.new()
+    term.enable_raw_mode()
+    term.enter_alternate_screen()
+    term.hide_cursor()
+
+    var kbd = KeyboardReader.new()
+    var con = Console.new(46usize, 25usize)
+    var timer = FrameTimer.new(60u32)
+    var game = SnakeGame.new()
+
+    var running = true
+    while running {
+        let dt = timer.tick()
+
+        // Handle user input
+        let evt = kbd.read_key(0)
+        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
+            running = false
+        } else if evt.is_char(112u8) { // 'p': Pause
+            game.paused = !game.paused
+        } else if evt.is_char(114u8) && game.game_over { // 'r': Restart
+            game.reset()
+        } else if !game.paused && !game.game_over {
+            if evt.code == KEY_UP || evt.is_char(119u8) { // Up / 'w'
+                game.set_direction(0, -1)
+            } else if evt.code == KEY_DOWN || evt.is_char(115u8) { // Down / 's'
+                game.set_direction(0, 1)
+            } else if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
+                game.set_direction(-1, 0)
+            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
+                game.set_direction(1, 0)
+            }
+        }
+
+        game.update(dt)
+        game.render(con)
+        timer.pace()
+    }
+
+    game.destroy()
+    con.close_console()
+    kbd.close_reader()
+    term.close()
+}

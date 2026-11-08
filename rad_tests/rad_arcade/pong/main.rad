@@ -1,0 +1,332 @@
+// ==============================================================================
+// Rad Arcade: Pong
+// Classic real-time table tennis with smooth ball physics, deflection angles,
+// and single-player vs AI or local two-player modes.
+// Zero external dependencies — pure syscalls, terminal, and console rendering.
+// ==============================================================================
+
+import terminal;
+import keyboard;
+import console;
+import time;
+
+const COURT_W: usize = 62usize
+const COURT_H: usize = 20usize
+const PADDLE_H: i32 = 4
+const WIN_SCORE: i32 = 7
+
+struct PongGame {
+    p1_y: f64,
+    p2_y: f64,
+    ball_x: f64,
+    ball_y: f64,
+    ball_vx: f64,
+    ball_vy: f64,
+    ball_speed: f64,
+
+    p1_score: i32,
+    p2_score: i32,
+    serving: bool,
+    serve_timer: f64,
+    is_vs_ai: bool,
+    game_over: bool,
+    winner: i32,
+    paused: bool,
+}
+
+impl PongGame {
+    fn new() -> PongGame {
+        var g = PongGame {
+            p1_y: 8.0,
+            p2_y: 8.0,
+            ball_x: 31.0,
+            ball_y: 10.0,
+            ball_vx: 24.0,
+            ball_vy: 8.0,
+            ball_speed: 26.0,
+            p1_score: 0,
+            p2_score: 0,
+            serving: true,
+            serve_timer: 1.0,
+            is_vs_ai: true,
+            game_over: false,
+            winner: 0,
+            paused: false,
+        }
+        g.reset_ball(1)
+        return g
+    }
+
+    fn reset_ball(var self, towards_player: i32) {
+        self.ball_x = ((COURT_W as f64) * 0.5)
+        self.ball_y = ((COURT_H as f64) * 0.5)
+        self.ball_speed = 28.0
+
+        var dir_x: f64 = 1.0
+        if towards_player == 1 {
+            dir_x = 0.0 - 1.0
+        }
+        self.ball_vx = dir_x * self.ball_speed
+        self.ball_vy = 6.0
+        self.serving = true
+        self.serve_timer = 1.0
+    }
+
+    fn move_p1(var self, dy: f64) {
+        self.p1_y = self.p1_y + dy
+        if self.p1_y < 1.0 { self.p1_y = 1.0 }
+        let max_y = ((COURT_H as f64) - 1.0) - (PADDLE_H as f64)
+        if self.p1_y > max_y { self.p1_y = max_y }
+    }
+
+    fn move_p2(var self, dy: f64) {
+        self.p2_y = self.p2_y + dy
+        if self.p2_y < 1.0 { self.p2_y = 1.0 }
+        let max_y = ((COURT_H as f64) - 1.0) - (PADDLE_H as f64)
+        if self.p2_y > max_y { self.p2_y = max_y }
+    }
+
+    fn update(var self, dt: f64) {
+        if self.game_over || self.paused {
+            return
+        }
+
+        // Handle serve delay
+        if self.serving {
+            self.serve_timer = self.serve_timer - dt
+            if self.serve_timer <= 0.0 {
+                self.serving = false
+            }
+            return
+        }
+
+        // AI Logic for Player 2
+        if self.is_vs_ai {
+            let p2_center = self.p2_y + ((PADDLE_H as f64) * 0.5)
+            let ai_speed = 18.0 * dt
+            if self.ball_vx > 0.0 && self.ball_x > 20.0 {
+                if self.ball_y < p2_center - 0.5 {
+                    self.move_p2(0.0 - ai_speed)
+                } else if self.ball_y > p2_center + 0.5 {
+                    self.move_p2(ai_speed)
+                }
+            } else {
+                // Return slowly to center when ball is away
+                let center_y = ((COURT_H as f64) * 0.5) - ((PADDLE_H as f64) * 0.5)
+                if self.p2_y < center_y - 1.0 {
+                    self.move_p2(ai_speed * 0.5)
+                } else if self.p2_y > center_y + 1.0 {
+                    self.move_p2(0.0 - (ai_speed * 0.5))
+                }
+            }
+        }
+
+        // Advance Ball Position
+        let next_x = self.ball_x + (self.ball_vx * dt)
+        let next_y = self.ball_y + (self.ball_vy * dt)
+
+        // Top & Bottom Wall Bounce
+        if next_y <= 1.0 {
+            self.ball_y = 1.0
+            self.ball_vy = 0.0 - self.ball_vy
+        } else if next_y >= ((COURT_H as f64) - 2.0) {
+            self.ball_y = ((COURT_H as f64) - 2.0)
+            self.ball_vy = 0.0 - self.ball_vy
+        } else {
+            self.ball_y = next_y
+        }
+
+        // Left Paddle Collision (x = 3)
+        let p1_x: f64 = 3.0
+        if next_x <= p1_x && self.ball_x > p1_x {
+            if self.ball_y >= self.p1_y - 0.5 && self.ball_y <= (self.p1_y + (PADDLE_H as f64) + 0.5) {
+                let hit_offset = (self.ball_y - (self.p1_y + ((PADDLE_H as f64) * 0.5))) / ((PADDLE_H as f64) * 0.5)
+                self.ball_speed = self.ball_speed + 1.2
+                if self.ball_speed > 55.0 { self.ball_speed = 55.0 }
+
+                self.ball_x = p1_x + 0.5
+                self.ball_vx = self.ball_speed
+                self.ball_vy = hit_offset * 18.0
+                return
+            }
+        }
+
+        // Right Paddle Collision (x = COURT_W - 4)
+        let p2_x = ((COURT_W as f64) - 4.0)
+        if next_x >= p2_x && self.ball_x < p2_x {
+            if self.ball_y >= self.p2_y - 0.5 && self.ball_y <= (self.p2_y + (PADDLE_H as f64) + 0.5) {
+                let hit_offset = (self.ball_y - (self.p2_y + ((PADDLE_H as f64) * 0.5))) / ((PADDLE_H as f64) * 0.5)
+                self.ball_speed = self.ball_speed + 1.2
+                if self.ball_speed > 55.0 { self.ball_speed = 55.0 }
+
+                self.ball_x = p2_x - 0.5
+                self.ball_vx = 0.0 - self.ball_speed
+                self.ball_vy = hit_offset * 18.0
+                return
+            }
+        }
+
+        // Point Scored Check
+        if next_x <= 0.0 {
+            // Player 2 scored
+            self.p2_score = self.p2_score + 1
+            if self.p2_score >= WIN_SCORE {
+                self.game_over = true
+                self.winner = 2
+            } else {
+                self.reset_ball(1)
+            }
+            return
+        } else if next_x >= (COURT_W as f64) - 1.0 {
+            // Player 1 scored
+            self.p1_score = self.p1_score + 1
+            if self.p1_score >= WIN_SCORE {
+                self.game_over = true
+                self.winner = 1
+            } else {
+                self.reset_ball(2)
+            }
+            return
+        }
+
+        self.ball_x = next_x
+    }
+
+    fn render(self, var con: Console) {
+        con.clear()
+
+        // Scoreboard Bar at Top
+        con.print_str(2usize, 0usize, "RAD ARCADE: PONG", Color.bright_cyan(), Color.default())
+
+        let s1 = int_to_str(self.p1_score as i64)
+        let s2 = int_to_str(self.p2_score as i64)
+        con.print_str(24usize, 0usize, s1.as_ptr() as str, Color.bright_green(), Color.default())
+        con.print_str(30usize, 0usize, "-", Color.white(), Color.default())
+        con.print_str(36usize, 0usize, s2.as_ptr() as str, Color.bright_yellow(), Color.default())
+
+        if self.is_vs_ai {
+            con.print_str(48usize, 0usize, "[Mode: VS AI]", Color.bright_magenta(), Color.default())
+        } else {
+            con.print_str(48usize, 0usize, "[Mode: 2-Player]", Color.bright_cyan(), Color.default())
+        }
+
+        // Court Top & Bottom Borders
+        var x = 0usize
+        while x < COURT_W {
+            con.set_cell(x, 1usize, 61u8, Color.bright_white(), Color.default()) // '='
+            con.set_cell(x, COURT_H - 1usize, 61u8, Color.bright_white(), Color.default())
+            x = x + 1usize
+        }
+
+        // Center Net (dashed line)
+        var ny = 2usize
+        while ny < COURT_H - 1usize {
+            if (ny % 2usize) == 0usize {
+                con.set_cell(31usize, ny, 124u8, Color.bright_black(), Color.default()) // '|'
+            }
+            ny = ny + 1usize
+        }
+
+        // Render Left Paddle (Player 1)
+        let p1_x = 3usize
+        var pi = 0i32
+        while pi < PADDLE_H {
+            let py = ((self.p1_y as i32) + pi) as usize
+            if py > 1usize && py < COURT_H - 1usize {
+                con.set_cell(p1_x, py, 124u8, Color.bright_green(), Color.default())
+                con.set_cell(p1_x - 1usize, py, 91u8, Color.bright_green(), Color.default()) // '['
+            }
+            pi = pi + 1
+        }
+
+        // Render Right Paddle (Player 2 / AI)
+        let p2_x = COURT_W - 4usize
+        var p2i = 0i32
+        while p2i < PADDLE_H {
+            let py = ((self.p2_y as i32) + p2i) as usize
+            if py > 1usize && py < COURT_H - 1usize {
+                con.set_cell(p2_x, py, 124u8, Color.bright_yellow(), Color.default())
+                con.set_cell(p2_x + 1usize, py, 93u8, Color.bright_yellow(), Color.default()) // ']'
+            }
+            p2i = p2i + 1
+        }
+
+        // Render Ball
+        let bx = self.ball_x as usize
+        let by = self.ball_y as usize
+        if bx < COURT_W && by > 1usize && by < COURT_H - 1usize {
+            con.set_cell(bx, by, 79u8, Color.bright_white(), Color.default()) // 'O'
+        }
+
+        // Controls footer
+        con.print_str(2usize, COURT_H + 1usize, "P1: W/S    P2: Up/Down    T: Mode    P: Pause    Q: Quit", Color.white(), Color.default())
+
+        if self.game_over {
+            if self.winner == 1 {
+                con.print_str(18usize, 9usize, " PLAYER 1 WINS THE MATCH! ", Color.bright_white(), Color.green())
+            } else {
+                con.print_str(18usize, 9usize, " PLAYER 2 WINS THE MATCH! ", Color.bright_white(), Color.red())
+            }
+            con.print_str(16usize, 11usize, "Press 'R' to Play Again or 'Q' to Quit", Color.bright_yellow(), Color.default())
+        } else if self.paused {
+            con.print_str(26usize, 9usize, " PAUSED ", Color.black(), Color.yellow())
+        }
+
+        con.present()
+    }
+}
+
+fn main() {
+    var term = TerminalSession.new()
+    term.enable_raw_mode()
+    term.enter_alternate_screen()
+    term.hide_cursor()
+
+    var kbd = KeyboardReader.new()
+    var con = Console.new(COURT_W, COURT_H + 3usize)
+    var timer = FrameTimer.new(60u32)
+    var game = PongGame.new()
+
+    var running = true
+    while running {
+        let dt = timer.tick()
+
+        // Handle user input
+        let evt = kbd.read_key(0)
+        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
+            running = false
+        } else if evt.is_char(112u8) { // 'p': Pause
+            game.paused = !game.paused
+        } else if evt.is_char(116u8) { // 't': Toggle VS AI / 2P
+            game.is_vs_ai = !game.is_vs_ai
+        } else if evt.is_char(114u8) && game.game_over { // 'r': Restart
+            game = PongGame.new()
+        } else if !game.paused && !game.game_over {
+            let paddle_step: f64 = 1.5
+
+            // Player 1 controls (W/S, and Up/Down when playing vs AI)
+            if evt.is_char(119u8) || (game.is_vs_ai && evt.code == KEY_UP) { // 'w' or Up
+                game.move_p1(0.0 - paddle_step)
+            } else if evt.is_char(115u8) || (game.is_vs_ai && evt.code == KEY_DOWN) { // 's' or Down
+                game.move_p1(paddle_step)
+            }
+
+            // Player 2 controls (Up/Down) when in 2P mode
+            if !game.is_vs_ai {
+                if evt.code == KEY_UP {
+                    game.move_p2(0.0 - paddle_step)
+                } else if evt.code == KEY_DOWN {
+                    game.move_p2(paddle_step)
+                }
+            }
+        }
+
+        game.update(dt)
+        game.render(con)
+        timer.pace()
+    }
+
+    con.close_console()
+    kbd.close_reader()
+    term.close()
+}
