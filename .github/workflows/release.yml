@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release Git Tag (default: v0.1.0)'
+        description: 'Release Git Tag (default: v0.2.0)'
         required: false
-        default: 'v0.1.0'
+        default: 'v0.2.0'
       title:
         description: 'Release Title (leave empty for UTC timestamp e.g. 11/8/2026 12:00 P.M.)'
         required: false
@@ -37,8 +37,8 @@ jobs:
           gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap
           tar -xzf /tmp/bootstrap/*.tar.gz -C ~/.rad --strip-components=1
           echo "$HOME/.rad/bin" >> $GITHUB_PATH
-          # Clean up any lingering timestamp tags so only clean version tags like v0.1.0 exist
-          for tag in $(gh release list --repo GamerxIOEPB/rad-lang | awk '{print $3}' | grep -E '^v0\.1\.0-'); do
+          # Clean up any lingering timestamp tags so only clean version tags exist
+          for tag in $(gh release list --repo GamerxIOEPB/rad-lang | awk '{print $3}' | grep -E '^v0\.[0-9]+\.[0-9]+-'); do
             echo "Deleting test tag $tag..."
             gh release delete "$tag" --yes --cleanup-tag --repo GamerxIOEPB/rad-lang || true
           done

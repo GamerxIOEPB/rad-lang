@@ -2,7 +2,7 @@
   "name": "rad-lang",
   "displayName": "Rad Programming Language",
   "description": "Rich language support, syntax highlighting, and Language Server Protocol integration for Rad.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "rad-lang",
   "repository": {
     "type": "git",
