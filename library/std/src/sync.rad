@@ -159,7 +159,8 @@ pub struct AtomicBool {
 impl AtomicBool {
     pub fn new(val: bool) -> AtomicBool {
         let p = malloc(4usize) as *raw var i32
-        let int_val = if val { 1 } else { 0 }
+        var int_val = 0
+        if val { int_val = 1 }
         atomic_store_i32(p, int_val)
         AtomicBool { ptr: p }
     }
@@ -170,19 +171,23 @@ impl AtomicBool {
     }
 
     pub fn store(self, val: bool) {
-        let int_val = if val { 1 } else { 0 }
+        var int_val = 0
+        if val { int_val = 1 }
         atomic_store_i32(self.ptr, int_val)
     }
 
     pub fn swap(self, val: bool) -> bool {
-        let int_val = if val { 1 } else { 0 }
+        var int_val = 0
+        if val { int_val = 1 }
         let old = atomic_swap_i32(self.ptr, int_val)
         old != 0
     }
 
     pub fn compare_exchange(self, expected: bool, desired: bool) -> bool {
-        let exp = if expected { 1 } else { 0 }
-        let des = if desired { 1 } else { 0 }
+        var exp = 0
+        if expected { exp = 1 }
+        var des = 0
+        if desired { des = 1 }
         let old = atomic_compare_exchange_i32(self.ptr, exp, des)
         old != 0
     }

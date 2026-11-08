@@ -496,7 +496,10 @@ impl DungeonGame {
                 let off = iy * MAP_W + ix
                 if self.explored[off] == 2i64 {
                     let ikind = self.items[ibase + 2usize] as u8
-                    let icol = if ikind == 33u8 { Color.bright_magenta() } else { Color.bright_yellow() }
+                    var icol = Color.bright_yellow()
+                    if ikind == 33u8 {
+                        icol = Color.bright_magenta()
+                    }
                     con.set_cell(ix + 2usize, iy + 2usize, ikind, icol, Color.default())
                 }
             }
@@ -514,9 +517,12 @@ impl DungeonGame {
                 let off = my * MAP_W + mx
                 if self.explored[off] == 2i64 {
                     let mkind = self.monsters[mbase + 6usize] as u8
-                    let mcol = if mkind == 68u8 { Color.bright_red() }
-                               else if mkind == 111u8 { Color.red() }
-                               else { Color.green() }
+                    var mcol = Color.green()
+                    if mkind == 68u8 {
+                        mcol = Color.bright_red()
+                    } else if mkind == 111u8 {
+                        mcol = Color.red()
+                    }
                     con.set_cell(mx + 2usize, my + 2usize, mkind, mcol, Color.default())
                 }
             }

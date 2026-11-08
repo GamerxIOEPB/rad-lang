@@ -146,7 +146,6 @@ impl KeyboardReader {
                 return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false }
             }
             n = n + n2
-        }
 
             let b1 = buf[1usize]
 
