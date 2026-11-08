@@ -85,9 +85,9 @@ radc: $(BIN_RADC)
 $(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp
 	@mkdir -p $(BIN_DIR)
 	@echo "==> Compiling backend bridge..."
-	@if [ -x "$(BIN_CLANGXX)" ]; then \
+	@if [ -x "$(BIN_CLANGXX)" ] && $(BIN_CLANGXX) --version >/dev/null 2>&1; then \
 		$(BIN_CLANGXX) -c -O2 -fPIC $(RADC_DIR)/backend_bridge.cpp -o $(BIN_DIR)/backend_bridge.o; \
-	elif [ -x "$(PREFIX)/bin/rad-clang++" ]; then \
+	elif [ -x "$(PREFIX)/bin/rad-clang++" ] && $(PREFIX)/bin/rad-clang++ --version >/dev/null 2>&1; then \
 		$(PREFIX)/bin/rad-clang++ -c -O2 -fPIC $(RADC_DIR)/backend_bridge.cpp -o $(BIN_DIR)/backend_bridge.o; \
 	else \
 		clang++ -c -O2 -fPIC $(RADC_DIR)/backend_bridge.cpp -o $(BIN_DIR)/backend_bridge.o; \
@@ -99,7 +99,7 @@ $(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp
 		$(RADC) --emit-llvm $(RADC_SRCS) -o $(BIN_DIR)/radc_rad.ll $(RADC_FLAGS) && \
 		rad-llc -filetype=obj -relocation-model=pic $(BIN_DIR)/radc_rad.ll -o $(BIN_DIR)/radc_rad.o; \
 	fi
-	@if [ -x "$(PREFIX)/bin/rad-clang++" ]; then \
+	@if [ -x "$(PREFIX)/bin/rad-clang++" ] && $(PREFIX)/bin/rad-clang++ --version >/dev/null 2>&1; then \
 		$(PREFIX)/bin/rad-clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldCommon -o $(BIN_RADC); \
 	else \
 		clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldCommon -o $(BIN_RADC); \
