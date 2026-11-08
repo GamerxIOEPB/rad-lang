@@ -19,21 +19,58 @@ fn main() -> i32 {
     let a: i64 = 25
     let b: i64 = 4
 
-    let sum = a + b       // 29
+    let sum  = a + b       // 29
     let diff = a - b      // 21
     let prod = a * b      // 100
     let quot = a / b      // 6
-    let rem = a % b       // 1
-    let neg = -a          // -25
+    let rem  = a % b       // 1
+    let neg  = -a          // -25
 
-    println("sum = {}, diff = {}, prod = {}, quot = {}, rem = {}", sum, diff, prod, quot, rem)
+    print("sum: ")
+    println(sum)
+    print("quot: ")
+    println(quot)
+    print("rem: ")
+    println(rem)
     return 0
 }
 ```
 
 ---
 
-## 5.2 Comparison Operators
+## 5.2 Bitwise Operators
+
+For systems programming, bitmask manipulation, and protocol framing, Rad provides complete bitwise operators:
+
+| Operator | Name | Example | Description |
+| :--- | :--- | :--- | :--- |
+| `&` | Bitwise AND | `a & b` | Bits present in both operands |
+| `\|` | Bitwise OR | `a \| b` | Bits present in either operand |
+| `^` | Bitwise XOR | `a ^ b` | Bits present in exactly one operand |
+| `<<` | Left Shift | `a << 2` | Shifts bits left by specified count |
+| `>>` | Right Shift | `a >> 2` | Shifts bits right by specified count |
+
+### Example:
+```rad
+fn main() -> i32 {
+    let flags: u32 = 0b0010_1010u32
+    let mask:  u32 = 0b0000_1111u32
+
+    let masked = flags & mask
+    let combined = flags | 0b0001_0000u32
+    let shifted = flags << 2
+
+    print("masked: ")
+    println(masked as i32)
+    print("shifted: ")
+    println(shifted as i32)
+    return 0
+}
+```
+
+---
+
+## 5.3 Comparison Operators
 
 Comparison operators evaluate expressions and return a `bool` (`true` or `false`):
 
@@ -55,7 +92,7 @@ fn main() -> i32 {
     let is_perfect: bool = score == 100
 
     if is_passing && !is_perfect {
-        println("Passed with score: {score}")
+        println("Passed the test!")
     }
     return 0
 }
@@ -63,7 +100,7 @@ fn main() -> i32 {
 
 ---
 
-## 5.3 Logical Operators
+## 5.4 Logical Operators
 
 Rad provides standard short-circuiting Boolean logic operators:
 
@@ -91,45 +128,52 @@ fn main() -> i32 {
 
 ---
 
-## 5.4 Operator Precedence
+## 5.5 Operator Precedence
 
 Operators in Rad are evaluated following standard mathematical and systems programming precedence rules (from highest to lowest binding power):
 
 1. **Postfix**: Member access (`.`), Method call (`.method()`), Function call (`()`), Indexing (`[]`)
-2. **Unary**: Negation (`-`), Logical NOT (`!`)
+2. **Unary**: Negation (`-`), Logical NOT (`!`), Bitwise NOT (`~`)
 3. **Multiplicative**: `*`, `/`, `%`
 4. **Additive**: `+`, `-`
-5. **Relational / Comparison**: `<`, `<=`, `>`, `>=`
-6. **Equality**: `==`, `!=`
-7. **Logical AND**: `&&`
-8. **Logical OR**: `||`
-9. **Cast**: `as`
-10. **Assignment**: `=`
+5. **Shift**: `<<`, `>>`
+6. **Bitwise AND**: `&`
+7. **Bitwise XOR**: `^`
+8. **Bitwise OR**: `|`
+9. **Relational / Comparison**: `<`, `<=`, `>`, `>=`
+10. **Equality**: `==`, `!=`
+11. **Logical AND**: `&&`
+12. **Logical OR**: `||`
+13. **Cast**: `as`
+14. **Assignment**: `=`
 
 Use parentheses `( ... )` to explicitly enforce evaluation order when combining complex expressions.
 
 ---
 
-## 5.5 Explicit Type Casting (`as`)
+## 5.6 Explicit Type Casting (`as`)
 
-Rad does not perform silent lossy implicit conversions between incompatible types. Conversions between numeric types, pointers, and memory representations require an explicit `as` cast:
+Rad strictly prevents implicit lossy conversions. Conversions between numeric types, pointers, and memory representations require an explicit `as` cast:
 
 ```rad
 fn main() -> i32 {
     let big: i64 = 1000
     let small: i32 = big as i32
 
-    let val: u64 = 0xDEADBEEF
+    let val: u64 = 0xDEADBEEFu64
     let as_ptr: *raw u8 = val as *raw u8
     let back_to_num: usize = as_ptr as usize
 
-    println("small = {}, ptr_addr = {}", small, back_to_num)
+    print("small: ")
+    println(small)
+    print("ptr addr: ")
+    println(back_to_num as i64)
     return 0
 }
 ```
 
 ### Common Cast Patterns:
-- Converting numeric width: `val_i64 as i32`, `byte as i64`
-- Casting pointers to integer addresses: `ptr as usize`
-- Casting integer addresses to raw pointers: `addr as *raw u8`
-- Casting byte pointers to string slices: `byte_ptr as str`
+- Numeric width changes: `val_i64 as i32`, `byte as i64`
+- Pointers to integer addresses: `ptr as usize`
+- Integer addresses to raw pointers: `addr as *raw u8`
+- Byte pointers to string references: `byte_ptr as str`

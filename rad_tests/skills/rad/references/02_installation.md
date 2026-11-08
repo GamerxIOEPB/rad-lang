@@ -10,12 +10,12 @@ curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/i
 
 ### What the Installer Does:
 1. Detects your host architecture (`x86_64`) and operating system (`Linux`).
-2. Downloads the official release archive (`rad-0.1.0-x86_64-unknown-linux-gnu.tar.gz`) from GitHub Releases.
+2. Downloads the official release archive (`rad-0.2.0-x86_64-unknown-linux-gnu.tar.gz`) from GitHub Releases.
 3. Verifies the cryptographic SHA-256 integrity hash against `SHA256SUMS`.
-4. Extracts all binaries, libraries, target sysroots, and LLVM tools to `~/.rad`.
-5. Automatically configures your shell environment (`~/.bashrc`, `~/.zshrc`, or `~/.profile`) to add `~/.rad/bin` to your `PATH`.
+4. Extracts all binaries, libraries, standard library modules, target sysroots, and embedded LLVM runtime components to `~/.rad`.
+5. Automatically configures your shell environment (`~/.bashrc`, `~/.zshrc`, or `~/.profile`) to ensure `~/.rad/bin` is exported in your `PATH`.
 
-To verify your installation in the current terminal, source your shell profile or restart your terminal:
+To activate your installation in the current terminal, source your shell profile or open a new terminal session:
 
 ```bash
 source ~/.bashrc
@@ -25,8 +25,8 @@ radc --version
 
 Expected output:
 ```text
-rad 0.1.0 (x86_64-unknown-linux-gnu)
-radc 0.1.0 (self-hosted x86_64-unknown-linux-gnu)
+rad 0.2.0 (x86_64-unknown-linux-gnu)
+radc 0.2.0 (self-hosted x86_64-unknown-linux-gnu)
 ```
 
 ---
@@ -39,14 +39,14 @@ Rad provides an integrated diagnostic doctor command that verifies every compone
 rad doctor
 ```
 
-Output:
+Expected diagnostic output:
 ```text
 Rad Toolchain Doctor
 ====================
 
   [OK] radc compiler: found (/home/username/.rad/bin/radc)
-  [OK] LLVM backend (rad-llc): found
-  [OK] Linker (rad-lld): found
+  [OK] Embedded LLVM & LLD backend: integrated in-process
+  [OK] Standard library sources: verified at /home/username/.rad/lib/rad
   [OK] Target sysroot (x86_64-unknown-linux-musl): verified at /home/username/.rad/lib/targets/x86_64-unknown-linux-musl
 
 Status: Toolchain is healthy and ready for self-contained native compilation.
@@ -73,26 +73,29 @@ curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/i
 
 ## 2.4 Building from Source
 
-If you prefer building the toolchain from source repository:
+If you prefer building the toolchain directly from source:
 
 ### Prerequisites:
 - Git
-- GNU Make
-- Host Clang & LLVM development libraries
-- Existing `radc` compiler (or reference compiler)
+- GNU Make (`make`)
+- Host Clang & LLVM development libraries (LLVM 18+ or 23+)
+- Existing `radc` compiler or prebuilt bootstrap
 
 ### Build Steps:
 ```bash
-# Clone the repository
+# Clone the official repository
 git clone https://github.com/GamerxIOEPB/rad-lang.git
 cd rad-lang
 
-# Build all binaries (compiler, package manager, static PIE launchers)
+# Build all binaries (compiler with embedded backend, package manager, launchers)
 make all
 
 # Verify the freshly built binaries in bin/
 ./bin/radc --version
 ./bin/rad doctor
+
+# Run regression test suite (152 tests)
+bash rad_tests/radtest/runner/run_tests.sh
 
 # Install into default prefix (~/.rad)
 make install
@@ -108,19 +111,21 @@ When installed into `~/.rad`, the directory structure is organized as follows:
 ~/.rad/
 ├── bin/
 │   ├── rad           # Rad package manager & build orchestrator
-│   ├── radc          # Self-hosted native Rad compiler
-│   ├── rad-llc       # Static PIE launcher for LLVM code generation
-│   ├── rad-lld       # Static PIE launcher for LLD GNU linker
-│   ├── rad-clang     # Bundled C compiler launcher
-│   └── rad-clang++   # Bundled C++ compiler launcher
+│   ├── radc          # Self-hosted native compiler with embedded LLVM & LLD
+│   ├── rad-clang     # Static PIE C compiler launcher
+│   └── rad-clang++   # Static PIE C++ compiler launcher
 ├── lib/
-│   ├── llvm/         # Real LLVM binaries (llc_real, ld.lld_real, clang) and shared libs
+│   ├── llvm/         # Embedded LLVM runtime libraries and headers
 │   ├── clang/        # Clang resource headers (stddef.h, stdarg.h, etc.)
-│   ├── rad/          # Rad standard library sources (core, alloc, std)
+│   ├── rad/          # Rad standard library sources
+│   │   ├── core/     # Fundamental types, options, results, math
+│   │   ├── alloc/    # Dynamic collections (String, Vec)
+│   │   └── std/      # Terminal, keyboard, console, time, io, fs, process
 │   └── targets/
 │       └── x86_64-unknown-linux-musl/
 │           ├── crt/  # C runtime startup objects (rcrt1.o, crti.o, crtn.o)
-│           └── lib/  # Static libraries (libc.a, libclang_rt.builtins-x86_64.a, libunwind.a)
+│           ├── include/ # C headers
+│           └── lib/  # Static libraries (libc.a, libclang_rt.builtins-x86_64.a)
 └── share/
     └── rad/          # License manifests, release metadata, and targets.toml
 ```
@@ -134,3 +139,4 @@ The toolchain respects the following environment variables:
 - **`RAD_HOME`**: Overrides the installation directory prefix (default: `~/.rad`).
 - **`PATH`**: Ensure `$RAD_HOME/bin` is in your `PATH`.
 - **`RADC`**: Explicit path to the `radc` binary used when executing `make` or build scripts.
+- **`RAD_LIB_DIR`**: Explicit path override for the standard library sources.

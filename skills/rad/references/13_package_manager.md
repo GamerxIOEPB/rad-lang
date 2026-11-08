@@ -15,7 +15,7 @@ Commands:
   test         Run tests for the package
   check        Analyze package for errors without compiling
   clean        Remove target build directory
-  doctor       Inspect and verify bundled toolchain and target sysroot
+  doctor       Inspect and verify compiler, embedded backend, and sysroot
 ```
 
 ---
@@ -42,23 +42,23 @@ rad init
 ```
 
 ### 3. `rad check`
-Checks all source files in the project for lexical, syntactic, and structural errors using `radc --check`. Does not invoke code generation or linking, making it instant:
+Checks all source files in the project for lexical, syntactic, and structural errors using `radc --check`. Does not invoke code generation or linking, making it near-instant:
 
 ```bash
 rad check
 ```
 
 ### 4. `rad build`
-Compiles the project into an executable or library artifact:
+Compiles the project into an executable or library artifact using `radc`'s embedded LLVM and LLD engine:
 
 ```bash
-# Debug build (LLVM -O0, places output in target/debug/main)
+# Debug build (places output in target/debug/main)
 rad build
 
 # Production release build (LLVM -O3, places output in target/release/main)
 rad build --release
 
-# Cross-compilation target override:
+# Explicit target override:
 rad build --target x86_64-unknown-linux-musl
 ```
 
@@ -68,22 +68,42 @@ Builds and executes the project's primary binary in one step:
 ```bash
 rad run
 
-# Run with arguments:
+# Run with arguments passed to the application:
 rad run -- --port 8080 --verbose
 ```
 
-### 6. `rad clean`
-Removes the `target/` directory containing intermediate objects, bitcode, and final binaries:
+### 6. `rad test`
+Executes test functions and verification suites defined in the package:
+
+```bash
+rad test
+```
+
+### 7. `rad clean`
+Removes the `target/` directory containing intermediate objects and final binaries:
 
 ```bash
 rad clean
 ```
 
-### 7. `rad doctor`
-Verifies all components of the Rad toolchain, ensuring that `radc`, `rad-llc`, `rad-lld`, and the Musl target sysroot are present and correctly configured:
+### 8. `rad doctor`
+Verifies all components of the Rad toolchain, ensuring that `radc` (with its embedded LLVM and LLD backend), standard library sources, and the Musl target sysroot are present and correctly configured:
 
 ```bash
 rad doctor
+```
+
+Output:
+```text
+Rad Toolchain Doctor
+====================
+
+  [OK] radc compiler: found (/home/username/.rad/bin/radc)
+  [OK] Embedded LLVM & LLD backend: integrated in-process
+  [OK] Standard library sources: verified at /home/username/.rad/lib/rad
+  [OK] Target sysroot (x86_64-unknown-linux-musl): verified at /home/username/.rad/lib/targets/x86_64-unknown-linux-musl
+
+Status: Toolchain is healthy and ready for self-contained native compilation.
 ```
 
 ---
@@ -95,7 +115,7 @@ Every Rad package root contains a `rad.toml` manifest file:
 ```toml
 [package]
 name = "my_app"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2026"
 
 [dependencies]

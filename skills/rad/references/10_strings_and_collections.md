@@ -2,18 +2,18 @@
 
 ## 10.1 The Built-In `String` Type
 
-Rad provides a heap-allocated, dynamically resizable `String` type built directly into the compiler's code generator.
+Rad provides a heap-allocated, dynamically resizable `String` type built directly into the compiler's standard library and code generator.
 
 ### Creating Strings
-- **`String.new()`**: Creates a new empty dynamic string with initial preallocated heap capacity.
-- **`String.from_str(s: str)`**: Creates a dynamic string initialized with a copy of an existing string literal or slice.
+- **`String::new()`**: Creates a new empty dynamic string with initial preallocated heap capacity.
+- **`String::from_str(s: str)`**: Creates a dynamic string initialized with a copy of an existing string literal or slice.
 
 ```rad
 fn main() -> i32 {
-    var s1 = String.new()
-    var s2 = String.from_str("Hello, Rad!")
+    var s1 = String::new()
+    var s2 = String::from_str("Hello, Rad!")
 
-    println("s2 = {}", s2.as_ptr())
+    println(s2.as_ptr())
     return 0
 }
 ```
@@ -26,12 +26,14 @@ fn main() -> i32 {
 
 ```rad
 fn main() -> i32 {
-    var greeting = String.from_str("Welcome")
+    var greeting = String::from_str("Welcome")
     greeting.push_str(" to the Rad Language")
     greeting.push_byte(33u8) // '!'
 
-    println("Text: {}", greeting.as_ptr())
-    println("Byte count: {}", greeting.len())
+    print("Text: ")
+    println(greeting.as_ptr())
+    print("Byte count: ")
+    println(greeting.len())
     return 0
 }
 ```
@@ -46,36 +48,43 @@ Byte count: 28
 
 ## 10.2 The Built-In `Vec` Type
 
-Rad provides a dynamically resizable heap vector (`Vec`) for sequential collections:
+Rad provides a dynamically resizable heap vector (`Vec<T>`) for sequential collections:
 
 ### Creating Vectors
-- **`Vec.new()`**: Allocates a new vector with initial capacity.
+- **`Vec::new()`**: Allocates a new vector with initial default capacity.
 
 ### Vector Operations
-- **`v.push(item: i64)`**: Appends an element to the end of the vector, doubling capacity when full.
-- **`v.pop() -> i64`**: Removes and returns the last element from the vector (returns `0` if empty).
+- **`v.push(item: T)`**: Appends an element to the end of the vector, doubling capacity when full.
+- **`v.pop() -> T`**: Removes and returns the last element from the vector.
+- **`v.get(index: usize) -> T`**: Retrieves the element at the specified index.
 - **`v.len`**: Struct field containing the current number of elements in the vector.
 - **`v.cap`**: Struct field containing the allocated capacity.
-- **`v.ptr`**: Raw pointer to the element array (`*raw i64` or `*raw u8`).
+- **`v.ptr`**: Raw pointer to the element array (`*raw T`).
 
 ```rad
 fn main() -> i32 {
-    var numbers = Vec.new()
+    var numbers: Vec<i32> = Vec::new()
 
     // Append items
     numbers.push(10)
     numbers.push(20)
     numbers.push(30)
 
-    println("Vector length: {}", numbers.len)
+    print("Vector length: ")
+    println(numbers.len)
 
-    // Access elements via raw pointer:
-    let p: *raw i64 = numbers.ptr as *raw i64
-    println("numbers[0] = {}, numbers[1] = {}", p[0usize], p[1usize])
+    // Access elements via get():
+    print("numbers[0]: ")
+    println(numbers.get(0usize))
+    print("numbers[1]: ")
+    println(numbers.get(1usize))
 
     // Pop the last element:
     let last = numbers.pop()
-    println("Popped item: {}, remaining count: {}", last, numbers.len)
+    print("Popped item: ")
+    println(last)
+    print("Remaining count: ")
+    println(numbers.len)
 
     return 0
 }
@@ -84,40 +93,40 @@ fn main() -> i32 {
 Output:
 ```text
 Vector length: 3
-numbers[0] = 10, numbers[1] = 20
-Popped item: 30, remaining count: 2
+numbers[0]: 10
+numbers[1]: 20
+Popped item: 30
+Remaining count: 2
 ```
 
 ---
 
-## 10.3 Formatted Printing with `println()`
+## 10.3 Standard Output Printing (`print`, `println`)
 
-Rad's `println()` function provides two complementary formatting modes:
-
-### 1. Positional `{}` Placeholders
-Pass a format template string followed by the arguments to print:
+Rad provides built-in `print()` and `println()` functions that accept strings, integers, and primitive values:
 
 ```rad
-let name: str = "Alice"
-let age: i32 = 30
-let city: str = "Zurich"
+fn main() -> i32 {
+    let title: str = "Player Status"
+    let score: i64 = 4500
+    let alive: bool = true
 
-println("Name: {}, Age: {}, City: {}", name, age, city)
-```
+    println(title)
+    print("Score: ")
+    println(score)
 
-### 2. Variable Interpolation (`{var_name}`)
-When passing a single template string, Rad automatically expands `{variable}` patterns:
-
-```rad
-let width: i64 = 1920
-let height: i64 = 1080
-
-println("Resolution: {width} x {height}")
+    if alive {
+        println("Status: ALIVE")
+    }
+    return 0
+}
 ```
 
 Output:
 ```text
-Resolution: 1920 x 1080
+Player Status
+Score: 4500
+Status: ALIVE
 ```
 
 ---
@@ -127,6 +136,10 @@ Resolution: 1920 x 1080
 For complex C-style format specifiers (`%08x`, `%.2f`, `%p`), you can call the standard libc `printf` function directly:
 
 ```rad
+extern "C" {
+    fn printf(fmt: str, ...) -> i32;
+}
+
 fn main() -> i32 {
     let hex_val: i64 = 255
     printf("Hexadecimal: 0x%04X\n", hex_val)

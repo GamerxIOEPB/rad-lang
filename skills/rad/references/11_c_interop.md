@@ -5,40 +5,32 @@
 Rad does not treat C as an afterthought or an awkward foreign interface. Rad is designed with **mechanical sympathy** for the C ABI:
 
 - Primitive integers (`i32`, `i64`, `u8`, `usize`) directly map to C hardware types (`int32_t`, `int64_t`, `uint8_t`, `size_t`).
-- Pointers (`*raw u8`, `*raw var T`) use standard 64-bit machine pointer representation.
+- Pointers (`*raw u8`, `*raw T`) use standard 64-bit machine pointer representation.
 - Functions adhere strictly to the System V AMD64 ABI calling convention on Linux.
-- Executables statically link against Musl libc (`libc.a`).
+- Executables statically link against the canonical Musl libc (`libc.a`).
 
 As a result, calling C functions from Rad—or calling Rad functions from C—incurs **zero runtime conversion overhead, zero boxing, and zero marshaling layers**.
 
 ---
 
-## 11.2 Built-In C Standard Library Functions
+## 11.2 Declaring Foreign C Functions (`extern "C"`)
 
-The Rad compiler's code generator automatically declares and links the most common POSIX / C standard library routines into every generated binary:
+To declare C library functions or functions implemented in external C object files, use the `extern "C"` block:
 
-| Function | Signature in Rad / LLVM | Purpose |
-| :--- | :--- | :--- |
-| `puts(s: str) -> i32` | `declare i32 @puts(ptr)` | Prints string followed by newline |
-| `printf(fmt: str, ...) -> i32` | `declare i32 @printf(ptr, ...)` | Formatted C printing |
-| `system(cmd: str) -> i32` | `declare i32 @system(ptr)` | Executes a shell command via `sh` |
-| `malloc(bytes: usize) -> *raw var u8` | `declare ptr @malloc(i64)` | Allocates heap memory |
-| `realloc(p: *raw u8, bytes: usize) -> *raw var u8` | `declare ptr @realloc(ptr, i64)` | Resizes allocated heap memory |
-| `free(p: *raw u8)` | `declare void @free(ptr)` | Deallocates heap memory |
-| `fopen(path: str, mode: str) -> *raw u8` | `declare ptr @fopen(ptr, ptr)` | Opens a file stream |
-| `fclose(fp: *raw u8) -> i32` | `declare i32 @fclose(ptr)` | Closes a file stream |
-| `fread(buf: *raw var u8, sz: i64, n: i64, fp: *raw u8) -> i64` | `declare i64 @fread(ptr, i64, i64, ptr)` | Reads binary data from stream |
-| `fwrite(buf: *raw u8, sz: i64, n: i64, fp: *raw u8) -> i64` | `declare i64 @fwrite(ptr, i64, i64, ptr)` | Writes binary data to stream |
-| `fseek(fp: *raw u8, off: i64, whence: i32) -> i32` | `declare i32 @fseek(ptr, i64, i32)` | Seeks stream position |
-| `ftell(fp: *raw u8) -> i64` | `declare i64 @ftell(ptr)` | Returns stream offset |
-| `getenv(name: str) -> str` | `declare ptr @getenv(ptr)` | Reads environment variable |
-
-### Example: Reading an Environment Variable and Running a Subprocess
 ```rad
+extern "C" {
+    fn puts(s: str) -> i32;
+    fn getenv(name: str) -> str;
+    fn system(cmd: str) -> i32;
+    fn malloc(size: usize) -> *raw u8;
+    fn free(ptr: *raw u8) -> void;
+}
+
 fn main() -> i32 {
     let user = getenv("USER")
     if (user as usize) != 0usize {
-        println("Current Linux user: {}", user)
+        print("Current user: ")
+        println(user)
     }
 
     // Call libc system() directly:
@@ -49,52 +41,75 @@ fn main() -> i32 {
 
 ---
 
-## 11.3 Compiling & Linking C Code with Rad
+## 11.3 Struct Memory Layout & C Interoperability
 
-When your project includes custom C algorithms, hardware device drivers, or third-party C libraries:
+Rad structs have standard C memory layout without hidden padding or metadata headers. A Rad struct can be passed directly by pointer to C functions:
 
-### Step 1: Write Your C Code
-Create `native_math.c`:
+### 1. In C Header / Implementation (`matrix.c`):
 ```c
-// native_math.c
+// matrix.c
 #include <stdint.h>
 
-int64_t native_fast_add(int64_t a, int64_t b) {
-    return (a * 2) + (b * 2);
+struct Vector2D {
+    int64_t x;
+    int64_t y;
+};
+
+int64_t vector_dot(const struct Vector2D* a, const struct Vector2D* b) {
+    return (a->x * b->x) + (a->y * b->y);
 }
 ```
 
-### Step 2: Compile C Object with `rad-clang`
-Use Rad's bundled C compiler:
-```bash
-rad-clang -c native_math.c -o native_math.o
-```
-
-### Step 3: Call and Link in Rad
-Create `main.rad`:
+### 2. In Rad (`main.rad`):
 ```rad
 // main.rad
-fn native_fast_add(a: i64, b: i64) -> i64 {
-    // Linked symbol from native_math.o
-    return 0
+struct Vector2D {
+    x: i64,
+    y: i64,
+}
+
+extern "C" {
+    fn vector_dot(a: *raw Vector2D, b: *raw Vector2D) -> i64;
 }
 
 fn main() -> i32 {
-    let res = native_fast_add(10, 20)
-    println("Native math result: {res}")
+    let v1 = Vector2D { x: 3, y: 4 }
+    let v2 = Vector2D { x: 2, y: 5 }
+
+    let dot = vector_dot(&v1 as *raw Vector2D, &v2 as *raw Vector2D)
+    print("Vector dot product: ")
+    println(dot)
     return 0
 }
-```
-
-Compile and link everything in one command:
-```bash
-radc main.rad native_math.o -o my_app
-./my_app
 ```
 
 ---
 
-## 11.4 Compiling C++ with `rad-clang++`
+## 11.4 Compiling & Linking C Code with Rad
+
+When your project includes custom C algorithms, hardware device drivers, or third-party C libraries:
+
+### Step 1: Compile C Object with `rad-clang`
+Use Rad's bundled C compiler:
+```bash
+rad-clang -c matrix.c -o matrix.o
+```
+
+### Step 2: Compile and Link with `radc`
+Pass the compiled `.o` file directly to `radc`:
+```bash
+radc main.rad matrix.o -o my_app
+./my_app
+```
+
+Output:
+```text
+Vector dot product: 26
+```
+
+---
+
+## 11.5 Compiling C++ with `rad-clang++`
 
 Rad bundles `rad-clang++` alongside `rad-clang`, complete with bundled C++ standard library headers.
 
@@ -103,7 +118,7 @@ To compile C++ translation units:
 rad-clang++ -c helper.cpp -o helper.o
 ```
 
-When linking C++ objects that use the standard C++ library (`std::string`, `std::vector`, `std::cout`), link with `-lstdc++` or `-lc++`:
+When linking C++ objects that use the standard C++ library (`std::string`, `std::vector`, `std::cout`), pass `-lstdc++` or `-lc++`:
 ```bash
-radc main.rad helper.o --linker "rad-clang++ -static" -o my_cpp_app
+radc main.rad helper.o -o my_cpp_app
 ```

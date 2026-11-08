@@ -23,22 +23,23 @@ fn main() -> i32 {
 ```
 
 ### Key Rules:
-- The condition expression must evaluate to a `bool`.
-- Parentheses around the condition are optional (`if x > 0` vs `if (x > 0)`).
-- The curly braces `{ ... }` around the then-block and else-block are **mandatory**, eliminating classic C "dangling else" vulnerabilities.
+- The condition expression must strictly evaluate to a `bool`.
+- Parentheses around conditions are optional (`if x > 0` or `if (x > 0)`).
+- The curly braces `{ ... }` around the body and else blocks are **mandatory**, eliminating classic C "dangling else" vulnerabilities.
 
 ---
 
 ## 6.2 While Loops (`while`)
 
-Rad provides the `while` loop for repeated execution while a Boolean condition remains `true`:
+Rad provides the `while` loop for repeated execution while a Boolean condition evaluates to `true`:
 
 ```rad
 fn main() -> i32 {
     var counter: i64 = 0
 
     while counter < 5 {
-        println("Iteration: {counter}")
+        print("Iteration: ")
+        println(counter)
         counter = counter + 1
     }
 
@@ -62,7 +63,7 @@ Loop completed.
 ## 6.3 Loop Control (`break` & `continue`)
 
 ### The `break` Statement
-`break` immediately exits the enclosing loop:
+`break` immediately terminates and exits the enclosing loop:
 
 ```rad
 fn main() -> i32 {
@@ -70,9 +71,10 @@ fn main() -> i32 {
 
     while true {
         if i >= 4 {
-            break // Exits the loop when i reaches 4
+            break // Exits loop when i reaches 4
         }
-        println("i = {i}")
+        print("i = ")
+        println(i)
         i = i + 1
     }
 
@@ -93,7 +95,8 @@ fn main() -> i32 {
         if i % 2 == 0 {
             continue // Skip even numbers
         }
-        println("Odd number: {i}")
+        print("Odd number: ")
+        println(i)
     }
 
     return 0
@@ -111,17 +114,56 @@ Odd number: 9
 
 ---
 
-## 6.4 Infinite Loops
+## 6.4 Nested Loops & Grid Traversal
 
-You can write infinite service loops or polling loops using `while true`:
+Nested loops are common for 2D matrix, game board, and console buffer rendering:
 
 ```rad
-fn poll_events() {
+fn render_grid(width: i32, height: i32) {
+    var y = 0
+    while y < height {
+        var x = 0
+        while x < width {
+            if x == 0 || x == width - 1 || y == 0 || y == height - 1 {
+                print("#")
+            } else {
+                print(".")
+            }
+            x = x + 1
+        }
+        println("")
+        y = y + 1
+    }
+}
+
+fn main() -> i32 {
+    render_grid(8, 4)
+    return 0
+}
+```
+
+Output:
+```text
+########
+#......#
+#......#
+########
+```
+
+---
+
+## 6.5 Infinite Loops & Game Loops
+
+Interactive game loops, service polling, and event listeners use `while true` with explicit exit conditions:
+
+```rad
+fn run_engine() {
     var running: bool = true
+    var frame_count: i64 = 0
+
     while running {
-        // Poll event queue
-        let should_exit = check_exit_signal()
-        if should_exit {
+        frame_count = frame_count + 1
+        if frame_count >= 1000 {
             running = false
             break
         }

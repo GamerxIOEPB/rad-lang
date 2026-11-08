@@ -31,6 +31,10 @@ RADC_FLAGS ?= -O2
 RAD_FLAGS  ?= -O2
 PREFIX     ?= $(HOME)/.rad
 
+# LLVM compilation and link flags
+LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags 2>/dev/null || echo "-I$(PREFIX)/include")
+LLVM_LDFLAGS  ?= $(shell llvm-config --ldflags 2>/dev/null || echo "")
+
 # Host & target triples
 TARGET_TRIPLE ?= x86_64-unknown-linux-musl
 SYSROOT       ?= lib/targets/$(TARGET_TRIPLE)
@@ -90,7 +94,7 @@ $(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp
 	elif [ -x "$(PREFIX)/bin/rad-clang++" ] && $(PREFIX)/bin/rad-clang++ --version >/dev/null 2>&1; then \
 		$(PREFIX)/bin/rad-clang++ -c -O2 -fPIC $(RADC_DIR)/backend_bridge.cpp -o $(BIN_DIR)/backend_bridge.o; \
 	else \
-		clang++ -c -O2 -fPIC $(RADC_DIR)/backend_bridge.cpp -o $(BIN_DIR)/backend_bridge.o; \
+		clang++ -c -O2 -fPIC $(LLVM_CXXFLAGS) $(RADC_DIR)/backend_bridge.cpp -o $(BIN_DIR)/backend_bridge.o; \
 	fi
 	@echo "==> Compiling self-hosted compiler ($@) using $(RADC)..."
 	@if $(RADC) --version 2>&1 | grep -q "0.2"; then \
@@ -102,7 +106,7 @@ $(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp
 	@if [ -x "$(PREFIX)/bin/rad-clang++" ] && $(PREFIX)/bin/rad-clang++ --version >/dev/null 2>&1; then \
 		$(PREFIX)/bin/rad-clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldCommon -o $(BIN_RADC); \
 	else \
-		clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldCommon -o $(BIN_RADC); \
+		clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o $(LLVM_LDFLAGS) -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldCommon -o $(BIN_RADC); \
 	fi
 	@chmod 755 $(BIN_RADC)
 

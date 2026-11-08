@@ -13,14 +13,15 @@ radc <file1.rad> [file2.rad ...] [options]
 | Flag | Description | Default |
 | :--- | :--- | :--- |
 | `-o <path>` | Set output binary path or object path | Auto-named / `a.out` |
+| `-c` | Compile source files to a relocatable object file (`.o`) without linking | Disabled |
 | `-O0` | Disable LLVM optimizations for fastest compile speed | — |
 | `-O1` | Basic optimizations | — |
 | `-O2` | Standard production optimization (recommended) | **Default** |
-| `-O3` | Aggressive optimization (vectorization, loop unrolling) | — |
+| `-O3` | Aggressive optimization (auto-vectorization, loop unrolling) | — |
 | `--emit-llvm`, `--emit-ir` | Emit textual LLVM IR (`.tmp.ll`) without assembling or linking | Disabled |
 | `--check` | Lex and parse all inputs to verify syntax and types without code generation | Disabled |
-| `--target <triple>` | Set compilation target architecture | `x86_64-unknown-linux-gnu` |
-| `--linker <cmd>` | Override the default linker cascade with a custom command | Bundled `rad-lld` |
+| `--target <triple>` | Set compilation target architecture | `x86_64-unknown-linux-musl` |
+| `--sysroot <dir>` | Override canonical target sysroot directory | Autodetected via `$RAD_HOME` |
 | `-V`, `--version` | Display compiler version and build information | — |
 
 ---
@@ -33,13 +34,13 @@ Because `radc` directly emits textual LLVM IR, you can inspect the exact low-lev
 radc main.rad --emit-llvm -o main.ll
 ```
 
-Open `main.ll` to see the generated LLVM IR:
+Open `main.ll` to inspect the generated SSA instructions:
 
 ```llvm
 ; ModuleID = 'radc_compiled'
 source_filename = "rad"
 target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
-target triple = "x86_64-unknown-linux-gnu"
+target triple = "x86_64-unknown-linux-musl"
 
 declare ptr @malloc(i64)
 declare void @free(ptr)
@@ -51,26 +52,29 @@ This is invaluable for systems engineers wanting to verify zero-overhead abstrac
 
 ---
 
-## 12.3 The Static PIE Linker Cascade
+## 12.3 Embedded In-Process LLVM & LLD Backend Engine
 
-When linking an executable, `radc` executes a two-stage cascade:
+Starting in Rad 0.2.0, `radc` does not invoke external CLI subprocesses (`rad-llc` or `rad-lld`). Instead, `radc` directly embeds the LLVM and LLD libraries in-process via a C++ backend bridge:
 
-1. **Object Assembly**:
-   ```bash
-   rad-llc -filetype=obj -relocation-model=pic -O2 input.tmp.ll -o output.o
-   ```
-2. **Static PIE Linking**:
-   ```bash
-   rad-lld -flavor gnu -m elf_x86_64 -static -pie --no-dynamic-linker -z text -z noexecstack \
-       -o output \
-       $SYSROOT/crt/rcrt1.o \
-       $SYSROOT/crt/crti.o \
-       output.o \
-       -L$SYSROOT/lib \
-       --start-group $SYSROOT/lib/libc.a $SYSROOT/lib/libclang_rt.builtins-x86_64.a --end-group \
-       $SYSROOT/crt/crtn.o
-   ```
+### 1. In-Process LLVM TargetMachine Object Emission
+When compiling an executable or object file, `radc`:
+1. Constructs the complete textual LLVM IR in memory.
+2. Invokes LLVM's C API (`LLVMParseIRInContext2`, `LLVMCreateTargetMachine`).
+3. Emits relocatable machine code (`.o`) directly to the build target using LLVM's `LLVMTargetMachineEmitToFile`.
 
-### Why Position-Independent Executables (PIE)?
-- **Full ASLR (Address Space Layout Randomization)**: The Linux kernel loads the code, stack, and heap at randomized memory addresses for defense against buffer overflows and ROP (Return-Oriented Programming) attacks.
-- **Static Linking**: Musl's `rcrt1.o` initializes the static executable's own relocations at runtime without requiring an external dynamic linker (`/lib64/ld-linux-x86-64.so.2`).
+### 2. In-Process LLD ELF Static PIE Linking
+For final binary linking, `radc` invokes the embedded LLD driver (`lld::elf::link`) in-process:
+- Relocation model: **Static Position-Independent Executable (`static-pie`)**
+- Sysroot assets linked:
+  - Startup objects: `rcrt1.o`, `crti.o`, `crtn.o`
+  - Runtime libraries: `libc.a` (Musl), `libclang_rt.builtins-x86_64.a`
+- Linker flags: `--no-dynamic-linker -z text -z noexecstack`
+
+This architecture eliminates all process fork/exec overhead, avoids temporary bitcode disk thrashing, and yields instant single-command compilation.
+
+---
+
+## 12.4 Why Position-Independent Executables (Static PIE)?
+
+- **Full ASLR (Address Space Layout Randomization)**: The Linux kernel loads the executable code, stack, and heap at randomized memory addresses, preventing Return-Oriented Programming (ROP) and code injection exploits.
+- **Zero Shared Library Dependencies**: Executables contain their own startup relocator (`rcrt1.o`) and standard C library (`libc.a`). There is no dynamic linker dependency (`no PT_INTERP` / `no /lib64/ld-linux-x86-64.so.2`), allowing the same binary to run effortlessly across Alpine Linux, Ubuntu, Debian, Fedora, Arch Linux, and container roots.

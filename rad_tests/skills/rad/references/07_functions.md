@@ -10,7 +10,8 @@ fn add(a: i64, b: i64) -> i64 {
 }
 
 fn greet(name: str) {
-    println("Hello, {}!", name)
+    print("Hello, ")
+    println(name)
 }
 ```
 
@@ -20,7 +21,7 @@ If a function does not return a value, the `-> Type` annotation can be omitted (
 
 ## 7.2 The `return` Statement
 
-In Rad, functions that return a value must explicitly use the `return` statement:
+In Rad, functions that produce a result value must explicitly use the `return` statement:
 
 ```rad
 fn max_val(a: i64, b: i64) -> i64 {
@@ -32,7 +33,7 @@ fn max_val(a: i64, b: i64) -> i64 {
 }
 ```
 
-Functions can also use early returns for guard clauses:
+Functions can also use early returns for defensive guard clauses:
 
 ```rad
 fn compute_ratio(numerator: i64, denominator: i64) -> i64 {
@@ -53,7 +54,8 @@ Function arguments are immutable by default within the function body. If a param
 ```rad
 fn countdown(var count: i64) {
     while count > 0 {
-        println("T-minus {count}...")
+        print("T-minus: ")
+        println(count)
         count = count - 1
     }
     println("Liftoff!")
@@ -70,14 +72,37 @@ When authoring multi-file projects or reusable libraries, items that should be a
 
 ```rad
 pub fn calculate_hash(data: *raw u8, len: usize) -> u64 {
-    // Implementation
-    return 0u64
+    var hash = 14695981039346656037u64
+    var i = 0usize
+    while i < len {
+        hash = (hash ^ (data[i] as u64)) * 1099511628211u64
+        i = i + 1
+    }
+    return hash
 }
 ```
 
 ---
 
-## 7.5 The `main` Entry Point
+## 7.5 Recursion
+
+Rad functions fully support recursion:
+
+```rad
+pub fn fibonacci(n: i64) -> i64 {
+    if n <= 0 {
+        return 0
+    }
+    if n == 1 {
+        return 1
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2)
+}
+```
+
+---
+
+## 7.6 The `main` Entry Point
 
 Every executable Rad program begins execution at the `main` function. Rad supports two valid signatures for `main`:
 
@@ -101,13 +126,17 @@ To receive command-line arguments passed from the operating system shell:
 
 ```rad
 fn main(argc: i32, argv: *raw *raw u8) -> i32 {
-    println("Program name: {}", argv[0usize] as str)
-    println("Argument count: {}", argc)
+    print("Program name: ")
+    println(argv[0usize] as str)
+
+    print("Argument count: ")
+    println(argc)
 
     var i: usize = 1usize
     while i < (argc as usize) {
         let arg_str: str = argv[i] as str
-        println("Arg #{}: {}", i, arg_str)
+        print("Arg: ")
+        println(arg_str)
         i = i + 1usize
     }
 
@@ -118,4 +147,4 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
 Here:
 - `argc`: Number of arguments (including program name at index 0).
 - `argv`: Raw pointer to an array of null-terminated C string pointers (`*raw *raw u8`).
-- Returning an integer value sets the Linux process exit status (returned to the calling shell via `$?`).
+- Returning an integer value sets the Linux process exit status (inspectable via `$?` in bash).
