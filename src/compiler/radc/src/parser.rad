@@ -1432,11 +1432,19 @@ impl Parser {
                 self.match_tok(TOK_COLON)
                 let _ty = self.parse_type_str()
                 self.match_tok(TOK_EQ)
+                var is_neg = false
+                if self.peek_kind() == TOK_MINUS {
+                    is_neg = true
+                    self.advance()
+                }
                 var c_val = 0i64
                 if self.peek_kind() == TOK_FLOAT {
                     c_val = parse_int(self.peek_text())
                 } else {
                     c_val = self.peek_int()
+                }
+                if is_neg {
+                    c_val = 0i64 - c_val
                 }
                 self.advance()
                 self.match_tok(TOK_SEMI)

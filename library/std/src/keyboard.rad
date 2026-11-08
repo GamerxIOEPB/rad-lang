@@ -4,7 +4,7 @@
 // Zero C, zero libc, zero external library dependencies.
 // ==============================================================================
 
-pub const KEY_EOF: i32        = -1
+pub const KEY_EOF: i32        = 99
 pub const KEY_NONE: i32       = 0
 pub const KEY_CHAR: i32       = 1
 pub const KEY_ENTER: i32      = 2
