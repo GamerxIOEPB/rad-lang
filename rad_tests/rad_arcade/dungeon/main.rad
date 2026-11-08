@@ -572,20 +572,20 @@ fn main() {
 
         // Turn-based input: wait for keypress
         let evt = kbd.read_key(50)
-        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
+        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_char(81u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', 'Q', Ctrl+C, EOF
             running = false
         } else if !game.game_over && !game.won {
-            if evt.code == KEY_UP || evt.is_char(119u8) || evt.is_char(107u8) { // Up / 'w' / 'k'
+            if evt.code == KEY_UP || evt.is_char(119u8) || evt.is_char(87u8) { // Up / 'w' / 'W'
                 game.try_move(0, -1)
-            } else if evt.code == KEY_DOWN || evt.is_char(115u8) || evt.is_char(106u8) { // Down / 's' / 'j'
+            } else if evt.code == KEY_DOWN || evt.is_char(115u8) || evt.is_char(83u8) { // Down / 's' / 'S'
                 game.try_move(0, 1)
-            } else if evt.code == KEY_LEFT || evt.is_char(97u8) || evt.is_char(104u8) { // Left / 'a' / 'h'
+            } else if evt.code == KEY_LEFT || evt.is_char(97u8) || evt.is_char(65u8) { // Left / 'a' / 'A'
                 game.try_move(-1, 0)
-            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) || evt.is_char(108u8) { // Right / 'd' / 'l'
+            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) || evt.is_char(68u8) { // Right / 'd' / 'D'
                 game.try_move(1, 0)
-            } else if evt.is_char(101u8) || evt.is_char(112u8) { // 'e' or 'p' potion
+            } else if evt.is_char(104u8) || evt.is_char(72u8) || evt.is_char(112u8) || evt.is_char(80u8) || evt.is_char(101u8) || evt.is_char(69u8) { // 'h'/'H', 'p'/'P', 'e'/'E': Heal / Potion
                 game.drink_potion()
-            } else if evt.is_char(62u8) { // '>' descend stairs
+            } else if evt.is_char(62u8) || evt.is_char(46u8) { // '>' or '.' descend stairs
                 game.descend_stairs()
             }
         }
