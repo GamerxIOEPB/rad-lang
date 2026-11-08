@@ -1,0 +1,86 @@
+// ==============================================================================
+// Rad Standard Library — Linux System Calls
+// Direct, zero-libc, pure-Rad kernel interface using compiler syscall intrinsics.
+// ==============================================================================
+
+pub const SYS_read: i64            = 0i64
+pub const SYS_write: i64           = 1i64
+pub const SYS_close: i64           = 3i64
+pub const SYS_poll: i64            = 7i64
+pub const SYS_rt_sigaction: i64    = 13i64
+pub const SYS_rt_sigprocmask: i64   = 14i64
+pub const SYS_ioctl: i64           = 16i64
+pub const SYS_nanosleep: i64       = 35i64
+pub const SYS_getpid: i64          = 39i64
+pub const SYS_exit: i64            = 60i64
+pub const SYS_kill: i64            = 62i64
+pub const SYS_clock_gettime: i64   = 228i64
+pub const SYS_clock_nanosleep: i64 = 230i64
+
+pub const STDIN_FILENO: i32  = 0
+pub const STDOUT_FILENO: i32 = 1
+pub const STDERR_FILENO: i32 = 2
+
+pub const CLOCK_REALTIME: i32  = 0
+pub const CLOCK_MONOTONIC: i32 = 1
+
+pub const POLLIN: i16  = 1i16
+pub const POLLOUT: i16 = 4i16
+pub const POLLERR: i16 = 8i16
+pub const POLLHUP: i16 = 16i16
+
+pub const SIGHUP: i32   = 1
+pub const SIGINT: i32   = 2
+pub const SIGQUIT: i32  = 3
+pub const SIGTERM: i32  = 15
+pub const SIGCONT: i32  = 18
+pub const SIGTSTP: i32  = 20
+pub const SIGWINCH: i32 = 28
+
+pub fn sys_read(fd: i32, buf: *raw var u8, count: usize) -> i64 {
+    syscall3(SYS_read, fd as i64, buf, count as i64)
+}
+
+pub fn sys_write(fd: i32, buf: *raw u8, count: usize) -> i64 {
+    syscall3(SYS_write, fd as i64, buf, count as i64)
+}
+
+pub fn sys_close(fd: i32) -> i64 {
+    syscall1(SYS_close, fd as i64)
+}
+
+pub fn sys_ioctl(fd: i32, req: u64, arg: *raw var u8) -> i64 {
+    syscall3(SYS_ioctl, fd as i64, req as i64, arg)
+}
+
+pub fn sys_poll(fds: *raw var u8, nfds: u64, timeout_ms: i32) -> i64 {
+    syscall3(SYS_poll, fds, nfds as i64, timeout_ms as i64)
+}
+
+pub fn sys_clock_gettime(clock_id: i32, tp: *raw var i64) -> i64 {
+    syscall2(SYS_clock_gettime, clock_id as i64, tp)
+}
+
+pub fn sys_nanosleep(req: *raw i64, rem: *raw var i64) -> i64 {
+    syscall2(SYS_nanosleep, req, rem)
+}
+
+pub fn sys_getpid() -> i64 {
+    syscall0(SYS_getpid)
+}
+
+pub fn sys_exit(status: i32) -> i64 {
+    syscall1(SYS_exit, status as i64)
+}
+
+pub fn sys_is_error(res: i64) -> bool {
+    res < 0i64 && res >= -4095i64
+}
+
+pub fn sys_errno(res: i64) -> i32 {
+    if sys_is_error(res) {
+        (-res) as i32
+    } else {
+        0
+    }
+}

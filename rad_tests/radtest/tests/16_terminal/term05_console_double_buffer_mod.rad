@@ -1,0 +1,472 @@
+// ==============================================================================
+// Rad Standard Library — Native Console Rendering Engine
+// Double-buffered cell matrix, ANSI 16/256/TrueColor, zero-flicker batch present.
+// Zero C, zero libc, zero external library dependencies.
+// ==============================================================================
+
+pub fn int_to_str(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0")
+    }
+    var v = val
+    var is_neg = false
+    if v < 0i64 {
+        is_neg = true
+        v = -v
+    }
+    var rev = String.new()
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8
+        rev.push_byte(48u8 + digit)
+        v = v / 10i64
+    }
+    if is_neg {
+        rev.push_byte(45u8) // '-'
+    }
+    var res = String.new()
+    var len = rev.len()
+    let p = rev.as_ptr()
+    while len > 0usize {
+        len = len - 1usize
+        res.push_byte(p[len])
+    }
+    return res
+}
+
+fn con_str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    i
+}
+
+fn con_push_int(var out: String, val: i32) {
+    if val == 0 {
+        out.push_byte(48u8) // '0'
+        return
+    }
+    var v = val
+    if v < 0 {
+        out.push_byte(45u8) // '-'
+        v = -v
+    }
+    let digits = malloc(16usize) as *raw var u8
+    var count = 0usize
+    while v > 0 {
+        let rem = v % 10
+        digits[count] = (48 + rem) as u8
+        v = v / 10
+        count = count + 1usize
+    }
+    while count > 0usize {
+        count = count - 1usize
+        out.push_byte(digits[count])
+    }
+    free(digits as *raw u8)
+}
+
+// ------------------------------------------------------------------------------
+// Color
+// ------------------------------------------------------------------------------
+
+pub const COLOR_TAG_DEFAULT: i32 = 0
+pub const COLOR_TAG_ANSI: i32    = 1
+pub const COLOR_TAG_INDEXED: i32 = 2
+pub const COLOR_TAG_RGB: i32     = 3
+
+pub struct Color {
+    pub tag: i32,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Color {
+    pub fn default() -> Color {
+        Color { tag: COLOR_TAG_DEFAULT, r: 0u8, g: 0u8, b: 0u8 }
+    }
+
+    pub fn ansi(code: u8) -> Color {
+        Color { tag: COLOR_TAG_ANSI, r: code, g: 0u8, b: 0u8 }
+    }
+
+    pub fn indexed(idx: u8) -> Color {
+        Color { tag: COLOR_TAG_INDEXED, r: idx, g: 0u8, b: 0u8 }
+    }
+
+    pub fn rgb(r: u8, g: u8, b: u8) -> Color {
+        Color { tag: COLOR_TAG_RGB, r: r, g: g, b: b }
+    }
+
+    // Standard 16 colors
+    pub fn black() -> Color         { Color.ansi(0u8) }
+    pub fn red() -> Color           { Color.ansi(1u8) }
+    pub fn green() -> Color         { Color.ansi(2u8) }
+    pub fn yellow() -> Color        { Color.ansi(3u8) }
+    pub fn blue() -> Color          { Color.ansi(4u8) }
+    pub fn magenta() -> Color       { Color.ansi(5u8) }
+    pub fn cyan() -> Color          { Color.ansi(6u8) }
+    pub fn white() -> Color         { Color.ansi(7u8) }
+    pub fn bright_black() -> Color  { Color.ansi(8u8) }
+    pub fn bright_red() -> Color    { Color.ansi(9u8) }
+    pub fn bright_green() -> Color  { Color.ansi(10u8) }
+    pub fn bright_yellow() -> Color { Color.ansi(11u8) }
+    pub fn bright_blue() -> Color   { Color.ansi(12u8) }
+    pub fn bright_magenta() -> Color{ Color.ansi(13u8) }
+    pub fn bright_cyan() -> Color   { Color.ansi(14u8) }
+    pub fn bright_white() -> Color  { Color.ansi(15u8) }
+}
+
+// ------------------------------------------------------------------------------
+// Console — Double-buffered 2D Grid
+// ------------------------------------------------------------------------------
+
+pub struct Console {
+    pub width: usize,
+    pub height: usize,
+    pub total_cells: usize,
+    pub front: *raw var u8,
+    pub back: *raw var u8,
+}
+
+impl Console {
+    pub fn new(w: usize, h: usize) -> Console {
+        var width = w
+        var height = h
+        if width == 0usize { width = 80usize }
+        if height == 0usize { height = 24usize }
+        let total = width * height
+        let bytes = total * 16usize
+
+        let f = malloc(bytes) as *raw var u8
+        let b = malloc(bytes) as *raw var u8
+
+        // Initialize front with invalid values so first present renders everything
+        var i = 0usize
+        while i < bytes {
+            f[i] = 255u8
+            b[i] = 0u8
+            i = i + 1usize
+        }
+
+        // Fill back buffer with spaces and default colors
+        var ci = 0usize
+        while ci < total {
+            let off = ci * 16usize
+            b[off] = 32u8 // space
+            ci = ci + 1usize
+        }
+
+        Console {
+            width: width,
+            height: height,
+            total_cells: total,
+            front: f,
+            back: b,
+        }
+    }
+
+    pub fn resize(var self, w: usize, h: usize) {
+        if w == self.width && h == self.height {
+            return
+        }
+        if (self.front as usize) != 0usize { free(self.front as *raw u8) }
+        if (self.back as usize) != 0usize { free(self.back as *raw u8) }
+
+        var width = w
+        var height = h
+        if width == 0usize { width = 80usize }
+        if height == 0usize { height = 24usize }
+        let total = width * height
+        let bytes = total * 16usize
+
+        let f = malloc(bytes) as *raw var u8
+        let b = malloc(bytes) as *raw var u8
+
+        var i = 0usize
+        while i < bytes {
+            f[i] = 255u8
+            b[i] = 0u8
+            i = i + 1usize
+        }
+        var ci = 0usize
+        while ci < total {
+            let off = ci * 16usize
+            b[off] = 32u8
+            ci = ci + 1usize
+        }
+
+        self.width = width
+        self.height = height
+        self.total_cells = total
+        self.front = f
+        self.back = b
+    }
+
+    pub fn clear(var self) {
+        let b = self.back as *raw var u8
+        var ci = 0usize
+        while ci < self.total_cells {
+            let off = ci * 16usize
+            b[off] = 32u8 // space
+            b[off + 1usize] = 0u8 // fg_tag: default
+            b[off + 2usize] = 0u8
+            b[off + 3usize] = 0u8
+            b[off + 4usize] = 0u8
+            b[off + 5usize] = 0u8 // bg_tag: default
+            b[off + 6usize] = 0u8
+            b[off + 7usize] = 0u8
+            b[off + 8usize] = 0u8
+            b[off + 9usize] = 0u8 // bold
+            ci = ci + 1usize
+        }
+    }
+
+    pub fn set_cell(var self, x: usize, y: usize, ch: u8, fg: Color, bg: Color) {
+        if x >= self.width || y >= self.height {
+            return
+        }
+        let b = self.back as *raw var u8
+        let off = (y * self.width + x) * 16usize
+        b[off] = ch
+        b[off + 1usize] = fg.tag as u8
+        b[off + 2usize] = fg.r
+        b[off + 3usize] = fg.g
+        b[off + 4usize] = fg.b
+        b[off + 5usize] = bg.tag as u8
+        b[off + 6usize] = bg.r
+        b[off + 7usize] = bg.g
+        b[off + 8usize] = bg.b
+        b[off + 9usize] = 0u8
+    }
+
+    pub fn set_char(var self, x: usize, y: usize, ch: u8) {
+        if x >= self.width || y >= self.height {
+            return
+        }
+        let b = self.back as *raw var u8
+        let off = (y * self.width + x) * 16usize
+        b[off] = ch
+    }
+
+    pub fn print_str(var self, x: usize, y: usize, s: str, fg: Color, bg: Color) {
+        if y >= self.height {
+            return
+        }
+        let len = con_str_len(s)
+        let s_ptr = s as *raw u8
+        var i = 0usize
+        var cur_x = x
+        while i < len && cur_x < self.width {
+            self.set_cell(cur_x, y, s_ptr[i], fg, bg)
+            cur_x = cur_x + 1usize
+            i = i + 1usize
+        }
+    }
+
+    pub fn draw_rect(var self, x: usize, y: usize, w: usize, h: usize, ch: u8, fg: Color, bg: Color) {
+        var row = y
+        let max_y = y + h
+        let max_x = x + w
+        while row < max_y && row < self.height {
+            var col = x
+            while col < max_x && col < self.width {
+                self.set_cell(col, row, ch, fg, bg)
+                col = col + 1usize
+            }
+            row = row + 1usize
+        }
+    }
+
+    pub fn draw_box(var self, x: usize, y: usize, w: usize, h: usize, fg: Color, bg: Color) {
+        if w < 2usize || h < 2usize {
+            return
+        }
+        let x2 = x + w - 1usize
+        let y2 = y + h - 1usize
+
+        // Corners
+        self.set_cell(x, y, 43u8, fg, bg)   // '+'
+        self.set_cell(x2, y, 43u8, fg, bg)  // '+'
+        self.set_cell(x, y2, 43u8, fg, bg)  // '+'
+        self.set_cell(x2, y2, 43u8, fg, bg) // '+'
+
+        // Top & bottom edges
+        var col = x + 1usize
+        while col < x2 && col < self.width {
+            self.set_cell(col, y, 45u8, fg, bg)  // '-'
+            self.set_cell(col, y2, 45u8, fg, bg) // '-'
+            col = col + 1usize
+        }
+
+        // Left & right edges
+        var row = y + 1usize
+        while row < y2 && row < self.height {
+            self.set_cell(x, row, 124u8, fg, bg)  // '|'
+            self.set_cell(x2, row, 124u8, fg, bg) // '|'
+            row = row + 1usize
+        }
+    }
+
+    pub fn present(var self) {
+        var out = String.new()
+        let f = self.front as *raw var u8
+        let b = self.back as *raw var u8
+
+        var cur_x = 999999usize
+        var cur_y = 999999usize
+        var last_fg_tag = -1
+        var last_fg_r = 0u8
+        var last_fg_g = 0u8
+        var last_fg_b = 0u8
+        var last_bg_tag = -1
+        var last_bg_r = 0u8
+        var last_bg_g = 0u8
+        var last_bg_b = 0u8
+
+        var y = 0usize
+        while y < self.height {
+            var x = 0usize
+            while x < self.width {
+                let off = (y * self.width + x) * 16usize
+
+                // Compare back with front
+                var diff = false
+                var k = 0usize
+                while k < 10usize {
+                    if b[off + k] != f[off + k] {
+                        diff = true
+                        break
+                    }
+                    k = k + 1usize
+                }
+
+                if diff {
+                    // Move cursor if discontinuous
+                    if x != cur_x || y != cur_y {
+                        out.push_str("\x1b[")
+                        con_push_int(out, (y + 1usize) as i32)
+                        out.push_byte(59u8) // ';'
+                        con_push_int(out, (x + 1usize) as i32)
+                        out.push_byte(72u8) // 'H'
+                        cur_x = x
+                        cur_y = y
+                    }
+
+                    let ch = b[off]
+                    let fg_tag = b[off + 1usize] as i32
+                    let fg_r = b[off + 2usize]
+                    let fg_g = b[off + 3usize]
+                    let fg_b = b[off + 4usize]
+                    let bg_tag = b[off + 5usize] as i32
+                    let bg_r = b[off + 6usize]
+                    let bg_g = b[off + 7usize]
+                    let bg_b = b[off + 8usize]
+
+                    // Foreground color change
+                    if fg_tag != last_fg_tag || fg_r != last_fg_r || fg_g != last_fg_g || fg_b != last_fg_b {
+                        if fg_tag == COLOR_TAG_DEFAULT {
+                            out.push_str("\x1b[39m")
+                        } else if fg_tag == COLOR_TAG_ANSI {
+                            if fg_r < 8u8 {
+                                out.push_str("\x1b[")
+                                con_push_int(out, 30 + (fg_r as i32))
+                                out.push_byte(109u8) // 'm'
+                            } else {
+                                out.push_str("\x1b[")
+                                con_push_int(out, 90 + ((fg_r - 8u8) as i32))
+                                out.push_byte(109u8)
+                            }
+                        } else if fg_tag == COLOR_TAG_INDEXED {
+                            out.push_str("\x1b[38;5;")
+                            con_push_int(out, fg_r as i32)
+                            out.push_byte(109u8)
+                        } else if fg_tag == COLOR_TAG_RGB {
+                            out.push_str("\x1b[38;2;")
+                            con_push_int(out, fg_r as i32)
+                            out.push_byte(59u8)
+                            con_push_int(out, fg_g as i32)
+                            out.push_byte(59u8)
+                            con_push_int(out, fg_b as i32)
+                            out.push_byte(109u8)
+                        }
+                        last_fg_tag = fg_tag
+                        last_fg_r = fg_r
+                        last_fg_g = fg_g
+                        last_fg_b = fg_b
+                    }
+
+                    // Background color change
+                    if bg_tag != last_bg_tag || bg_r != last_bg_r || bg_g != last_bg_g || bg_b != last_bg_b {
+                        if bg_tag == COLOR_TAG_DEFAULT {
+                            out.push_str("\x1b[49m")
+                        } else if bg_tag == COLOR_TAG_ANSI {
+                            if bg_r < 8u8 {
+                                out.push_str("\x1b[")
+                                con_push_int(out, 40 + (bg_r as i32))
+                                out.push_byte(109u8)
+                            } else {
+                                out.push_str("\x1b[")
+                                con_push_int(out, 100 + ((bg_r - 8u8) as i32))
+                                out.push_byte(109u8)
+                            }
+                        } else if bg_tag == COLOR_TAG_INDEXED {
+                            out.push_str("\x1b[48;5;")
+                            con_push_int(out, bg_r as i32)
+                            out.push_byte(109u8)
+                        } else if bg_tag == COLOR_TAG_RGB {
+                            out.push_str("\x1b[48;2;")
+                            con_push_int(out, bg_r as i32)
+                            out.push_byte(59u8)
+                            con_push_int(out, bg_g as i32)
+                            out.push_byte(59u8)
+                            con_push_int(out, bg_b as i32)
+                            out.push_byte(109u8)
+                        }
+                        last_bg_tag = bg_tag
+                        last_bg_r = bg_r
+                        last_bg_g = bg_g
+                        last_bg_b = bg_b
+                    }
+
+                    out.push_byte(ch)
+                    cur_x = cur_x + 1usize
+                }
+
+                x = x + 1usize
+            }
+            y = y + 1usize
+        }
+
+        // Copy back to front
+        let total_bytes = self.total_cells * 16usize
+        var cpy_i = 0usize
+        while cpy_i < total_bytes {
+            f[cpy_i] = b[cpy_i]
+            cpy_i = cpy_i + 1usize
+        }
+
+        // Reset styling at end of frame
+        if last_fg_tag != COLOR_TAG_DEFAULT || last_bg_tag != COLOR_TAG_DEFAULT {
+            out.push_str("\x1b[0m")
+        }
+
+        // Single atomic syscall write to stdout
+        if out.len() > 0usize {
+            let _w = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64)
+        }
+    }
+
+    pub fn close_console(var self) {
+        if (self.front as usize) != 0usize {
+            free(self.front as *raw u8)
+            self.front = 0usize as *raw var u8
+        }
+        if (self.back as usize) != 0usize {
+            free(self.back as *raw u8)
+            self.back = 0usize as *raw var u8
+        }
+    }
+}

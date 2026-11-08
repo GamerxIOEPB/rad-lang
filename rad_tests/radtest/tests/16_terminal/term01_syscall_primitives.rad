@@ -1,0 +1,34 @@
+// Test direct syscall primitives in pure Rad (no libc wrappers)
+fn main() {
+    let pid = sys_getpid()
+    if pid > 0i64 {
+        println("pid_ok: true")
+    } else {
+        println("pid_ok: false")
+    }
+
+    let ts = malloc(16usize) as *raw var i64
+    // SYS_clock_gettime = 228, CLOCK_MONOTONIC = 1
+    let r_clk = sys_clock_gettime(1, ts)
+    if r_clk == 0i64 && ts[0usize] >= 0i64 {
+        println("clock_monotonic: true")
+    } else {
+        println("clock_monotonic: false")
+    }
+
+    // Test sys_nanosleep for 1ms
+    let req = malloc(16usize) as *raw var i64
+    req[0usize] = 0i64
+    req[1usize] = 1000000i64 // 1ms
+    let rem = malloc(16usize) as *raw var i64
+    let r_slp = sys_nanosleep(req as *raw i64, rem)
+    if r_slp == 0i64 {
+        println("nanosleep: true")
+    } else {
+        println("nanosleep: false")
+    }
+
+    free(ts as *raw u8)
+    free(req as *raw u8)
+    free(rem as *raw u8)
+}

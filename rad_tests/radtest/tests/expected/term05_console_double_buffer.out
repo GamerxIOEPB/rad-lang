@@ -1,0 +1,7 @@
+color_def: true
+color_ansi: true
+color_idx: true
+color_rgb: true
+console_grid: true
+console_draw: true
+console_cleanup: true

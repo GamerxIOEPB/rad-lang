@@ -1,0 +1,23 @@
+// Test native TerminalSession initialization, geometry querying, and cleanup
+fn main() {
+    var term = TerminalSession.new()
+    let sz = term.size()
+    if sz.cols > 0usize && sz.rows > 0usize {
+        println("term_geometry: true")
+    } else {
+        println("term_geometry: false")
+    }
+
+    if (term.orig_termios as usize) != 0usize && (term.raw_termios as usize) != 0usize {
+        println("term_buffers: true")
+    } else {
+        println("term_buffers: false")
+    }
+
+    term.close()
+    if (term.orig_termios as usize) == 0usize {
+        println("term_cleanup: true")
+    } else {
+        println("term_cleanup: false")
+    }
+}

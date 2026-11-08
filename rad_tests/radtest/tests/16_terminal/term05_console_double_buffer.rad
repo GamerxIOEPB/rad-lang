@@ -1,0 +1,47 @@
+// Test Console double-buffered grid, color constructors, cell manipulation, and box drawing
+fn main() {
+    let c_def = Color.default()
+    let c_ansi = Color.ansi(1u8)
+    let c_idx = Color.indexed(42u8)
+    let c_rgb = Color.rgb(255u8, 128u8, 64u8)
+
+    if c_def.tag == COLOR_TAG_DEFAULT { println("color_def: true") } else { println("color_def: false") }
+    if c_ansi.tag == COLOR_TAG_ANSI && c_ansi.r == 1u8 { println("color_ansi: true") } else { println("color_ansi: false") }
+    if c_idx.tag == COLOR_TAG_INDEXED && c_idx.r == 42u8 { println("color_idx: true") } else { println("color_idx: false") }
+    if c_rgb.tag == COLOR_TAG_RGB && c_rgb.r == 255u8 && c_rgb.g == 128u8 && c_rgb.b == 64u8 {
+        println("color_rgb: true")
+    } else {
+        println("color_rgb: false")
+    }
+
+    var con = Console.new(20usize, 10usize)
+    if con.width == 20usize && con.height == 10usize && con.total_cells == 200usize {
+        println("console_grid: true")
+    } else {
+        println("console_grid: false")
+    }
+
+    con.draw_box(0usize, 0usize, 20usize, 10usize, Color.green(), Color.default())
+    con.print_str(2usize, 2usize, "RadConsole", Color.bright_yellow(), Color.default())
+
+    // Verify cell contents in back buffer without printing raw ANSI to stdout
+    let b = con.back as *raw u8
+    // Corner at (0, 0) should be '+' (43)
+    let tl = b[0usize]
+    // Cell at (2, 2) should be 'R' (82)
+    let off_r = (2usize * con.width + 2usize) * 16usize
+    let ch_r = b[off_r]
+
+    if tl == 43u8 && ch_r == 82u8 {
+        println("console_draw: true")
+    } else {
+        println("console_draw: false")
+    }
+
+    con.close_console()
+    if (con.front as usize) == 0usize {
+        println("console_cleanup: true")
+    } else {
+        println("console_cleanup: false")
+    }
+}

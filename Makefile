@@ -145,6 +145,20 @@ $(BIN_CLANGXX): $(BIN_CLANG)
 	cp -f $(BIN_CLANG) $(BIN_CLANGXX)
 	@chmod 755 $(BIN_CLANGXX)
 
+ARCADE_STD := library/std/src/os/linux/syscall.rad library/std/src/terminal.rad library/std/src/keyboard.rad library/std/src/console.rad library/std/src/time.rad
+
+arcade: $(BIN_RADC)
+	@echo "==> Building Rad Arcade games..."
+	@mkdir -p bin/arcade
+	$(BIN_RADC) $(ARCADE_STD) rad_tests/rad_arcade/tetris/main.rad -o bin/arcade/tetris
+	$(BIN_RADC) $(ARCADE_STD) rad_tests/rad_arcade/dungeon/main.rad -o bin/arcade/dungeon
+	$(BIN_RADC) $(ARCADE_STD) rad_tests/rad_arcade/invaders/main.rad -o bin/arcade/invaders
+	$(BIN_RADC) $(ARCADE_STD) rad_tests/rad_arcade/raycaster/main.rad -o bin/arcade/raycaster
+	$(BIN_RADC) $(ARCADE_STD) rad_tests/rad_arcade/snake/main.rad -o bin/arcade/snake
+	$(BIN_RADC) $(ARCADE_STD) rad_tests/rad_arcade/pong/main.rad -o bin/arcade/pong
+	$(BIN_RADC) $(ARCADE_STD) rad_tests/rad_arcade/breakout/main.rad -o bin/arcade/breakout
+	@echo "[✓] Rad Arcade games built in bin/arcade/"
+
 dist:
 	@bash scripts/build_distribution.sh
 

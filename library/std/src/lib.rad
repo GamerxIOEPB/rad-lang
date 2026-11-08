@@ -8,3 +8,6 @@ pub import net
 pub import sync
 pub import thread
 pub import async
+pub import terminal
+pub import keyboard
+pub import console

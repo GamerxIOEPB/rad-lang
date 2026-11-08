@@ -1,0 +1,214 @@
+// ==============================================================================
+// Rad Standard Library: Time and Clocks
+// Pure Rad, zero external dependencies, native Linux monotonic clock & sleep syscalls.
+// ==============================================================================
+
+struct TimeSpec {
+    sec: i64,
+    nsec: i64,
+}
+
+pub struct Duration {
+    pub secs: u64,
+    pub nanos: u32,
+}
+
+impl Duration {
+    pub fn zero() -> Duration {
+        Duration { secs: 0u64, nanos: 0u32 }
+    }
+
+    pub fn from_nanos(nanos: u64) -> Duration {
+        let secs = nanos / 1000000000u64
+        let rem_ns = nanos % 1000000000u64
+        Duration { secs: secs, nanos: rem_ns as u32 }
+    }
+
+    pub fn from_micros(micros: u64) -> Duration {
+        let secs = micros / 1000000u64
+        let rem_us = micros % 1000000u64
+        let nanos = (rem_us as u32) * 1000u32
+        Duration { secs: secs, nanos: nanos }
+    }
+
+    pub fn from_millis(millis: u64) -> Duration {
+        let secs = millis / 1000u64
+        let rem_ms = millis % 1000u64
+        let nanos = (rem_ms as u32) * 1000000u32
+        Duration { secs: secs, nanos: nanos }
+    }
+
+    pub fn from_secs(secs: u64) -> Duration {
+        Duration { secs: secs, nanos: 0u32 }
+    }
+
+    pub fn as_nanos(self) -> u64 {
+        (self.secs * 1000000000u64) + (self.nanos as u64)
+    }
+
+    pub fn as_micros(self) -> u64 {
+        (self.secs * 1000000u64) + ((self.nanos as u64) / 1000u64)
+    }
+
+    pub fn as_millis(self) -> u64 {
+        (self.secs * 1000u64) + ((self.nanos as u64) / 1000000u64)
+    }
+
+    pub fn as_secs(self) -> u64 {
+        self.secs
+    }
+
+    pub fn as_secs_f64(self) -> f64 {
+        (self.secs as f64) + ((self.nanos as f64) / 1000000000.0)
+    }
+
+    pub fn add(self, other: Duration) -> Duration {
+        var s = self.secs + other.secs
+        var ns = self.nanos + other.nanos
+        if ns >= 1000000000u32 {
+            s = s + 1u64
+            ns = ns - 1000000000u32
+        }
+        Duration { secs: s, nanos: ns }
+    }
+
+    pub fn sub(self, other: Duration) -> Duration {
+        if self.secs < other.secs || (self.secs == other.secs && self.nanos < other.nanos) {
+            return Duration.zero()
+        }
+        var s = self.secs - other.secs
+        var ns = 0u32
+        if self.nanos >= other.nanos {
+            ns = self.nanos - other.nanos
+        } else {
+            s = s - 1u64
+            ns = (self.nanos + 1000000000u32) - other.nanos
+        }
+        Duration { secs: s, nanos: ns }
+    }
+
+    pub fn cmp(self, other: Duration) -> i32 {
+        if self.secs < other.secs { return -1 }
+        if self.secs > other.secs { return 1 }
+        if self.nanos < other.nanos { return -1 }
+        if self.nanos > other.nanos { return 1 }
+        0
+    }
+}
+
+pub struct Instant {
+    pub secs: i64,
+    pub nanos: i64,
+}
+
+impl Instant {
+    pub fn now() -> Instant {
+        let ts = TimeSpec { sec: 0i64, nsec: 0i64 }
+        // SYS_clock_gettime = 228, CLOCK_MONOTONIC = 1
+        let _ret = syscall2(228i64, 1i64, ts as *raw i64)
+        Instant { secs: ts.sec, nanos: ts.nsec }
+    }
+
+    pub fn elapsed(self) -> Duration {
+        let current = Instant.now()
+        self.duration_since(current)
+    }
+
+    pub fn duration_since(self, later: Instant) -> Duration {
+        var total_s = later.secs - self.secs
+        var total_ns = later.nanos - self.nanos
+        if total_ns < 0i64 {
+            total_s = total_s - 1i64
+            total_ns = total_ns + 1000000000i64
+        }
+        if total_s < 0i64 {
+            return Duration.zero()
+        }
+        Duration {
+            secs: total_s as u64,
+            nanos: total_ns as u32,
+        }
+    }
+}
+
+pub fn sleep(d: Duration) {
+    let req = TimeSpec { sec: d.secs as i64, nsec: d.nanos as i64 }
+    let rem = TimeSpec { sec: 0i64, nsec: 0i64 }
+    // SYS_nanosleep = 35
+    let _ret = syscall2(35i64, req as *raw i64, rem as *raw i64)
+}
+
+pub fn sleep_ms(millis: u64) {
+    sleep(Duration.from_millis(millis))
+}
+
+pub fn sleep_micros(micros: u64) {
+    sleep(Duration.from_micros(micros))
+}
+
+// ------------------------------------------------------------------------------
+// FrameTimer — High-precision frame pacing and FPS measurement for game loops
+// ------------------------------------------------------------------------------
+
+pub struct FrameTimer {
+    pub target_fps: u32,
+    pub frame_dur: Duration,
+    pub last_tick: Instant,
+    pub frame_count: u64,
+    pub measured_fps: f64,
+    pub fps_timer: Instant,
+    pub fps_frames: u64,
+}
+
+impl FrameTimer {
+    pub fn new(target_fps: u32) -> FrameTimer {
+        var frame_ns = 16666666u64 // default ~60 FPS
+        if target_fps > 0u32 {
+            frame_ns = 1000000000u64 / (target_fps as u64)
+        }
+        let now = Instant.now()
+        FrameTimer {
+            target_fps: target_fps,
+            frame_dur: Duration.from_nanos(frame_ns),
+            last_tick: now,
+            frame_count: 0u64,
+            measured_fps: target_fps as f64,
+            fps_timer: now,
+            fps_frames: 0u64,
+        }
+    }
+
+    pub fn tick(var self) -> f64 {
+        let now = Instant.now()
+        let elapsed = self.last_tick.duration_since(now)
+        self.last_tick = now
+        self.frame_count = self.frame_count + 1u64
+        self.fps_frames = self.fps_frames + 1u64
+
+        // Measure FPS once per second
+        let fps_elapsed = self.fps_timer.duration_since(now)
+        if fps_elapsed.as_millis() >= 1000u64 {
+            let secs = fps_elapsed.as_secs_f64()
+            if secs > 0.0 {
+                self.measured_fps = (self.fps_frames as f64) / secs
+            }
+            self.fps_frames = 0u64
+            self.fps_timer = now
+        }
+
+        elapsed.as_secs_f64()
+    }
+
+    pub fn pace(self) {
+        let now = Instant.now()
+        let frame_elapsed = self.last_tick.duration_since(now)
+        if self.frame_dur.cmp(frame_elapsed) > 0 {
+            let remaining = self.frame_dur.sub(frame_elapsed)
+            sleep(remaining)
+        }
+    }
+
+    pub fn fps(self) -> f64 {
+        self.measured_fps
+    }
+}

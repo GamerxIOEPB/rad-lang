@@ -1,0 +1,3 @@
+pid_ok: true
+clock_monotonic: true
+nanosleep: true

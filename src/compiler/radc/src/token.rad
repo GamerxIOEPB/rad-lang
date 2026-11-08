@@ -61,6 +61,10 @@ const TOK_OROR: i32 = 63      // ||
 const TOK_NOT: i32 = 64       // !
 const TOK_SHL: i32 = 65       // <<
 const TOK_SHR: i32 = 66       // >>
+const TOK_AMP: i32 = 67       // &
+const TOK_PIPE: i32 = 68      // |
+const TOK_CARET: i32 = 69     // ^
+const TOK_TILDE: i32 = 70     // ~
 
 struct Token {
     kind: i32,
@@ -292,6 +296,29 @@ fn lex_source(src: String) -> Vec<Token> {
                             str_lit.push_byte(13u8) // '\r'
                         } else if p[i] == 48u8 {
                             str_lit.push_byte(0u8)  // '\0'
+                        } else if p[i] == 101u8 {   // '\e'
+                            str_lit.push_byte(27u8) // ESC (0x1B)
+                        } else if p[i] == 120u8 && i + 2usize < len { // '\xNN'
+                            let h1 = p[i + 1usize]
+                            let h2 = p[i + 2usize]
+                            var val = 0u8
+                            if h1 >= 48u8 && h1 <= 57u8 {
+                                val = (h1 - 48u8) * 16u8
+                            } else if h1 >= 97u8 && h1 <= 102u8 {
+                                val = ((h1 - 97u8) + 10u8) * 16u8
+                            } else if h1 >= 65u8 && h1 <= 70u8 {
+                                val = ((h1 - 65u8) + 10u8) * 16u8
+                            }
+                            if h2 >= 48u8 && h2 <= 57u8 {
+                                val = val + (h2 - 48u8)
+                            } else if h2 >= 97u8 && h2 <= 102u8 {
+                                val = val + ((h2 - 97u8) + 10u8)
+                            } else if h2 >= 65u8 && h2 <= 70u8 {
+                                val = val + ((h2 - 65u8) + 10u8)
+                            }
+                            str_lit.push_byte(val)
+                            i = i + 2usize
+                            cur_col = cur_col + 2i64
                         } else {
                             str_lit.push_byte(p[i])
                         }
@@ -407,14 +434,26 @@ fn lex_source(src: String) -> Vec<Token> {
                     } else {
                         k = TOK_GT
                     }
-                } else if ch == 38u8 && i + 1usize < len && p[i + 1usize] == 38u8 { // &&
-                    k = TOK_ANDAND
-                    i = i + 1usize
-                    cur_col = cur_col + 1i64
-                } else if ch == 124u8 && i + 1usize < len && p[i + 1usize] == 124u8 { // ||
-                    k = TOK_OROR
-                    i = i + 1usize
-                    cur_col = cur_col + 1i64
+                } else if ch == 38u8 {
+                    if i + 1usize < len && p[i + 1usize] == 38u8 { // &&
+                        k = TOK_ANDAND
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    } else {
+                        k = TOK_AMP
+                    }
+                } else if ch == 124u8 {
+                    if i + 1usize < len && p[i + 1usize] == 124u8 { // ||
+                        k = TOK_OROR
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    } else {
+                        k = TOK_PIPE
+                    }
+                } else if ch == 94u8 { // ^
+                    k = TOK_CARET
+                } else if ch == 126u8 { // ~
+                    k = TOK_TILDE
                 }
                 if k != 0 {
                     var empty = String.new()

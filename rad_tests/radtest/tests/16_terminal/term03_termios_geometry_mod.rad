@@ -1,0 +1,215 @@
+// ==============================================================================
+// Rad Standard Library — Native Terminal Management
+// Direct UAPI ioctl, raw/cooked modes, alternate screen, and window geometry.
+// Zero C, zero libc, zero external library dependencies.
+// ==============================================================================
+
+pub struct TerminalSize {
+    pub cols: usize,
+    pub rows: usize,
+}
+
+// ------------------------------------------------------------------------------
+// Internal byte helpers for termios buffer (60 bytes on Linux x86-64)
+// ------------------------------------------------------------------------------
+
+fn term_get_u32(buf: *raw u8, off: usize) -> u32 {
+    let b0 = buf[off] as u32
+    let b1 = buf[off + 1usize] as u32
+    let b2 = buf[off + 2usize] as u32
+    let b3 = buf[off + 3usize] as u32
+    b0 | (b1 << 8u32) | (b2 << 16u32) | (b3 << 24u32)
+}
+
+fn term_set_u32(buf: *raw var u8, off: usize, val: u32) {
+    buf[off] = (val & 255u32) as u8
+    buf[off + 1usize] = ((val >> 8u32) & 255u32) as u8
+    buf[off + 2usize] = ((val >> 16u32) & 255u32) as u8
+    buf[off + 3usize] = ((val >> 24u32) & 255u32) as u8
+}
+
+fn term_copy_bytes(src: *raw u8, dst: *raw var u8, count: usize) {
+    var i = 0usize
+    while i < count {
+        dst[i] = src[i]
+        i = i + 1usize
+    }
+}
+
+// ------------------------------------------------------------------------------
+// TerminalSession
+// ------------------------------------------------------------------------------
+
+pub struct TerminalSession {
+    pub orig_termios: *raw var u8,
+    pub raw_termios: *raw var u8,
+    pub winsize_buf: *raw var u8,
+    pub is_raw: bool,
+    pub in_alt_screen: bool,
+    pub cursor_hidden: bool,
+}
+
+impl TerminalSession {
+    pub fn new() -> TerminalSession {
+        let orig = malloc(64usize) as *raw var u8
+        let raw = malloc(64usize) as *raw var u8
+        let ws = malloc(16usize) as *raw var u8
+        TerminalSession {
+            orig_termios: orig,
+            raw_termios: raw,
+            winsize_buf: ws,
+            is_raw: false,
+            in_alt_screen: false,
+            cursor_hidden: false,
+        }
+    }
+
+    pub fn enable_raw_mode(var self) -> bool {
+        if self.is_raw {
+            return true
+        }
+
+        // TCGETS = 21505 (0x5401)
+        // SYS_ioctl = 16, STDIN_FILENO = 0
+        let r = syscall3(16i64, 0i64, 21505i64, self.orig_termios)
+        if r != 0i64 {
+            return false
+        }
+
+        term_copy_bytes(self.orig_termios as *raw u8, self.raw_termios, 60usize)
+
+        // Read flags
+        let iflag = term_get_u32(self.orig_termios as *raw u8, 0usize)
+        let oflag = term_get_u32(self.orig_termios as *raw u8, 4usize)
+        let cflag = term_get_u32(self.orig_termios as *raw u8, 8usize)
+        let lflag = term_get_u32(self.orig_termios as *raw u8, 12usize)
+
+        // iflag &= ~(BRKINT(2) | ICRNL(256) | INPCK(16) | ISTRIP(32) | IXON(1024)) = ~1330
+        let raw_iflag = iflag & (~1330u32)
+
+        // oflag &= ~(OPOST(1))
+        let raw_oflag = oflag & (~1u32)
+
+        // cflag |= CS8(48)
+        let raw_cflag = cflag | 48u32
+
+        // lflag &= ~(ECHO(8) | ECHONL(64) | ICANON(2) | IEXTEN(32768) | ISIG(1)) = ~32843
+        let raw_lflag = lflag & (~32843u32)
+
+        term_set_u32(self.raw_termios, 0usize, raw_iflag)
+        term_set_u32(self.raw_termios, 4usize, raw_oflag)
+        term_set_u32(self.raw_termios, 8usize, raw_cflag)
+        term_set_u32(self.raw_termios, 12usize, raw_lflag)
+
+        // c_cc[VTIME = 5 + 17 = 22] = 0
+        // c_cc[VMIN  = 6 + 17 = 23] = 0 (non-blocking)
+        let raw_bytes = self.raw_termios as *raw var u8
+        raw_bytes[22usize] = 0u8
+        raw_bytes[23usize] = 0u8
+
+        // TCSETSF = 21508 (0x5404)
+        let set_r = syscall3(16i64, 0i64, 21508i64, self.raw_termios)
+        if set_r != 0i64 {
+            return false
+        }
+
+        self.is_raw = true
+        true
+    }
+
+    pub fn restore_mode(var self) -> bool {
+        if !self.is_raw {
+            return true
+        }
+
+        // TCSETSF = 21508
+        let r = syscall3(16i64, 0i64, 21508i64, self.orig_termios)
+        if r == 0i64 {
+            self.is_raw = false
+            return true
+        }
+        false
+    }
+
+    pub fn enter_alternate_screen(var self) {
+        if !self.in_alt_screen {
+            // \x1b[?1049h
+            let cmd = "\x1b[?1049h"
+            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 8i64)
+            self.in_alt_screen = true
+        }
+    }
+
+    pub fn leave_alternate_screen(var self) {
+        if self.in_alt_screen {
+            // \x1b[?1049l
+            let cmd = "\x1b[?1049l"
+            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 8i64)
+            self.in_alt_screen = false
+        }
+    }
+
+    pub fn hide_cursor(var self) {
+        if !self.cursor_hidden {
+            // \x1b[?25l
+            let cmd = "\x1b[?25l"
+            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 6i64)
+            self.cursor_hidden = true
+        }
+    }
+
+    pub fn show_cursor(var self) {
+        if self.cursor_hidden {
+            // \x1b[?25h
+            let cmd = "\x1b[?25h"
+            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 6i64)
+            self.cursor_hidden = false
+        }
+    }
+
+    pub fn clear_screen(self) {
+        // \x1b[2J\x1b[H
+        let cmd = "\x1b[2J\x1b[H"
+        let _w = syscall3(1i64, 1i64, cmd as *raw u8, 7i64)
+    }
+
+    pub fn size(self) -> TerminalSize {
+        // TIOCGWINSZ = 21523 (0x5413)
+        // SYS_ioctl = 16, STDOUT_FILENO = 1
+        let ws = self.winsize_buf as *raw u8
+        let r = syscall3(16i64, 1i64, 21523i64, ws)
+        if r == 0i64 {
+            let r0 = ws[0usize] as usize
+            let r1 = ws[1usize] as usize
+            let rows = r0 | (r1 << 8usize)
+
+            let c0 = ws[2usize] as usize
+            let c1 = ws[3usize] as usize
+            let cols = c0 | (c1 << 8usize)
+
+            if cols > 0usize && rows > 0usize {
+                return TerminalSize { cols: cols, rows: rows }
+            }
+        }
+        // Default fallback geometry
+        TerminalSize { cols: 80usize, rows: 24usize }
+    }
+
+    pub fn close(var self) {
+        self.show_cursor()
+        self.leave_alternate_screen()
+        self.restore_mode()
+        if (self.orig_termios as usize) != 0usize {
+            free(self.orig_termios as *raw u8)
+            self.orig_termios = 0usize as *raw var u8
+        }
+        if (self.raw_termios as usize) != 0usize {
+            free(self.raw_termios as *raw u8)
+            self.raw_termios = 0usize as *raw var u8
+        }
+        if (self.winsize_buf as usize) != 0usize {
+            free(self.winsize_buf as *raw u8)
+            self.winsize_buf = 0usize as *raw var u8
+        }
+    }
+}

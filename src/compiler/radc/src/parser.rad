@@ -234,22 +234,31 @@ impl Parser {
         if op == TOK_ANDAND {
             return 2
         }
-        if op == TOK_EQEQ || op == TOK_NEQ {
+        if op == TOK_PIPE {
             return 3
         }
-        if op == TOK_LT || op == TOK_LEQ || op == TOK_GT || op == TOK_GEQ {
+        if op == TOK_CARET {
             return 4
         }
-        if op == TOK_SHL || op == TOK_SHR {
-            return 4
-        }
-        if op == TOK_PLUS || op == TOK_MINUS {
+        if op == TOK_AMP {
             return 5
         }
-        if op == TOK_STAR || op == TOK_SLASH || op == TOK_PERCENT {
+        if op == TOK_EQEQ || op == TOK_NEQ {
             return 6
         }
-        0
+        if op == TOK_LT || op == TOK_LEQ || op == TOK_GT || op == TOK_GEQ {
+            return 7
+        }
+        if op == TOK_SHL || op == TOK_SHR {
+            return 8
+        }
+        if op == TOK_PLUS || op == TOK_MINUS {
+            return 9
+        }
+        if op == TOK_STAR || op == TOK_SLASH || op == TOK_PERCENT {
+            return 10
+        }
+        return 0
     }
 
     fn parse_primary(var self) -> usize {
@@ -361,16 +370,21 @@ impl Parser {
                 field_name: String.new(),
             })
         }
+        if k == TOK_AMP {
+            self.advance()
+            let sub = self.parse_primary()
+            return self.parse_postfix(sub)
+        }
         if k == TOK_LPAREN {
             self.advance()
             let e = self.parse_expr(0)
             self.expect_tok(TOK_RPAREN, ")")
             return e
         }
-        if k == TOK_MINUS || k == TOK_NOT {
+        if k == TOK_MINUS || k == TOK_NOT || k == TOK_TILDE {
             let un_op = k + 0
             self.advance()
-            let operand = self.parse_expr(8)
+            let operand = self.parse_expr(10)
             return self.add_expr(Expr {
                 kind: EXPR_UNARY,
                 op: un_op,
@@ -1246,6 +1260,12 @@ impl Parser {
         var f_names = Vec.new()
         var f_types = Vec.new()
         while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+            if self.peek_kind() == TOK_PUB {
+                self.advance()
+            }
+            if self.peek_kind() == TOK_RBRACE || self.peek_kind() == TOK_EOF {
+                break
+            }
             let start_pos = self.pos
             let fnm = String.from_str(self.peek_text())
             self.match_tok(TOK_IDENT)

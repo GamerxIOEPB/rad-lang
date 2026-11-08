@@ -206,7 +206,7 @@ impl Codegen {
     }
 
     fn get_var_type(self, vname: str) -> str {
-        let raw = self.get_raw_var_type(vname)
+        let raw: str = self.get_raw_var_type(vname)
         if str_len(raw) > 0usize {
             return self.emit_llvm_type(raw)
         }
@@ -225,6 +225,10 @@ impl Codegen {
             return str_eq(ty, "double") || str_eq(ty, "float")
         }
         if k == EXPR_BINARY {
+            let op = ep[id].op
+            if op == TOK_EQEQ || op == TOK_NEQ || op == TOK_LT || op == TOK_LEQ || op == TOK_GT || op == TOK_GEQ || op == TOK_ANDAND || op == TOK_OROR {
+                return false
+            }
             return self.is_expr_float(ep[id].left) || self.is_expr_float(ep[id].right)
         }
         if k == EXPR_CAST {
@@ -257,6 +261,16 @@ impl Codegen {
                 let rty = self.get_func_ret_type(fname)
                 return str_eq(rty, "double") || str_eq(rty, "float")
             }
+            if ep[callee_id].kind == EXPR_FIELD_ACCESS {
+                let member = ep[callee_id].field_name.as_ptr() as str
+                let rty = self.get_func_ret_type(member)
+                return str_eq(rty, "double") || str_eq(rty, "float")
+            }
+        }
+        if k == EXPR_METHOD_CALL {
+            let member = ep[id].str_val.as_ptr() as str
+            let rty = self.get_func_ret_type(member)
+            return str_eq(rty, "double") || str_eq(rty, "float")
         }
         return false
     }
@@ -293,10 +307,16 @@ impl Codegen {
             if param_idx == 0usize { return "ptr" }
             return "i64"
         }
+        if str_starts_with(fname, "syscall") {
+            return "i64"
+        }
         return "i64"
     }
 
     fn get_func_ret_type(self, fname: str) -> str {
+        if str_starts_with(fname, "syscall") {
+            return "i64"
+        }
         var fi = 0usize
         while fi < self.parser.functions.len {
             if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, fname) {
@@ -448,15 +468,63 @@ impl Codegen {
                 if self.is_struct_name(fname) {
                     return true
                 }
-                return str_eq(self.get_func_ret_type(fname), "ptr")
+                if str_eq(self.get_func_ret_type(fname), "ptr") {
+                    return true
+                }
+            }
+            if ep[callee_id].kind == EXPR_FIELD_ACCESS {
+                let recv_id = ep[callee_id].left
+                let type_s = ep[recv_id].str_val.as_ptr() as str
+                let member_s = ep[callee_id].field_name.as_ptr() as str
+                var full_name = String.new()
+                full_name.push_str(type_s)
+                full_name.push_str("__")
+                full_name.push_str(member_s)
+                if str_eq(self.get_func_ret_type(full_name.as_ptr() as str), "ptr") {
+                    return true
+                }
+                if str_eq(self.get_func_ret_type(member_s), "ptr") {
+                    return true
+                }
             }
         }
         if k == EXPR_METHOD_CALL {
-            let mname = ep[id].str_val.as_ptr() as str
-            if str_eq(mname, "as_ptr") || str_eq(mname, "new") || str_eq(mname, "from_str") {
+            let recv_id = ep[id].left
+            let member = ep[id].str_val.as_ptr() as str
+            if str_eq(member, "as_ptr") || str_eq(member, "new") || str_eq(member, "from_str") {
                 return true
             }
-            if str_eq(self.get_func_ret_type(mname), "ptr") {
+            var is_static = false
+            if ep[recv_id].kind == EXPR_IDENT {
+                let p_recv: *raw u8 = ep[recv_id].str_val.as_ptr()
+                if (p_recv as usize) != 0usize && (p_recv[0usize] >= 65u8 && p_recv[0usize] <= 90u8) {
+                    is_static = true
+                }
+            }
+            if is_static {
+                let type_s = ep[recv_id].str_val.as_ptr() as str
+                var mangled = String.new()
+                mangled.push_str(type_s)
+                mangled.push_str("__")
+                mangled.push_str(member)
+                if str_eq(self.get_func_ret_type(mangled.as_ptr() as str), "ptr") {
+                    return true
+                }
+            }
+            if !is_static && ep[recv_id].kind == EXPR_IDENT {
+                let vname = ep[recv_id].str_val.as_ptr() as str
+                let raw_ty = self.get_raw_var_type(vname)
+                if str_len(raw_ty) > 0usize {
+                    var mangled = String.new()
+                    mangled.push_str(raw_ty)
+                    mangled.push_str("__")
+                    mangled.push_str(member)
+                    if str_eq(self.get_func_ret_type(mangled.as_ptr() as str), "ptr") {
+                        return true
+                    }
+                }
+            }
+            if str_eq(self.get_func_ret_type(member), "ptr") {
                 return true
             }
         }
@@ -779,10 +847,12 @@ impl Codegen {
                     self.ir.push_str("sdiv i64 %")
                 } else if bin_op == TOK_PERCENT {
                     self.ir.push_str("srem i64 %")
-                } else if bin_op == TOK_ANDAND {
+                } else if bin_op == TOK_ANDAND || bin_op == TOK_AMP {
                     self.ir.push_str("and i64 %")
-                } else if bin_op == TOK_OROR {
+                } else if bin_op == TOK_OROR || bin_op == TOK_PIPE {
                     self.ir.push_str("or i64 %")
+                } else if bin_op == TOK_CARET {
+                    self.ir.push_str("xor i64 %")
                 } else if bin_op == TOK_SHL {
                     self.ir.push_str("shl i64 %")
                 } else if bin_op == TOK_SHR {
@@ -824,6 +894,11 @@ impl Codegen {
                 self.ir.push_str(int_to_str(res).as_ptr() as str)
                 self.ir.push_str(" to i64\n")
                 return ext
+            } else if un_op == TOK_TILDE {
+                self.ir.push_str(" = xor i64 %")
+                self.ir.push_str(int_to_str(sub_reg).as_ptr() as str)
+                self.ir.push_str(", -1\n")
+                return res
             } else {
                 return res
             }
@@ -869,7 +944,7 @@ impl Codegen {
                    str_eq(callee_name, "fread") || str_eq(callee_name, "fwrite") || str_eq(callee_name, "fseek") ||
                    str_eq(callee_name, "ftell") || str_eq(callee_name, "getenv") || str_eq(callee_name, "strcmp") ||
                    str_eq(callee_name, "dprintf") || str_eq(callee_name, "eprintln") || str_eq(callee_name, "system") ||
-                   str_eq(callee_name, "sqrt") || str_eq(callee_name, "remove") || self.is_struct_name(callee_name) {
+                   str_eq(callee_name, "sqrt") || str_eq(callee_name, "remove") || str_starts_with(callee_name, "syscall") || self.is_struct_name(callee_name) {
                     is_known = true
                 }
             }
@@ -968,6 +1043,63 @@ impl Codegen {
                     fi = fi + 1usize
                 }
                 return obj_reg
+            }
+
+            if str_starts_with(callee_name, "syscall") {
+                var s_arg_regs = Vec.new()
+                let s_args_len = ep_sub[expr_id].args.len
+                var si = 0usize
+                while si < s_args_len {
+                    let a_expr = ep_sub[expr_id].args.ptr[si]
+                    var r = self.emit_expr(a_expr)
+                    if self.is_expr_ptr(a_expr) {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = ptrtoint ptr %")
+                        self.emit_str(int_to_str(r).as_ptr() as str)
+                        self.emit_str(" to i64\n")
+                        r = cvt
+                    }
+                    s_arg_regs.push(r)
+                    si = si + 1usize
+                }
+
+                let ret_reg = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(ret_reg).as_ptr() as str)
+                self.emit_str(" = call i64 asm sideeffect ")
+
+                let is_arm = str_starts_with(self.target.as_ptr() as str, "aarch64")
+                if is_arm {
+                    self.emit_str("\"svc #0\", \"={x0},{x8}")
+                    if s_arg_regs.len > 1usize { self.emit_str(",{x0}") }
+                    if s_arg_regs.len > 2usize { self.emit_str(",{x1}") }
+                    if s_arg_regs.len > 3usize { self.emit_str(",{x2}") }
+                    if s_arg_regs.len > 4usize { self.emit_str(",{x3}") }
+                    if s_arg_regs.len > 5usize { self.emit_str(",{x4}") }
+                    if s_arg_regs.len > 6usize { self.emit_str(",{x5}") }
+                    self.emit_str(",~{memory}\"(")
+                } else {
+                    self.emit_str("\"syscall\", \"={rax},{rax}")
+                    if s_arg_regs.len > 1usize { self.emit_str(",{rdi}") }
+                    if s_arg_regs.len > 2usize { self.emit_str(",{rsi}") }
+                    if s_arg_regs.len > 3usize { self.emit_str(",{rdx}") }
+                    if s_arg_regs.len > 4usize { self.emit_str(",{r10}") }
+                    if s_arg_regs.len > 5usize { self.emit_str(",{r8}") }
+                    if s_arg_regs.len > 6usize { self.emit_str(",{r9}") }
+                    self.emit_str(",~{rcx},~{r11},~{memory}\"(")
+                }
+
+                var sj = 0usize
+                while sj < s_arg_regs.len {
+                    if sj > 0usize { self.emit_str(", ") }
+                    self.emit_str("i64 %")
+                    self.emit_str(int_to_str(s_arg_regs.ptr[sj]).as_ptr() as str)
+                    sj = sj + 1usize
+                }
+                self.emit_str(")\n")
+                return ret_reg
             }
 
             if str_eq(callee_name, "printf") && ep_sub[expr_id].args.len > 0usize {
@@ -1337,6 +1469,76 @@ impl Codegen {
                 }
                 i = i + 1usize
             }
+            var final_types = Vec.new()
+            var j = 0usize
+            while j < arg_regs.len {
+                var pty = self.get_func_param_type(callee_name, j)
+                var cur_r = arg_regs.ptr[j]
+                let is_p = arg_is_ptrs.ptr[j]
+                var is_flt = false
+                if !is_static && j == 0usize {
+                    pty = "ptr"
+                } else {
+                    var ai = j
+                    if !is_static { ai = j - 1usize }
+                    let a_id = ep[expr_id].args.ptr[ai]
+                    is_flt = self.is_expr_float(a_id)
+                }
+
+                if str_eq(pty, "double") || str_eq(pty, "float") || is_flt {
+                    if !is_flt {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = sitofp i64 %")
+                        self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                        self.emit_str(" to double\n")
+                        cur_r = cvt
+                    }
+                    pty = "double"
+                } else if str_eq(pty, "ptr") && is_p == 0 {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = inttoptr i64 %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(" to ptr\n")
+                    cur_r = cvt
+                } else if (str_eq(pty, "i64") || str_eq(pty, "i32")) && is_p == 1 {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = ptrtoint ptr %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(" to i64\n")
+                    cur_r = cvt
+                    pty = "i64"
+                } else if is_p == 1 {
+                    pty = "ptr"
+                } else if str_eq(pty, "i32") && is_p == 0 {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = trunc i64 %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(" to i32\n")
+                    cur_r = cvt
+                } else if (str_eq(pty, "i8") || str_eq(pty, "i16")) && is_p == 0 {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = trunc i64 %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(" to ")
+                    self.emit_str(pty)
+                    self.emit_str("\n")
+                    cur_r = cvt
+                }
+                arg_regs.ptr[j] = cur_r
+                final_types.push(pty as i64)
+                j = j + 1usize
+            }
+
             var ret_ty: str = self.get_func_ret_type(callee_name)
             if str_eq(member, "as_ptr") || (is_static && (str_eq(member, "new") || str_eq(member, "from_str"))) {
                 ret_ty = "ptr"
@@ -1345,16 +1547,14 @@ impl Codegen {
                 self.emit_str("  call void @")
                 self.emit_str(callee_name)
                 self.emit_str("(")
-                var j = 0usize
-                while j < arg_regs.len {
-                    if j > 0usize { self.emit_str(", ") }
-                    if arg_is_ptrs.ptr[j] == 1 {
-                        self.emit_str("ptr %")
-                    } else {
-                        self.emit_str("i64 %")
-                    }
-                    self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
-                    j = j + 1usize
+                var k = 0usize
+                while k < arg_regs.len {
+                    if k > 0usize { self.emit_str(", ") }
+                    let pty = final_types.ptr[k] as str
+                    self.emit_str(pty)
+                    self.emit_str(" %")
+                    self.emit_str(int_to_str(arg_regs.ptr[k]).as_ptr() as str)
+                    k = k + 1usize
                 }
                 self.emit_str(")\n")
                 return 0
@@ -1367,16 +1567,14 @@ impl Codegen {
             self.emit_str(" @")
             self.emit_str(callee_name)
             self.emit_str("(")
-            var j = 0usize
-            while j < arg_regs.len {
-                if j > 0usize { self.emit_str(", ") }
-                if arg_is_ptrs.ptr[j] == 1 {
-                    self.emit_str("ptr %")
-                } else {
-                    self.emit_str("i64 %")
-                }
-                self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
-                j = j + 1usize
+            var k = 0usize
+            while k < arg_regs.len {
+                if k > 0usize { self.emit_str(", ") }
+                let pty = final_types.ptr[k] as str
+                self.emit_str(pty)
+                self.emit_str(" %")
+                self.emit_str(int_to_str(arg_regs.ptr[k]).as_ptr() as str)
+                k = k + 1usize
             }
             self.emit_str(")\n")
             if str_eq(ret_ty, "i32") {
@@ -2366,7 +2564,8 @@ impl Codegen {
                    !str_eq(fname, "fopen") && !str_eq(fname, "fclose") && !str_eq(fname, "fread") &&
                    !str_eq(fname, "fwrite") && !str_eq(fname, "fseek") && !str_eq(fname, "ftell") &&
                    !str_eq(fname, "getenv") && !str_eq(fname, "strcmp") && !str_eq(fname, "exit") &&
-                   !str_eq(fname, "dprintf") && !str_eq(fname, "sqrt") && !str_eq(fname, "remove") {
+                   !str_eq(fname, "dprintf") && !str_eq(fname, "sqrt") && !str_eq(fname, "remove") &&
+                   !str_starts_with(fname, "syscall") {
                     var already_declared = false
                     var prev_i = 0usize
                     while prev_i < ext_i {

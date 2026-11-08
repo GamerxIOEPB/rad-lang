@@ -1,0 +1,43 @@
+// Test pure-Rad time, duration arithmetic, and FrameTimer frame pacing
+fn main() {
+    let d1 = Duration.from_millis(500u64)
+    let d2 = Duration.from_millis(250u64)
+    let d_sum = d1.add(d2)
+    let d_diff = d1.sub(d2)
+
+    if d_sum.as_millis() == 750u64 {
+        println("duration_add: true")
+    } else {
+        println("duration_add: false")
+    }
+
+    if d_diff.as_millis() == 250u64 {
+        println("duration_sub: true")
+    } else {
+        println("duration_sub: false")
+    }
+
+    let t0 = Instant.now()
+    sleep_ms(15u64)
+    let elapsed = t0.elapsed()
+    if elapsed.as_millis() >= 10u64 {
+        println("sleep_ms: true")
+    } else {
+        println("sleep_ms: false")
+    }
+
+    var timer = FrameTimer.new(120u32)
+    var i = 0
+    var pace_ok = true
+    while i < 3 {
+        let dt = timer.tick()
+        timer.pace()
+        if dt < 0.0 { pace_ok = false }
+        i = i + 1
+    }
+    if pace_ok {
+        println("frametimer_pace: true")
+    } else {
+        println("frametimer_pace: false")
+    }
+}

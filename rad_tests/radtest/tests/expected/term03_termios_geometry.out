@@ -1,0 +1,3 @@
+term_geometry: true
+term_buffers: true
+term_cleanup: true

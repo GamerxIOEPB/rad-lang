@@ -1,0 +1,47 @@
+// Test native KeyEvent model, modifiers, and non-blocking reader polling
+fn main() {
+    let e_none = KeyEvent.none()
+    let e_char = KeyEvent.char(113u8) // 'q'
+    let e_ctrl = KeyEvent { code: KEY_CHAR, char_val: 99u8, ctrl: true, alt: false, shift: false } // Ctrl+C
+    let e_up = KeyEvent.key(KEY_UP)
+
+    if e_none.code == KEY_NONE {
+        println("key_none: true")
+    } else {
+        println("key_none: false")
+    }
+
+    if e_char.is_char(113u8) && !e_char.is_ctrl(113u8) {
+        println("key_char: true")
+    } else {
+        println("key_char: false")
+    }
+
+    if e_ctrl.is_ctrl(99u8) && !e_ctrl.is_char(99u8) {
+        println("key_ctrl: true")
+    } else {
+        println("key_ctrl: false")
+    }
+
+    if e_up.code == KEY_UP {
+        println("key_nav: true")
+    } else {
+        println("key_nav: false")
+    }
+
+    var kbd = KeyboardReader.new()
+    let _polled = kbd.poll(0)
+    let polled_evt = kbd.read_key(0)
+    if polled_evt.code == KEY_NONE {
+        println("kbd_nonblocking: true")
+    } else {
+        println("kbd_nonblocking: false")
+    }
+
+    kbd.close_reader()
+    if (kbd.pollfd as usize) == 0usize {
+        println("kbd_cleanup: true")
+    } else {
+        println("kbd_cleanup: false")
+    }
+}
