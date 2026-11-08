@@ -99,17 +99,34 @@ The arcade games are powered by native standard library infrastructure under `li
 
 ## How to Build & Run
 
-All games can be compiled directly using the self-hosted Rad compiler (`radc`):
+Thanks to Rad's native standard-library module import system, each game can now be compiled directly with a single source file invocation:
 
 ```bash
-# Compile and run any game:
-radc library/std/src/os/linux/syscall.rad \
-     library/std/src/terminal.rad \
-     library/std/src/keyboard.rad \
-     library/std/src/console.rad \
-     library/std/src/time.rad \
-     rad_tests/rad_arcade/tetris/main.rad \
-     -o rad_tests/rad_arcade/tetris/tetris
-
-./rad_tests/rad_arcade/tetris/tetris
+# Compile and run any game directly:
+radc rad_tests/rad_arcade/tetris/main.rad -o tetris
+./tetris
 ```
+
+You can compile and run any of the arcade games in the exact same way:
+
+```bash
+# Pong
+radc rad_tests/rad_arcade/pong/main.rad -o pong && ./pong
+
+# Snake
+radc rad_tests/rad_arcade/snake/main.rad -o snake && ./snake
+
+# Breakout
+radc rad_tests/rad_arcade/breakout/main.rad -o breakout && ./breakout
+
+# Space Invaders
+radc rad_tests/rad_arcade/invaders/main.rad -o invaders && ./invaders
+
+# Dungeon Crawler
+radc rad_tests/rad_arcade/dungeon/main.rad -o dungeon && ./dungeon
+
+# 3D Raycaster
+radc rad_tests/rad_arcade/raycaster/main.rad -o raycaster && ./raycaster
+```
+
+All standard library terminal, keyboard, console, and timing dependencies (`std::terminal`, `std::keyboard`, `std::console`, `std::time`) are resolved and compiled automatically.
