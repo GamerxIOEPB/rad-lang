@@ -372,28 +372,33 @@ fn main() {
     while running {
         let dt = timer.tick()
 
-        // Handle user input
-        let evt = kbd.read_key(0)
-        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
-            running = false
-        } else if evt.is_char(109u8) { // 'm': Toggle minimap
-            game.show_map = !game.show_map
-        } else {
-            let move_step: f64 = 0.35
-            let turn_step: f64 = 0.15
+        // Drain and handle all pending user input
+        while true {
+            let evt = kbd.read_key(0)
+            if evt.code == KEY_NONE {
+                break
+            }
+            if (evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof()) && !evt.is_release { // Esc, 'q', Ctrl+C, EOF
+                running = false
+            } else if evt.is_char(109u8) { // 'm': Toggle minimap
+                game.show_map = !game.show_map
+            } else if !evt.is_release {
+                let move_step: f64 = 0.35
+                let turn_step: f64 = 0.15
 
-            if evt.code == KEY_UP || evt.is_char(119u8) { // Up / 'w': Forward
-                game.move_player(move_step, 0.0)
-            } else if evt.code == KEY_DOWN || evt.is_char(115u8) { // Down / 's': Backward
-                game.move_player(0.0 - move_step, 0.0)
-            } else if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a': Turn Left
-                game.rotate_player(0.0 - turn_step)
-            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd': Turn Right
-                game.rotate_player(turn_step)
-            } else if evt.is_char(101u8) { // 'e': Strafe Right
-                game.move_player(0.0, move_step)
-            } else if evt.is_char(122u8) { // 'z': Strafe Left
-                game.move_player(0.0, 0.0 - move_step)
+                if evt.code == KEY_UP || evt.is_char(119u8) { // Up / 'w': Forward
+                    game.move_player(move_step, 0.0)
+                } else if evt.code == KEY_DOWN || evt.is_char(115u8) { // Down / 's': Backward
+                    game.move_player(0.0 - move_step, 0.0)
+                } else if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a': Turn Left
+                    game.rotate_player(0.0 - turn_step)
+                } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd': Turn Right
+                    game.rotate_player(turn_step)
+                } else if evt.is_char(101u8) { // 'e': Strafe Right
+                    game.move_player(0.0, move_step)
+                } else if evt.is_char(122u8) { // 'z': Strafe Left
+                    game.move_player(0.0, 0.0 - move_step)
+                }
             }
         }
 

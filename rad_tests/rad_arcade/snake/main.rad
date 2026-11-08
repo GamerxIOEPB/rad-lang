@@ -290,23 +290,28 @@ fn main() {
     while running {
         let dt = timer.tick()
 
-        // Handle user input
-        let evt = kbd.read_key(0)
-        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
-            running = false
-        } else if evt.is_char(112u8) { // 'p': Pause
-            game.paused = !game.paused
-        } else if evt.is_char(114u8) && game.game_over { // 'r': Restart
-            game.reset()
-        } else if !game.paused && !game.game_over {
-            if evt.code == KEY_UP || evt.is_char(119u8) { // Up / 'w'
-                game.set_direction(0, -1)
-            } else if evt.code == KEY_DOWN || evt.is_char(115u8) { // Down / 's'
-                game.set_direction(0, 1)
-            } else if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
-                game.set_direction(-1, 0)
-            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
-                game.set_direction(1, 0)
+        // Drain and handle all pending user input
+        while true {
+            let evt = kbd.read_key(0)
+            if evt.code == KEY_NONE {
+                break
+            }
+            if (evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof()) && !evt.is_release { // Esc, 'q', Ctrl+C, EOF
+                running = false
+            } else if evt.is_char(112u8) { // 'p': Pause
+                game.paused = !game.paused
+            } else if evt.is_char(114u8) && game.game_over { // 'r': Restart
+                game.reset()
+            } else if !game.paused && !game.game_over && !evt.is_release {
+                if evt.code == KEY_UP || evt.is_char(119u8) { // Up / 'w'
+                    game.set_direction(0, -1)
+                } else if evt.code == KEY_DOWN || evt.is_char(115u8) { // Down / 's'
+                    game.set_direction(0, 1)
+                } else if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
+                    game.set_direction(-1, 0)
+                } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
+                    game.set_direction(1, 0)
+                }
             }
         }
 

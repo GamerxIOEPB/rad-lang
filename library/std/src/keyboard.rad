@@ -40,31 +40,36 @@ pub struct KeyEvent {
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
+    pub is_release: bool,
 }
 
 impl KeyEvent {
     pub fn none() -> KeyEvent {
-        KeyEvent { code: KEY_NONE, char_val: 0u8, ctrl: false, alt: false, shift: false }
+        KeyEvent { code: KEY_NONE, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: false }
     }
 
     pub fn char(ch: u8) -> KeyEvent {
-        KeyEvent { code: KEY_CHAR, char_val: ch, ctrl: false, alt: false, shift: false }
+        KeyEvent { code: KEY_CHAR, char_val: ch, ctrl: false, alt: false, shift: false, is_release: false }
     }
 
     pub fn key(code: i32) -> KeyEvent {
-        KeyEvent { code: code, char_val: 0u8, ctrl: false, alt: false, shift: false }
+        KeyEvent { code: code, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: false }
     }
 
     pub fn is_char(self, ch: u8) -> bool {
-        self.code == KEY_CHAR && self.char_val == ch && !self.ctrl
+        self.code == KEY_CHAR && self.char_val == ch && !self.ctrl && !self.is_release
     }
 
     pub fn is_ctrl(self, ch: u8) -> bool {
-        self.code == KEY_CHAR && self.char_val == ch && self.ctrl
+        self.code == KEY_CHAR && self.char_val == ch && self.ctrl && !self.is_release
     }
 
     pub fn is_eof(self) -> bool {
         self.code == KEY_EOF
+    }
+
+    pub fn is_press(self) -> bool {
+        self.code != KEY_NONE && self.code != KEY_EOF && !self.is_release
     }
 }
 
@@ -125,7 +130,7 @@ impl KeyboardReader {
         // SYS_read = 0, STDIN_FILENO = 0: read 1 byte first to prevent discarding queued keystrokes
         var n = syscall3(0i64, 0i64, buf, 1i64)
         if n == 0i64 {
-            return KeyEvent { code: KEY_EOF, char_val: 0u8, ctrl: false, alt: false, shift: false }
+            return KeyEvent { code: KEY_EOF, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: false }
         }
         if n < 0i64 {
             return KeyEvent.none()
@@ -138,12 +143,12 @@ impl KeyboardReader {
             // Wait up to 30ms for following escape sequence bytes
             let follow = self.poll(30)
             if !follow {
-                return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false }
+                return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false, is_release: false }
             }
             let buf_cont = (buf as usize + 1usize) as *raw var u8
             let n2 = syscall3(0i64, 0i64, buf_cont, 63i64)
             if n2 <= 0i64 {
-                return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false }
+                return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false, is_release: false }
             }
             n = n + n2
 
@@ -151,7 +156,7 @@ impl KeyboardReader {
 
             // Alt + character: \x1b followed by ASCII char
             if n == 2i64 && b1 >= 32u8 && b1 < 127u8 {
-                return KeyEvent { code: KEY_CHAR, char_val: b1, ctrl: false, alt: true, shift: false }
+                return KeyEvent { code: KEY_CHAR, char_val: b1, ctrl: false, alt: true, shift: false, is_release: false }
             }
 
             // SS3 sequence: \x1bO [P, Q, R, S] -> F1, F2, F3, F4
@@ -165,40 +170,51 @@ impl KeyboardReader {
 
             // CSI sequence: \x1b[ ...
             if b1 == 91u8 && n >= 3i64 {
-                let b2 = buf[2usize]
-                if b2 == 65u8 { return KeyEvent.key(KEY_UP) }
-                if b2 == 66u8 { return KeyEvent.key(KEY_DOWN) }
-                if b2 == 67u8 { return KeyEvent.key(KEY_RIGHT) }
-                if b2 == 68u8 { return KeyEvent.key(KEY_LEFT) }
-                if b2 == 72u8 { return KeyEvent.key(KEY_HOME) }
-                if b2 == 70u8 { return KeyEvent.key(KEY_END) }
+                var is_rel = false
+                var si = 2usize
+                let s_limit = (n - 1i64) as usize
+                while si < s_limit {
+                    if buf[si] == 58u8 && buf[si + 1usize] == 51u8 { // ":3" release
+                        is_rel = true
+                    }
+                    si = si + 1usize
+                }
 
+                let last_b = buf[(n - 1i64) as usize]
+
+                // Arrows (legacy \x1b[A..\x1b[D and Kitty \x1b[1;1:1A / \x1b[1;1:3A)
+                if last_b == 65u8 { return KeyEvent { code: KEY_UP, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                if last_b == 66u8 { return KeyEvent { code: KEY_DOWN, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                if last_b == 67u8 { return KeyEvent { code: KEY_RIGHT, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                if last_b == 68u8 { return KeyEvent { code: KEY_LEFT, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                if last_b == 72u8 { return KeyEvent { code: KEY_HOME, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                if last_b == 70u8 { return KeyEvent { code: KEY_END, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+
+                let b2 = buf[2usize]
                 if n >= 4i64 && buf[3usize] == 126u8 { // ~ terminator
-                    if b2 == 49u8 { return KeyEvent.key(KEY_HOME) }
-                    if b2 == 50u8 { return KeyEvent.key(KEY_INSERT) }
-                    if b2 == 51u8 { return KeyEvent.key(KEY_DELETE) }
-                    if b2 == 52u8 { return KeyEvent.key(KEY_END) }
-                    if b2 == 53u8 { return KeyEvent.key(KEY_PAGE_UP) }
-                    if b2 == 54u8 { return KeyEvent.key(KEY_PAGE_DOWN) }
+                    if b2 == 49u8 { return KeyEvent { code: KEY_HOME, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 50u8 { return KeyEvent { code: KEY_INSERT, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 51u8 { return KeyEvent { code: KEY_DELETE, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 52u8 { return KeyEvent { code: KEY_END, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 53u8 { return KeyEvent { code: KEY_PAGE_UP, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 54u8 { return KeyEvent { code: KEY_PAGE_DOWN, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
                 }
 
                 // F5 - F12 sequences: \x1b[15~ .. \x1b[24~
                 if n >= 5i64 && buf[4usize] == 126u8 {
                     let b3 = buf[3usize]
-                    if b2 == 49u8 && b3 == 53u8 { return KeyEvent.key(KEY_F5) }
-                    if b2 == 49u8 && b3 == 55u8 { return KeyEvent.key(KEY_F6) }
-                    if b2 == 49u8 && b3 == 56u8 { return KeyEvent.key(KEY_F7) }
-                    if b2 == 49u8 && b3 == 57u8 { return KeyEvent.key(KEY_F8) }
-                    if b2 == 50u8 && b3 == 48u8 { return KeyEvent.key(KEY_F9) }
-                    if b2 == 50u8 && b3 == 49u8 { return KeyEvent.key(KEY_F10) }
-                    if b2 == 50u8 && b3 == 51u8 { return KeyEvent.key(KEY_F11) }
-                    if b2 == 50u8 && b3 == 52u8 { return KeyEvent.key(KEY_F12) }
+                    if b2 == 49u8 && b3 == 53u8 { return KeyEvent { code: KEY_F5, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 49u8 && b3 == 55u8 { return KeyEvent { code: KEY_F6, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 49u8 && b3 == 56u8 { return KeyEvent { code: KEY_F7, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 49u8 && b3 == 57u8 { return KeyEvent { code: KEY_F8, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 50u8 && b3 == 48u8 { return KeyEvent { code: KEY_F9, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 50u8 && b3 == 49u8 { return KeyEvent { code: KEY_F10, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 50u8 && b3 == 51u8 { return KeyEvent { code: KEY_F11, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
+                    if b2 == 50u8 && b3 == 52u8 { return KeyEvent { code: KEY_F12, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel } }
                 }
 
                 // Kitty Keyboard Protocol: \x1b[ {key} ; {mod} u or \x1b[ {key} u
-                let last_b = buf[(n - 1i64) as usize]
                 if last_b == 117u8 { // 'u'
-                    // Basic fallback decoding of Kitty key code
                     if b2 >= 48u8 && b2 <= 57u8 {
                         var key_val = (b2 - 48u8) as i32
                         var ki = 3usize
@@ -208,7 +224,31 @@ impl KeyboardReader {
                             ki = ki + 1usize
                         }
                         if key_val >= 32 && key_val < 127 {
-                            return KeyEvent.char(key_val as u8)
+                            return KeyEvent { code: KEY_CHAR, char_val: key_val as u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
+                        }
+                        if key_val == 13 || key_val == 10 {
+                            return KeyEvent { code: KEY_ENTER, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
+                        }
+                        if key_val == 27 {
+                            return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
+                        }
+                        if key_val == 9 {
+                            return KeyEvent { code: KEY_TAB, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
+                        }
+                        if key_val == 127 || key_val == 8 {
+                            return KeyEvent { code: KEY_BACKSPACE, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
+                        }
+                        if key_val == 57376 {
+                            return KeyEvent { code: KEY_UP, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
+                        }
+                        if key_val == 57377 {
+                            return KeyEvent { code: KEY_DOWN, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
+                        }
+                        if key_val == 57378 {
+                            return KeyEvent { code: KEY_LEFT, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
+                        }
+                        if key_val == 57379 {
+                            return KeyEvent { code: KEY_RIGHT, char_val: 0u8, ctrl: false, alt: false, shift: false, is_release: is_rel }
                         }
                     }
                 }
@@ -235,7 +275,7 @@ impl KeyboardReader {
         // Ctrl + letter: ASCII 1..26
         if b0 >= 1u8 && b0 <= 26u8 {
             let ch = 96u8 + b0 // 1 -> 'a' (97), 3 -> 'c' (99)
-            return KeyEvent { code: KEY_CHAR, char_val: ch, ctrl: true, alt: false, shift: false }
+            return KeyEvent { code: KEY_CHAR, char_val: ch, ctrl: true, alt: false, shift: false, is_release: false }
         }
 
         // Printable ASCII

@@ -517,32 +517,38 @@ fn main() {
         let dt = timer.tick()
 
         // Handle user input
-        let evt = kbd.read_key(0)
-        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
-            running = false
-        } else if evt.is_char(112u8) { // 'p'
-            game.paused = !game.paused
-        } else if evt.is_char(114u8) && game.game_over { // 'r' restart
-            game.destroy()
-            game = TetrisGame.new()
-        } else if !game.paused && !game.game_over {
-            if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
-                if !game.check_collision(game.cur_x - 1, game.cur_y, game.cur_rot) {
-                    game.cur_x = game.cur_x - 1
+        // Drain and handle all pending user input
+        while true {
+            let evt = kbd.read_key(0)
+            if evt.code == KEY_NONE {
+                break
+            }
+            if (evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof()) && !evt.is_release { // Esc, 'q', Ctrl+C, EOF
+                running = false
+            } else if evt.is_char(112u8) { // 'p'
+                game.paused = !game.paused
+            } else if evt.is_char(114u8) && game.game_over { // 'r' restart
+                game.destroy()
+                game = TetrisGame.new()
+            } else if !game.paused && !game.game_over && !evt.is_release {
+                if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
+                    if !game.check_collision(game.cur_x - 1, game.cur_y, game.cur_rot) {
+                        game.cur_x = game.cur_x - 1
+                    }
+                } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
+                    if !game.check_collision(game.cur_x + 1, game.cur_y, game.cur_rot) {
+                        game.cur_x = game.cur_x + 1
+                    }
+                } else if evt.code == KEY_UP || evt.is_char(119u8) { // Up / 'w' rotate
+                    let next_rot = (game.cur_rot + 1) % 4
+                    if !game.check_collision(game.cur_x, game.cur_y, next_rot) {
+                        game.cur_rot = next_rot
+                    }
+                } else if evt.code == KEY_DOWN || evt.is_char(115u8) { // Down / 's'
+                    game.drop()
+                } else if evt.is_char(32u8) { // Space (hard drop)
+                    game.hard_drop()
                 }
-            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
-                if !game.check_collision(game.cur_x + 1, game.cur_y, game.cur_rot) {
-                    game.cur_x = game.cur_x + 1
-                }
-            } else if evt.code == KEY_UP || evt.is_char(119u8) { // Up / 'w' rotate
-                let next_rot = (game.cur_rot + 1) % 4
-                if !game.check_collision(game.cur_x, game.cur_y, next_rot) {
-                    game.cur_rot = next_rot
-                }
-            } else if evt.code == KEY_DOWN || evt.is_char(115u8) { // Down / 's'
-                game.drop()
-            } else if evt.is_char(32u8) { // Space (hard drop)
-                game.hard_drop()
             }
         }
 

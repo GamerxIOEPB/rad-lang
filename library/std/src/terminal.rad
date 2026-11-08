@@ -133,18 +133,18 @@ impl TerminalSession {
 
     pub fn enter_alternate_screen(var self) {
         if !self.in_alt_screen {
-            // \x1b[?1049h
-            let cmd = "\x1b[?1049h"
-            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 8i64)
+            // \x1b[?1049h\x1b[>3u : enter alt screen and request Kitty progressive enhancement (flags 1|2)
+            let cmd = "\x1b[?1049h\x1b[>3u"
+            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 14i64)
             self.in_alt_screen = true
         }
     }
 
     pub fn leave_alternate_screen(var self) {
         if self.in_alt_screen {
-            // \x1b[?1049l
-            let cmd = "\x1b[?1049l"
-            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 8i64)
+            // \x1b[<u\x1b[?1049l : pop Kitty flags and leave alt screen
+            let cmd = "\x1b[<u\x1b[?1049l"
+            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 12i64)
             self.in_alt_screen = false
         }
     }
@@ -196,6 +196,8 @@ impl TerminalSession {
     }
 
     pub fn close(var self) {
+        let cmd = "\x1b[<u"
+        let _w = syscall3(1i64, 1i64, cmd as *raw u8, 4i64)
         self.show_cursor()
         self.leave_alternate_screen()
         self.restore_mode()

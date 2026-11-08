@@ -291,28 +291,66 @@ fn main() {
     var timer = FrameTimer.new(60u32)
     var game = BreakoutGame.new()
 
+    var paddle_vx: f64 = 0.0
+    var paddle_timer: f64 = 0.0
+    var has_release = false
+
     var running = true
     while running {
         let dt = timer.tick()
 
-        // Handle user input
-        let evt = kbd.read_key(0)
-        if evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof() { // Esc, 'q', Ctrl+C, EOF
-            running = false
-        } else if evt.is_char(112u8) { // 'p': Pause
-            game.paused = !game.paused
-        } else if evt.is_char(114u8) && (game.game_over || game.won) { // 'r': Restart
-            game.destroy()
-            game = BreakoutGame.new()
-        } else if !game.paused && !game.game_over && !game.won {
-            let paddle_step: f64 = 2.0
+        // Drain and handle all pending user input events
+        while true {
+            let evt = kbd.read_key(0)
+            if evt.code == KEY_NONE {
+                break
+            }
+            if evt.is_release {
+                has_release = true
+            }
 
-            if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
-                game.move_paddle(0.0 - paddle_step)
-            } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
-                game.move_paddle(paddle_step)
-            } else if evt.is_char(32u8) || evt.code == KEY_UP || evt.is_char(119u8) { // Space / Up / 'w'
-                game.launch_ball()
+            if (evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof()) && !evt.is_release {
+                running = false
+            } else if evt.is_char(112u8) { // 'p': Pause
+                game.paused = !game.paused
+                paddle_vx = 0.0
+            } else if evt.is_char(114u8) && (game.game_over || game.won) { // 'r': Restart
+                game.destroy()
+                game = BreakoutGame.new()
+                paddle_vx = 0.0
+            } else if !game.paused && !game.game_over && !game.won {
+                let paddle_speed: f64 = 40.0
+
+                if evt.code == KEY_LEFT || evt.is_char(97u8) { // Left / 'a'
+                    if evt.is_release {
+                        if paddle_vx < 0.0 { paddle_vx = 0.0 }
+                    } else {
+                        paddle_vx = 0.0 - paddle_speed
+                        paddle_timer = 0.12
+                    }
+                } else if evt.code == KEY_RIGHT || evt.is_char(100u8) { // Right / 'd'
+                    if evt.is_release {
+                        if paddle_vx > 0.0 { paddle_vx = 0.0 }
+                    } else {
+                        paddle_vx = paddle_speed
+                        paddle_timer = 0.12
+                    }
+                } else if (evt.is_char(32u8) || evt.code == KEY_UP || evt.is_char(119u8)) && !evt.is_release { // Space / Up / 'w'
+                    game.launch_ball()
+                }
+            }
+        }
+
+        // Apply continuous paddle velocity at 60 FPS
+        if !game.paused && !game.game_over && !game.won {
+            if paddle_vx != 0.0 {
+                game.move_paddle(paddle_vx * dt)
+                if !has_release {
+                    paddle_timer = paddle_timer - dt
+                    if paddle_timer <= 0.0 {
+                        paddle_vx = 0.0
+                    }
+                }
             }
         }
 
