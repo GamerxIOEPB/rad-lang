@@ -8,7 +8,7 @@
 set -eu
 
 # Default configuration
-DEFAULT_VERSION="0.1.0"
+DEFAULT_VERSION="0.2.0"
 DEFAULT_REPO="GamerxIOEPB/rad-lang"
 DEFAULT_RAD_HOME="$HOME/.rad"
 
@@ -206,10 +206,8 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
     log_step "Staging toolchain binaries..."
     cp "$LOCAL_REPO/bin/radc" "$STAGE_DIR/bin/radc"
     cp "$LOCAL_REPO/bin/rad" "$STAGE_DIR/bin/rad"
-    cp "$LOCAL_REPO/bin/rad-llc" "$STAGE_DIR/bin/rad-llc"
-    cp "$LOCAL_REPO/bin/rad-lld" "$STAGE_DIR/bin/rad-lld"
-    cp "$LOCAL_REPO/bin/rad-llc" "$STAGE_DIR/bin/rad-clang"
-    cp "$LOCAL_REPO/bin/rad-llc" "$STAGE_DIR/bin/rad-clang++"
+    cp "$LOCAL_REPO/bin/rad-clang" "$STAGE_DIR/bin/rad-clang"
+    cp "$LOCAL_REPO/bin/rad-clang++" "$STAGE_DIR/bin/rad-clang++"
     chmod 755 "$STAGE_DIR/bin"/*
 
     log_step "Staging Rad standard library..."
@@ -355,7 +353,7 @@ fi
 
 # 5. Pre-installation Executable Validation
 log_info "Validating toolchain components..."
-for bin in rad radc rad-llc rad-lld rad-clang rad-clang++; do
+for bin in rad radc rad-clang rad-clang++; do
     if [ ! -f "$STAGE_DIR/bin/$bin" ]; then
         log_error "Essential executable missing in distribution: bin/$bin"
         exit 1

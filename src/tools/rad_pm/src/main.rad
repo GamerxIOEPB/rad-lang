@@ -541,32 +541,18 @@ fn cmd_doctor(argv0: str) -> i32 {
         all_ok = false
     }
 
-    // 2. Check rad-llc / llc
-    let llc_status = system("rad-llc --version >/dev/null 2>&1")
-    if llc_status == 0 {
-        println("  [OK] LLVM backend (rad-llc): found")
-    } else {
-        let llc_fb = system("llc --version >/dev/null 2>&1")
-        if llc_fb == 0 {
-            println("  [OK] LLVM backend (llc fallback): found")
-        } else {
-            println("  [!!] LLVM backend: neither `rad-llc` nor `llc` found in PATH")
-            all_ok = false
-        }
-    }
+    // 2. Check LLVM backend (embedded in radc)
+    println("  [OK] LLVM backend: embedded in radc")
 
-    // 3. Check rad-lld / ld.lld
-    let lld_status = system("rad-lld --version >/dev/null 2>&1")
-    if lld_status == 0 {
-        println("  [OK] Linker (rad-lld): found")
+    // 3. Check Linker (embedded in radc)
+    println("  [OK] Linker: embedded in radc")
+
+    // 4. Check C/C++ Interop (rad-clang / rad-clang++)
+    let clang_status = system("rad-clang++ --version >/dev/null 2>&1")
+    if clang_status == 0 {
+        println("  [OK] C/C++ compiler (rad-clang++): found")
     } else {
-        let lld_fb = system("ld.lld --version >/dev/null 2>&1")
-        if lld_fb == 0 {
-            println("  [OK] Linker (ld.lld fallback): found")
-        } else {
-            println("  [!!] Linker: neither `rad-lld` nor `ld.lld` found in PATH")
-            all_ok = false
-        }
+        println("  [--] C/C++ compiler (rad-clang++): optional, not in PATH")
     }
 
     // 4. Check Target Sysroot (x86_64-unknown-linux-musl)

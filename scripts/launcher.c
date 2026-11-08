@@ -40,15 +40,9 @@ int main(int argc, char **argv) {
     if (strstr(base, "clang++") != NULL) {
         snprintf(target_binary, sizeof(target_binary), "%s/clang++", lib_llvm);
         argv[0] = "clang++";
-    } else if (strstr(base, "clang") != NULL) {
+    } else {
         snprintf(target_binary, sizeof(target_binary), "%s/clang", lib_llvm);
         argv[0] = "clang";
-    } else if (strstr(base, "lld") != NULL) {
-        snprintf(target_binary, sizeof(target_binary), "%s/ld.lld", lib_llvm);
-        argv[0] = "ld.lld";
-    } else {
-        snprintf(target_binary, sizeof(target_binary), "%s/llc_real", lib_llvm);
-        argv[0] = "llc";
     }
 
     execv(target_binary, argv);

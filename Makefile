@@ -57,21 +57,17 @@ LAUNCHER_SRC := scripts/launcher.c
 BIN_DIR := bin
 BIN_RADC := $(BIN_DIR)/radc
 BIN_RAD  := $(BIN_DIR)/rad
-BIN_LLC  := $(BIN_DIR)/rad-llc
-BIN_LLD     := $(BIN_DIR)/rad-lld
 BIN_CLANG   := $(BIN_DIR)/rad-clang
 BIN_CLANGXX := $(BIN_DIR)/rad-clang++
 
 .PHONY: all radc rad launchers dist install clean help check-radc
 
-all: check-radc $(BIN_RADC) $(BIN_RAD) $(BIN_LLC) $(BIN_LLD) $(BIN_CLANG) $(BIN_CLANGXX)
+all: check-radc $(BIN_RADC) $(BIN_RAD) $(BIN_CLANG) $(BIN_CLANGXX)
 	@echo ""
 	@echo "======================================================================"
 	@echo " Rad Toolchain Built Successfully into $(BIN_DIR)/"
 	@echo "   - $(BIN_RADC)"
 	@echo "   - $(BIN_RAD)"
-	@echo "   - $(BIN_LLC)"
-	@echo "   - $(BIN_LLD)"
 	@echo "   - $(BIN_CLANG)"
 	@echo "   - $(BIN_CLANGXX)"
 	@echo "======================================================================"
@@ -118,18 +114,21 @@ $(BIN_RAD): $(RAD_SRCS) $(BIN_RADC)
 	$(BIN_RADC) $(RAD_SRCS) -o $(BIN_RAD) $(RAD_FLAGS)
 	@chmod 755 $(BIN_RAD)
 
-launchers: $(BIN_LLC) $(BIN_LLD) $(BIN_CLANG) $(BIN_CLANGXX)
+launchers: $(BIN_CLANG) $(BIN_CLANGXX)
 
-$(BIN_LLC): $(LAUNCHER_SRC) $(SYSROOT)/crt/rcrt1.o
+$(BIN_CLANG): $(LAUNCHER_SRC) $(SYSROOT)/crt/rcrt1.o
 	@mkdir -p $(BIN_DIR)
-	@if [ -x "$(HOME)/.rad/bin/rad-llc" ]; then \
-		echo "==> Using prebuilt launcher from $(HOME)/.rad/bin/rad-llc..."; \
-		cp -f "$(HOME)/.rad/bin/rad-llc" $(BIN_LLC); \
+	@if [ -x "$(PREFIX)/bin/rad-clang" ]; then \
+		echo "==> Using prebuilt launcher from $(PREFIX)/bin/rad-clang..."; \
+		cp -f "$(PREFIX)/bin/rad-clang" $(BIN_CLANG); \
+	elif [ -x "$(HOME)/.rad/bin/rad-clang" ]; then \
+		echo "==> Using prebuilt launcher from $(HOME)/.rad/bin/rad-clang..."; \
+		cp -f "$(HOME)/.rad/bin/rad-clang" $(BIN_CLANG); \
 	else \
 		echo "==> Building static PIE launcher ($@)..."; \
 		clang -c -target $(TARGET_TRIPLE) $(LAUNCHER_SRC) -o $(BIN_DIR)/launcher.o; \
 		ld.lld -flavor gnu -m elf_x86_64 -static -pie --no-dynamic-linker -z text -z noexecstack \
-			-o $(BIN_LLC) \
+			-o $(BIN_CLANG) \
 			$(SYSROOT)/crt/rcrt1.o \
 			$(SYSROOT)/crt/crti.o \
 			$(BIN_DIR)/launcher.o \
@@ -138,24 +137,12 @@ $(BIN_LLC): $(LAUNCHER_SRC) $(SYSROOT)/crt/rcrt1.o
 			$(SYSROOT)/crt/crtn.o; \
 		rm -f $(BIN_DIR)/launcher.o; \
 	fi
-	@chmod 755 $(BIN_LLC)
-
-$(BIN_LLD): $(BIN_LLC)
-	@mkdir -p $(BIN_DIR)
-	@echo "==> Creating linker launcher ($@)..."
-	cp -f $(BIN_LLC) $(BIN_LLD)
-	@chmod 755 $(BIN_LLD)
-
-$(BIN_CLANG): $(BIN_LLC)
-	@mkdir -p $(BIN_DIR)
-	@echo "==> Creating C compiler launcher ($@)..."
-	cp -f $(BIN_LLC) $(BIN_CLANG)
 	@chmod 755 $(BIN_CLANG)
 
-$(BIN_CLANGXX): $(BIN_LLC)
+$(BIN_CLANGXX): $(BIN_CLANG)
 	@mkdir -p $(BIN_DIR)
 	@echo "==> Creating C++ compiler launcher ($@)..."
-	cp -f $(BIN_LLC) $(BIN_CLANGXX)
+	cp -f $(BIN_CLANG) $(BIN_CLANGXX)
 	@chmod 755 $(BIN_CLANGXX)
 
 dist:
@@ -187,10 +174,10 @@ help:
 	@echo "Rad Build System"
 	@echo "================="
 	@echo "Targets:"
-	@echo "  all        - Build radc, rad, rad-llc, and rad-lld into bin/ (default)"
-	@echo "  radc       - Compile self-hosted radc compiler using existing radc"
+	@echo "  all        - Build radc, rad, rad-clang, and rad-clang++ into bin/ (default)"
+	@echo "  radc       - Compile self-hosted radc compiler (with embedded LLVM & LLD)"
 	@echo "  rad        - Compile native package manager using radc"
-	@echo "  launchers  - Compile static PIE rad-llc and rad-lld wrappers"
+	@echo "  launchers  - Compile static PIE rad-clang and rad-clang++ wrappers"
 	@echo "  dist       - Build distribution archives (.tar.gz) and SHA256SUMS"
 	@echo "  install    - Install built binaries and standard library to PREFIX (default: ~/.rad)"
 	@echo "  clean      - Remove bin/ and temporary distribution outputs"

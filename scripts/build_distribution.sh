@@ -2,13 +2,13 @@
 # ==============================================================================
 # scripts/build_distribution.sh — Rad Toolchain Distribution Builder & Publisher
 # Produces only the single complete, all-in-one distribution archive:
-#   rad-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+#   rad-0.2.0-x86_64-unknown-linux-gnu.tar.gz
 #
 # Flags:
 #   --upload, -u           Upload the release archive to GitHub Releases
 #   --title <title>        Override release title (default: UTC date/time e.g. "11/5/2026 7:15 P.M.")
 #   --desc, --notes <text> Release description / release notes
-#   --tag <tag>            Release git tag (default: "v0.1.0")
+#   --tag <tag>            Release git tag (default: "v0.2.0")
 #   -y, --yes              Non-interactive mode (auto-proceed with upload, ideal for AI agents)
 #   -h, --help             Show help
 # ==============================================================================
@@ -116,19 +116,15 @@ echo "==> [1/4] Building production binaries via Makefile..."
 make -C "$ROOT_DIR" all
 
 # Safety fallback: if launchers weren't compiled, copy from ~/.rad/bin if available
-if [ ! -f "$ROOT_DIR/bin/rad-llc" ] && [ -f "$HOME/.rad/bin/rad-llc" ]; then
-    cp "$HOME/.rad/bin/rad-llc" "$ROOT_DIR/bin/rad-llc"
-    cp "$HOME/.rad/bin/rad-llc" "$ROOT_DIR/bin/rad-lld"
-    cp "$HOME/.rad/bin/rad-llc" "$ROOT_DIR/bin/rad-clang"
-    cp "$HOME/.rad/bin/rad-llc" "$ROOT_DIR/bin/rad-clang++"
+if [ ! -f "$ROOT_DIR/bin/rad-clang" ] && [ -f "$HOME/.rad/bin/rad-clang" ]; then
+    cp "$HOME/.rad/bin/rad-clang" "$ROOT_DIR/bin/rad-clang"
+    cp "$HOME/.rad/bin/rad-clang++" "$ROOT_DIR/bin/rad-clang++"
 fi
 
 cp "$ROOT_DIR/bin/radc" "$DIST_ROOT/bin/radc"
 cp "$ROOT_DIR/bin/rad" "$DIST_ROOT/bin/rad"
-cp "$ROOT_DIR/bin/rad-llc" "$DIST_ROOT/bin/rad-llc"
-cp "$ROOT_DIR/bin/rad-lld" "$DIST_ROOT/bin/rad-lld"
-cp "$ROOT_DIR/bin/rad-llc" "$DIST_ROOT/bin/rad-clang"
-cp "$ROOT_DIR/bin/rad-llc" "$DIST_ROOT/bin/rad-clang++"
+cp "$ROOT_DIR/bin/rad-clang" "$DIST_ROOT/bin/rad-clang"
+cp "$ROOT_DIR/bin/rad-clang++" "$DIST_ROOT/bin/rad-clang++"
 chmod 755 "$DIST_ROOT/bin"/*
 
 # ------------------------------------------------------------------------------
@@ -219,24 +215,22 @@ Host:    ${HOST_TRIPLE}
 Target:  ${TARGET_TRIPLE}
 EOF
 
-cat << 'EOF' > "$DIST_ROOT/share/rad/toolchain.toml"
+cat << EOF > "$DIST_ROOT/share/rad/toolchain.toml"
 [toolchain]
-version = "0.1.0"
+version = "${VERSION}"
 channel = "stable"
-host = "x86_64-unknown-linux-gnu"
-default_target = "x86_64-unknown-linux-musl"
+host = "${HOST_TRIPLE}"
+default_target = "${TARGET_TRIPLE}"
 
 [components]
 rad = { path = "bin/rad", role = "package_manager" }
 radc = { path = "bin/radc", role = "compiler" }
-rad-llc = { path = "bin/rad-llc", role = "backend" }
-rad-lld = { path = "bin/rad-lld", role = "linker" }
 rad-clang = { path = "bin/rad-clang", role = "c_compiler" }
 rad-clangxx = { path = "bin/rad-clang++", role = "cxx_compiler" }
 
 [llvm]
 version = "23.1.4"
-components = ["llc", "lld"]
+components = ["embedded-backend", "embedded-lld"]
 EOF
 
 cat << 'EOF' > "$DIST_ROOT/share/rad/targets.toml"
