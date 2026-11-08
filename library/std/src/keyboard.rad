@@ -60,6 +60,10 @@ impl KeyEvent {
         self.code == KEY_CHAR && self.char_val == ch && !self.ctrl && !self.is_release
     }
 
+    pub fn is_key(self, code: i32) -> bool {
+        self.code == code && !self.is_release
+    }
+
     pub fn is_ctrl(self, ch: u8) -> bool {
         self.code == KEY_CHAR && self.char_val == ch && self.ctrl && !self.is_release
     }
