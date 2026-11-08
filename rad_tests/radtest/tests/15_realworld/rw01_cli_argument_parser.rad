@@ -1,0 +1,66 @@
+struct CliConfig {
+    verbose: bool,
+    dry_run: bool,
+    output_path: String,
+    threads: i64,
+    positional: Vec<String>,
+}
+
+fn parse_args(args: Vec<String>) -> CliConfig {
+    var cfg = CliConfig {
+        verbose: false,
+        dry_run: false,
+        output_path: String.from_str("default.bin"),
+        threads: 1,
+        positional: Vec.new(),
+    };
+
+    var i = 0usize;
+    while i < args.len {
+        let s = args.ptr[i].as_ptr() as str;
+        if s == "-v" || s == "--verbose" {
+            cfg.verbose = true;
+        } else if s == "--dry-run" {
+            cfg.dry_run = true;
+        } else if s == "-o" && i + 1usize < args.len {
+            i = i + 1usize;
+            cfg.output_path = String.from_str(args.ptr[i].as_ptr() as str);
+        } else if s == "-j" && i + 1usize < args.len {
+            i = i + 1usize;
+            let val_s = args.ptr[i].as_ptr() as str;
+            let b0 = (val_s as *raw u8)[0usize];
+            cfg.threads = (b0 - 48u8) as i64;
+        } else {
+            cfg.positional.push(String.from_str(s));
+        }
+        i = i + 1usize;
+    }
+
+    return cfg;
+}
+
+fn main() -> i32 {
+    var raw_inputs = Vec.new();
+    raw_inputs.push(String.from_str("-v"));
+    raw_inputs.push(String.from_str("-o"));
+    raw_inputs.push(String.from_str("app.out"));
+    raw_inputs.push(String.from_str("-j"));
+    raw_inputs.push(String.from_str("4"));
+    raw_inputs.push(String.from_str("--dry-run"));
+    raw_inputs.push(String.from_str("src/main.rad"));
+    raw_inputs.push(String.from_str("lib/util.rad"));
+
+    let cfg = parse_args(raw_inputs);
+
+    println("verbose: {}", cfg.verbose);
+    println("dry_run: {}", cfg.dry_run);
+    println("output: {}", cfg.output_path.as_ptr() as str);
+    println("threads: {}", cfg.threads);
+    println("pos_count: {}", cfg.positional.len);
+    var k = 0usize;
+    while k < cfg.positional.len {
+        println("pos[{}]: {}", k, cfg.positional.ptr[k].as_ptr() as str);
+        k = k + 1usize;
+    }
+    0
+}

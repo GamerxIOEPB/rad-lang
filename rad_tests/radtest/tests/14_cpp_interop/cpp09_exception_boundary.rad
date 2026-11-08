@@ -1,0 +1,25 @@
+extern "C" {
+    fn cpp_safe_divide(a: i32, b: i32, out_res: *raw i32) -> i32;
+    fn cpp_parse_integer_safe(s: str, out_val: *raw i32) -> i32;
+    fn malloc(size: usize) -> *raw u8;
+    fn free(ptr: *raw u8) -> void;
+}
+
+fn main() -> i32 {
+    let res = malloc(8usize) as *raw i32;
+
+    let rc1 = cpp_safe_divide(100, 4, res);
+    println("div ok: rc={}, val={}", rc1, res[0]);
+
+    let rc2 = cpp_safe_divide(100, 0, res);
+    println("div err: rc={}", rc2);
+
+    let rc3 = cpp_parse_integer_safe("12345", res);
+    println("parse ok: rc={}, val={}", rc3, res[0]);
+
+    let rc4 = cpp_parse_integer_safe("not_a_number", res);
+    println("parse err: rc={}", rc4);
+
+    free(res as *raw u8);
+    0
+}

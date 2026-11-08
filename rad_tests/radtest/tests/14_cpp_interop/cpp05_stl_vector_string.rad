@@ -1,0 +1,24 @@
+extern "C" {
+    fn cpp_sort_and_median(data: *raw i64, len: i64) -> i64;
+    fn cpp_join_strings_len(prefix: str, suffix: str) -> i32;
+    fn malloc(size: usize) -> *raw u8;
+    fn free(ptr: *raw u8) -> void;
+}
+
+fn main() -> i32 {
+    let arr = malloc(64usize) as *raw i64;
+    arr[0] = 50;
+    arr[1] = 10;
+    arr[2] = 40;
+    arr[3] = 20;
+    arr[4] = 30;
+
+    let med = cpp_sort_and_median(arr, 5);
+    println("sorted=[{}, {}, {}, {}, {}]", arr[0], arr[1], arr[2], arr[3], arr[4]);
+    println("median={}", med);
+    free(arr as *raw u8);
+
+    let jlen = cpp_join_strings_len("RadLanguage", "CompilerCore");
+    println("jlen={}", jlen);
+    0
+}

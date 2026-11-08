@@ -1,0 +1,47 @@
+struct Vec3D {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+struct MeshBounds {
+    min_x: f64,
+    min_y: f64,
+    min_z: f64,
+    max_x: f64,
+    max_y: f64,
+    max_z: f64,
+}
+
+extern "C" {
+    fn cpp_vec3_cross(a: *raw Vec3D, b: *raw Vec3D, out: *raw Vec3D) -> void;
+    fn cpp_vec3_dot(a: *raw Vec3D, b: *raw Vec3D) -> f64;
+    fn cpp_compute_triangle_bounds(p0: *raw Vec3D, p1: *raw Vec3D, p2: *raw Vec3D, out_bounds: *raw MeshBounds) -> void;
+}
+
+fn main() -> i32 {
+    var v1 = Vec3D { x: 1.0, y: 0.0, z: 0.0 };
+    var v2 = Vec3D { x: 0.0, y: 1.0, z: 0.0 };
+    var v_cross = Vec3D { x: 0.0, y: 0.0, z: 0.0 };
+
+    cpp_vec3_cross(&v1 as *raw Vec3D, &v2 as *raw Vec3D, &v_cross as *raw Vec3D);
+    println("cross: ({}, {}, {})", v_cross.x, v_cross.y, v_cross.z);
+
+    let dot = cpp_vec3_dot(&v1 as *raw Vec3D, &v2 as *raw Vec3D);
+    println("dot: {}", dot);
+
+    var p0 = Vec3D { x: -5.0, y: 2.0, z: 1.0 };
+    var p1 = Vec3D { x: 3.0, y: -4.0, z: 8.0 };
+    var p2 = Vec3D { x: 10.0, y: 6.0, z: -2.0 };
+
+    var bounds = MeshBounds {
+        min_x: 0.0, min_y: 0.0, min_z: 0.0,
+        max_x: 0.0, max_y: 0.0, max_z: 0.0,
+    };
+
+    cpp_compute_triangle_bounds(&p0 as *raw Vec3D, &p1 as *raw Vec3D, &p2 as *raw Vec3D, &bounds as *raw MeshBounds);
+
+    println("min: ({}, {}, {})", bounds.min_x, bounds.min_y, bounds.min_z);
+    println("max: ({}, {}, {})", bounds.max_x, bounds.max_y, bounds.max_z);
+    0
+}

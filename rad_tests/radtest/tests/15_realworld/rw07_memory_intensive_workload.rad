@@ -1,0 +1,35 @@
+fn main() -> i32 {
+    var v = Vec.new();
+    var sum = 0i64;
+    var i = 1i64;
+
+    // Allocate and push 50,000 items
+    while i <= 50000i64 {
+        v.push(i);
+        i = i + 1i64;
+    }
+
+    println("Vector len: {}", v.len);
+
+    // Sum every 5th element
+    var k = 0usize;
+    while k < v.len {
+        let val = v.ptr[k];
+        if val % 5i64 == 0i64 {
+            sum = sum + val;
+        }
+        k = k + 1usize;
+    }
+
+    println("Filtered sum: {}", sum);
+
+    // Pop 20,000 items
+    var p = 0i64;
+    while p < 20000i64 {
+        v.pop();
+        p = p + 1i64;
+    }
+
+    println("Final len: {}", v.len);
+    0
+}

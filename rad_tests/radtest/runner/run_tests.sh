@@ -47,13 +47,50 @@ for cat in "${CATS[@]}"; do
     shopt -s nullglob
     for f in "$TDIR/$cat"/*.rad; do
         name="$(basename "$f" .rad)"
+        if [[ "$name" =~ (_helper|_mod|_sub)$ ]]; then
+            continue
+        fi
         fdirname="$name"
         mkdir -p "$RES/$name"
         echo -n "  $name ... "
 
+        # ---- compile companion C / C++ files if present ----
+        extra_objs=()
+        if [ -f "$TDIR/$cat/$name.cpp" ]; then
+            rad-clang++ -target x86_64-unknown-linux-musl -O2 -c "$TDIR/$cat/$name.cpp" -o "$BLD/${name}_cpp.o" 2>"$RES/$name/cpp_compile.err"
+            extra_objs+=("$BLD/${name}_cpp.o")
+        fi
+        for cpp_extra in "$TDIR/$cat/${name}"_*.cpp; do
+            if [ -f "$cpp_extra" ]; then
+                cpp_base="$(basename "$cpp_extra" .cpp)"
+                rad-clang++ -target x86_64-unknown-linux-musl -O2 -c "$cpp_extra" -o "$BLD/${cpp_base}.o" 2>"$RES/$name/cpp_compile.err"
+                if [[ "$name" == *"static_lib"* ]]; then
+                    ar rcs "$BLD/lib${cpp_base}.a" "$BLD/${cpp_base}.o" 2>/dev/null
+                    extra_objs+=("$BLD/lib${cpp_base}.a")
+                else
+                    extra_objs+=("$BLD/${cpp_base}.o")
+                fi
+            fi
+        done
+        for c_extra in "$TDIR/$cat/${name}"*.c; do
+            if [ -f "$c_extra" ]; then
+                c_base="$(basename "$c_extra" .c)"
+                rad-clang -target x86_64-unknown-linux-musl -O2 -c "$c_extra" -o "$BLD/${c_base}.o" 2>"$RES/$name/c_compile.err"
+                extra_objs+=("$BLD/${c_base}.o")
+            fi
+        done
+
+        # Companion Rad modules
+        extra_rads=()
+        for r_extra in "$TDIR/$cat/${name}"_*.rad; do
+            if [ -f "$r_extra" ]; then
+                extra_rads+=("$r_extra")
+            fi
+        done
+
         # ---- compile ----
         t0=$(date +%s%N 2>/dev/null || echo 0)
-        "$RADC" "$f" -o "$BLD/$fdirname" >"$RES/$name/compile.out" 2>&1
+        "$RADC" "$f" "${extra_rads[@]}" "${extra_objs[@]}" -o "$BLD/$fdirname" >"$RES/$name/compile.out" 2>&1
         crc=$?
         t1=$(date +%s%N 2>/dev/null || echo 0)
         ms=$(( (t1 - t0) / 1000000 ))

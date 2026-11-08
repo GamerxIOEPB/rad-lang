@@ -1197,6 +1197,46 @@ impl Parser {
         })
     }
 
+    fn parse_extern_fn(var self) {
+        self.advance() // skip 'fn'
+        let raw_fn_name = String.from_str(self.peek_text())
+        self.match_tok(TOK_IDENT)
+        self.match_tok(TOK_LPAREN)
+
+        var param_names = Vec.new()
+        var param_types = Vec.new()
+        while self.peek_kind() != TOK_RPAREN && self.peek_kind() != TOK_EOF {
+            let p_name = String.from_str(self.peek_text())
+            self.match_tok(TOK_IDENT)
+            if self.match_tok(TOK_COLON) {
+                let p_ty = self.parse_type_str()
+                param_names.push(p_name)
+                param_types.push(p_ty)
+            }
+            if !self.match_tok(TOK_COMMA) {
+                break
+            }
+        }
+        while self.peek_kind() != TOK_RPAREN && self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_ARROW && self.peek_kind() != TOK_EOF {
+            self.advance()
+        }
+        self.match_tok(TOK_RPAREN)
+
+        var ret_type = String.from_str("void")
+        if self.match_tok(TOK_ARROW) {
+            ret_type = self.parse_type_str()
+        }
+        let _disc_semi = self.match_tok(TOK_SEMI)
+
+        self.functions.push(FunctionDef {
+            fn_name: raw_fn_name,
+            param_names: param_names,
+            param_types: param_types,
+            ret_type: ret_type,
+            body: Vec.new(),
+        })
+    }
+
     fn parse_struct(var self) {
         self.advance() // skip 'struct'
         let s_name = String.from_str(self.peek_text())
@@ -1323,18 +1363,14 @@ impl Parser {
                 if self.match_tok(TOK_LBRACE) {
                     while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
                         if self.peek_kind() == TOK_FN {
-                            self.advance()
-                            let _ext_name = String.from_str(self.peek_text())
-                            self.match_tok(TOK_IDENT)
-                            while self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
-                                self.advance()
-                            }
-                            let _disc3 = self.match_tok(TOK_SEMI)
+                            self.parse_extern_fn()
                         } else {
                             self.advance()
                         }
                     }
                     let _disc4 = self.match_tok(TOK_RBRACE)
+                } else if self.peek_kind() == TOK_FN {
+                    self.parse_extern_fn()
                 }
             } else if str_eq(self.peek_text(), "import") {
                 self.advance()

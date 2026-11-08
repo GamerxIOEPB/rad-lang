@@ -1,0 +1,52 @@
+fn str_len(s: str) -> usize {
+    let p = s as *raw u8;
+    var i = 0usize;
+    while p[i] != 0u8 {
+        i = i + 1usize;
+    }
+    return i;
+}
+
+extern "C" {
+    fn fopen(path: str, mode: str) -> *raw u8;
+    fn fclose(fp: *raw u8) -> i32;
+    fn fwrite(ptr: *raw u8, size: usize, nmemb: usize, fp: *raw u8) -> usize;
+    fn fread(ptr: *raw u8, size: usize, nmemb: usize, fp: *raw u8) -> usize;
+    fn fseek(fp: *raw u8, offset: i64, whence: i32) -> i32;
+    fn ftell(fp: *raw u8) -> i64;
+    fn strcmp(s1: str, s2: str) -> i32;
+    fn malloc(size: usize) -> *raw u8;
+    fn free(ptr: *raw u8) -> void;
+}
+
+fn main() -> i32 {
+    let fpath = "/tmp/rad_posix_test.txt";
+    let fp = fopen(fpath, "wb+");
+    if (fp as usize) == 0usize {
+        println("fopen failed");
+        return 1;
+    }
+
+    let msg = "Hello from Rad POSIX C Interop!\n";
+    let slen = str_len(msg);
+    let written = fwrite(msg as *raw u8, 1usize, slen, fp);
+    println("written bytes: {}", written);
+
+    fseek(fp, 0i64, 2);
+    let fsize = ftell(fp);
+    println("file size: {}", fsize);
+
+    fseek(fp, 0i64, 0);
+    let read_buf = malloc(slen + 1usize);
+    let bytes_read = fread(read_buf, 1usize, slen, fp);
+    read_buf[slen] = 0u8;
+
+    fclose(fp);
+
+    let cmp = strcmp(msg, read_buf as str);
+    println("bytes read: {}", bytes_read);
+    println("strcmp equal: {}", cmp == 0);
+
+    free(read_buf);
+    0
+}

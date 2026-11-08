@@ -1,0 +1,12 @@
+extern "C" {
+    fn cpp_archive_multiplier(x: i32, factor: i32) -> i32;
+    fn cpp_archive_adder(a: i32, b: i32) -> i32;
+}
+
+fn main() -> i32 {
+    let m = cpp_archive_multiplier(7, 6);
+    let s = cpp_archive_adder(m, 8);
+    println("m={}", m);
+    println("s={}", s);
+    0
+}

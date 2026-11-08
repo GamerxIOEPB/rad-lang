@@ -1,0 +1,23 @@
+extern "C" {
+    fn cpp_accum_create(init: i32) -> *raw u8;
+    fn cpp_accum_add(acc: *raw u8, delta: i32) -> void;
+    fn cpp_accum_value(acc: *raw u8) -> i32;
+    fn cpp_accum_count(acc: *raw u8) -> i32;
+    fn cpp_accum_destroy(acc: *raw u8) -> void;
+}
+
+fn main() -> i32 {
+    let acc = cpp_accum_create(10);
+    cpp_accum_add(acc, 5);
+    cpp_accum_add(acc, 20);
+    cpp_accum_add(acc, 7);
+
+    let val = cpp_accum_value(acc);
+    let cnt = cpp_accum_count(acc);
+
+    println("val={}", val);
+    println("cnt={}", cnt);
+
+    cpp_accum_destroy(acc);
+    0
+}

@@ -1,0 +1,109 @@
+fn str_len(s: str) -> usize {
+    let p = s as *raw u8;
+    var i = 0usize;
+    while p[i] != 0u8 {
+        i = i + 1usize;
+    }
+    return i;
+}
+
+struct DocMatch {
+    doc_id: i64,
+    score: i64,
+}
+
+struct MiniSearchEngine {
+    docs: Vec<String>,
+}
+
+impl MiniSearchEngine {
+    fn new() -> MiniSearchEngine {
+        return MiniSearchEngine {
+            docs: Vec.new(),
+        };
+    }
+
+    fn add_document(var self, doc: str) -> i64 {
+        let id = self.docs.len as i64;
+        self.docs.push(String.from_str(doc));
+        return id;
+    }
+
+    fn search(self, query: str) -> Vec<DocMatch> {
+        var matches = Vec.new();
+
+        var d_idx = 0usize;
+        while d_idx < self.docs.len {
+            let doc_text = self.docs.ptr[d_idx].as_ptr() as str;
+            let score = self.count_occurrences(doc_text, query);
+            if score > 0 {
+                var m = DocMatch {
+                    doc_id: d_idx as i64,
+                    score: score,
+                };
+                matches.push(m);
+            }
+            d_idx = d_idx + 1usize;
+        }
+        return matches;
+    }
+
+    fn count_occurrences(self, text: str, word: str) -> i64 {
+        let t_len = str_len(text);
+        let w_len = str_len(word);
+        if w_len > t_len || w_len == 0usize {
+            return 0;
+        }
+
+        let pt = text as *raw u8;
+        let pw = word as *raw u8;
+        var count = 0i64;
+        var i = 0usize;
+        let limit = t_len - w_len;
+
+        while i <= limit {
+            var matched = true;
+            var j = 0usize;
+            while j < w_len {
+                if pt[i + j] != pw[j] {
+                    matched = false;
+                    break;
+                }
+                j = j + 1usize;
+            }
+            if matched {
+                count = count + 1;
+                i = i + w_len;
+            } else {
+                i = i + 1usize;
+            }
+        }
+        return count;
+    }
+}
+
+fn main() -> i32 {
+    var engine = MiniSearchEngine.new();
+
+    let d0 = engine.add_document("rad is a modern compiled systems programming language");
+    let d1 = engine.add_document("the rad compiler compiles rad to native machine code");
+    let d2 = engine.add_document("zero runtime overhead with deterministic memory management");
+
+    println("Indexed {} docs", engine.docs.len);
+
+    let res = engine.search("rad");
+    println("Search matches: {}", res.len);
+
+    var i = 0usize;
+    while i < res.len {
+        println("Match: doc_id={} score={}", res.ptr[i].doc_id, res.ptr[i].score);
+        i = i + 1usize;
+    }
+
+    let res_compiler = engine.search("compiler");
+    println("Compiler matches: {}", res_compiler.len);
+    if res_compiler.len > 0usize {
+        println("Compiler in doc_id: {}", res_compiler.ptr[0usize].doc_id);
+    }
+    0
+}

@@ -1,0 +1,5 @@
+get(A): 100
+Evicted: B
+get(B): -1
+get(C): 300
+get(D): 400

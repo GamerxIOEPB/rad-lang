@@ -231,6 +231,33 @@ impl Codegen {
             let tgt = ep[id].target_type.as_ptr() as str
             return str_eq(tgt, "f64") || str_eq(tgt, "f32")
         }
+        if k == EXPR_UNARY {
+            return self.is_expr_float(ep[id].left)
+        }
+        if k == EXPR_FIELD_ACCESS {
+            let fname = ep[id].field_name.as_ptr() as str
+            var si = 0usize
+            while si < self.parser.structs.len {
+                let sdef = self.parser.structs.ptr[si]
+                var fi = 0usize
+                while fi < sdef.field_names.len {
+                    if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                        let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                        return str_eq(fty, "f64") || str_eq(fty, "f32")
+                    }
+                    fi = fi + 1usize
+                }
+                si = si + 1usize
+            }
+        }
+        if k == EXPR_CALL {
+            let callee_id = ep[id].left
+            if ep[callee_id].kind == EXPR_IDENT {
+                let fname = ep[callee_id].str_val.as_ptr() as str
+                let rty = self.get_func_ret_type(fname)
+                return str_eq(rty, "double") || str_eq(rty, "float")
+            }
+        }
         return false
     }
 
@@ -375,13 +402,14 @@ impl Codegen {
 
         // CompilerOptions
         if str_eq(field_name, "input_paths") { return 0i64 }
-        if str_eq(field_name, "output_path") { return 1i64 }
-        if str_eq(field_name, "emit_llvm") { return 2i64 }
-        if str_eq(field_name, "check_only") { return 3i64 }
-        if str_eq(field_name, "opt_level") { return 4i64 }
-        if str_eq(field_name, "target_triple") { return 5i64 }
-        if str_eq(field_name, "linker_cmd") { return 6i64 }
-        if str_eq(field_name, "show_version") { return 7i64 }
+        if str_eq(field_name, "extra_objects") { return 1i64 }
+        if str_eq(field_name, "output_path") { return 2i64 }
+        if str_eq(field_name, "emit_llvm") { return 3i64 }
+        if str_eq(field_name, "check_only") { return 4i64 }
+        if str_eq(field_name, "opt_level") { return 5i64 }
+        if str_eq(field_name, "target_triple") { return 6i64 }
+        if str_eq(field_name, "linker_cmd") { return 7i64 }
+        if str_eq(field_name, "show_version") { return 8i64 }
 
         var si = 0usize
         while si < self.parser.structs.len {
@@ -768,13 +796,19 @@ impl Codegen {
             }
         }
         if k == EXPR_UNARY {
-            let sub_reg = self.emit_expr(ep[expr_id].left)
+            let sub_id = ep[expr_id].left
+            let sub_reg = self.emit_expr(sub_id)
             let un_op = ep[expr_id].op
+            let is_f = self.is_expr_float(sub_id)
             let res = self.alloc_ssa()
             self.ir.push_str("  %")
             self.ir.push_str(int_to_str(res).as_ptr() as str)
             if un_op == TOK_MINUS {
-                self.ir.push_str(" = sub nsw i64 0, %")
+                if is_f {
+                    self.ir.push_str(" = fsub double 0.0, %")
+                } else {
+                    self.ir.push_str(" = sub nsw i64 0, %")
+                }
                 self.ir.push_str(int_to_str(sub_reg).as_ptr() as str)
                 self.ir.push_str("\n")
                 return res
@@ -849,6 +883,16 @@ impl Codegen {
             }
 
             if self.is_struct_name(callee_name) {
+                var s_def_idx = 0usize
+                var found_sdef = false
+                while s_def_idx < self.parser.structs.len {
+                    if str_eq(self.parser.structs.ptr[s_def_idx].struct_name.as_ptr() as str, callee_name) {
+                        found_sdef = true
+                        break
+                    }
+                    s_def_idx = s_def_idx + 1usize
+                }
+
                 var arg_regs = Vec.new()
                 let args_len = ep_sub[expr_id].args.len
                 var i = 0usize
@@ -879,22 +923,47 @@ impl Codegen {
                     self.emit_str(int_to_str(fi as i32).as_ptr() as str)
                     self.emit_str("\n")
 
-                    let a_is_ptr = self.is_expr_ptr(ep_sub[expr_id].args.ptr[fi])
-                    var val_reg = arg_regs.ptr[fi]
-                    if a_is_ptr {
-                        let cvt = self.alloc_ssa()
-                        self.emit_str("  %")
-                        self.emit_str(int_to_str(cvt).as_ptr() as str)
-                        self.emit_str(" = ptrtoint ptr %")
-                        self.emit_str(int_to_str(val_reg).as_ptr() as str)
-                        self.emit_str(" to i64\n")
-                        val_reg = cvt
+                    var field_is_flt = self.is_expr_float(ep_sub[expr_id].args.ptr[fi])
+                    if found_sdef && fi < self.parser.structs.ptr[s_def_idx].field_types.len {
+                        let fty = self.parser.structs.ptr[s_def_idx].field_types.ptr[fi].as_ptr() as str
+                        if str_eq(fty, "f64") || str_eq(fty, "f32") {
+                            field_is_flt = true
+                        }
                     }
-                    self.emit_str("  store i64 %")
-                    self.emit_str(int_to_str(val_reg).as_ptr() as str)
-                    self.emit_str(", ptr %")
-                    self.emit_str(int_to_str(gep).as_ptr() as str)
-                    self.emit_str(", align 8\n")
+
+                    var val_reg = arg_regs.ptr[fi]
+                    if field_is_flt {
+                        if !self.is_expr_float(ep_sub[expr_id].args.ptr[fi]) {
+                            let cvt = self.alloc_ssa()
+                            self.emit_str("  %")
+                            self.emit_str(int_to_str(cvt).as_ptr() as str)
+                            self.emit_str(" = sitofp i64 %")
+                            self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                            self.emit_str(" to double\n")
+                            val_reg = cvt
+                        }
+                        self.emit_str("  store double %")
+                        self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                        self.emit_str(", ptr %")
+                        self.emit_str(int_to_str(gep).as_ptr() as str)
+                        self.emit_str(", align 8\n")
+                    } else {
+                        let a_is_ptr = self.is_expr_ptr(ep_sub[expr_id].args.ptr[fi])
+                        if a_is_ptr {
+                            let cvt = self.alloc_ssa()
+                            self.emit_str("  %")
+                            self.emit_str(int_to_str(cvt).as_ptr() as str)
+                            self.emit_str(" = ptrtoint ptr %")
+                            self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                            self.emit_str(" to i64\n")
+                            val_reg = cvt
+                        }
+                        self.emit_str("  store i64 %")
+                        self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                        self.emit_str(", ptr %")
+                        self.emit_str(int_to_str(gep).as_ptr() as str)
+                        self.emit_str(", align 8\n")
+                    }
                     fi = fi + 1usize
                 }
                 return obj_reg
@@ -973,6 +1042,16 @@ impl Codegen {
                     self.emit_str(" = trunc i64 %")
                     self.emit_str(int_to_str(r).as_ptr() as str)
                     self.emit_str(" to i32\n")
+                    r = cvt
+                } else if (str_eq(pty, "i8") || str_eq(pty, "i16")) && !a_is_ptr {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = trunc i64 %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(" to ")
+                    self.emit_str(pty)
+                    self.emit_str("\n")
                     r = cvt
                 }
                 arg_regs.push(r)
@@ -1165,6 +1244,17 @@ impl Codegen {
                 self.emit_str(" to i64\n")
                 return ext
             }
+            if str_eq(call_ret_ty, "i8") || str_eq(call_ret_ty, "i16") {
+                let ext = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(ext).as_ptr() as str)
+                self.emit_str(" = sext ")
+                self.emit_str(call_ret_ty)
+                self.emit_str(" %")
+                self.emit_str(int_to_str(res).as_ptr() as str)
+                self.emit_str(" to i64\n")
+                return ext
+            }
             return res
         }
         if k == EXPR_METHOD_CALL {
@@ -1350,10 +1440,32 @@ impl Codegen {
             self.emit_str(int_to_str(f_idx as i32).as_ptr() as str)
             self.emit_str("\n")
 
+            var field_is_float = false
+            var si = 0usize
+            while si < self.parser.structs.len {
+                let sdef = self.parser.structs.ptr[si]
+                var fi = 0usize
+                while fi < sdef.field_names.len {
+                    if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                        let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                        if str_eq(fty, "f64") || str_eq(fty, "f32") {
+                            field_is_float = true
+                        }
+                        break
+                    }
+                    fi = fi + 1usize
+                }
+                si = si + 1usize
+            }
+
             let load_reg = self.alloc_ssa()
             self.emit_str("  %")
             self.emit_str(int_to_str(load_reg).as_ptr() as str)
-            self.emit_str(" = load i64, ptr %")
+            if field_is_float {
+                self.emit_str(" = load double, ptr %")
+            } else {
+                self.emit_str(" = load i64, ptr %")
+            }
             self.emit_str(int_to_str(gep).as_ptr() as str)
             self.emit_str(", align 8\n")
             return load_reg
@@ -1852,21 +1964,56 @@ impl Codegen {
             self.ir.push_str(int_to_str(f_idx as i32).as_ptr() as str)
             self.ir.push_str("\n")
 
-            if self.is_expr_ptr(val_expr) {
-                let cvt = self.alloc_ssa()
-                self.ir.push_str("  %")
-                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
-                self.ir.push_str(" = ptrtoint ptr %")
-                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
-                self.ir.push_str(" to i64\n")
-                val_reg = cvt
+            var field_is_float = false
+            var si = 0usize
+            while si < self.parser.structs.len {
+                let sdef = self.parser.structs.ptr[si]
+                var fi = 0usize
+                while fi < sdef.field_names.len {
+                    if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                        let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                        if str_eq(fty, "f64") || str_eq(fty, "f32") {
+                            field_is_float = true
+                        }
+                        break
+                    }
+                    fi = fi + 1usize
+                }
+                si = si + 1usize
             }
 
-            self.ir.push_str("  store i64 %")
-            self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
-            self.ir.push_str(", ptr %")
-            self.ir.push_str(int_to_str(gep).as_ptr() as str)
-            self.ir.push_str(", align 8\n")
+            if field_is_float {
+                if !self.is_expr_float(val_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = sitofp i64 %")
+                    self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                    self.ir.push_str(" to double\n")
+                    val_reg = cvt
+                }
+                self.ir.push_str("  store double %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+            } else {
+                if self.is_expr_ptr(val_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = ptrtoint ptr %")
+                    self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                    self.ir.push_str(" to i64\n")
+                    val_reg = cvt
+                }
+
+                self.ir.push_str("  store i64 %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+            }
         } else if k == STMT_IF {
             let cond_reg = self.emit_expr(sp[stmt_id].expr_id)
             let bool_reg = self.alloc_ssa()
@@ -2087,6 +2234,20 @@ impl Codegen {
                     self.ir.push_str("  ret ptr %")
                     self.ir.push_str(int_to_str(final_reg).as_ptr() as str)
                     self.ir.push_str("\n")
+                } else if str_eq(ret_ty, "double") || str_eq(ret_ty, "float") {
+                    var final_reg = r + 0
+                    if !self.is_expr_float(sp[stmt_id].expr_id) {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = sitofp i64 %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to double\n")
+                        final_reg = cvt
+                    }
+                    self.ir.push_str("  ret double %")
+                    self.ir.push_str(int_to_str(final_reg).as_ptr() as str)
+                    self.ir.push_str("\n")
                 } else {
                     var final_reg = r + 0
                     if self.is_expr_ptr(sp[stmt_id].expr_id) {
@@ -2094,6 +2255,14 @@ impl Codegen {
                         self.ir.push_str("  %")
                         self.ir.push_str(int_to_str(cvt).as_ptr() as str)
                         self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        final_reg = cvt
+                    } else if self.is_expr_float(sp[stmt_id].expr_id) {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = fptosi double %")
                         self.ir.push_str(int_to_str(r).as_ptr() as str)
                         self.ir.push_str(" to i64\n")
                         final_reg = cvt
@@ -2184,6 +2353,38 @@ impl Codegen {
         header.push_str("declare i32 @dprintf(i32, ptr, ...)\n")
         header.push_str("declare double @sqrt(double)\n\n")
 
+        // Emit extern function declarations
+        var ext_i = 0usize
+        while ext_i < self.parser.functions.len {
+            let func = self.parser.functions.ptr[ext_i]
+            if func.body.len == 0usize {
+                let fname = func.fn_name.as_ptr() as str
+                if !str_eq(fname, "malloc") && !str_eq(fname, "free") && !str_eq(fname, "realloc") &&
+                   !str_eq(fname, "system") && !str_eq(fname, "puts") && !str_eq(fname, "printf") &&
+                   !str_eq(fname, "fopen") && !str_eq(fname, "fclose") && !str_eq(fname, "fread") &&
+                   !str_eq(fname, "fwrite") && !str_eq(fname, "fseek") && !str_eq(fname, "ftell") &&
+                   !str_eq(fname, "getenv") && !str_eq(fname, "strcmp") && !str_eq(fname, "exit") &&
+                   !str_eq(fname, "dprintf") && !str_eq(fname, "sqrt") {
+                    header.push_str("declare ")
+                    header.push_str(self.emit_llvm_type(func.ret_type.as_ptr() as str))
+                    header.push_str(" @")
+                    header.push_str(fname)
+                    header.push_str("(")
+                    var pi = 0usize
+                    while pi < func.param_types.len {
+                        if pi > 0usize {
+                            header.push_str(", ")
+                        }
+                        header.push_str(self.emit_llvm_type(func.param_types.ptr[pi].as_ptr() as str))
+                        pi = pi + 1usize
+                    }
+                    header.push_str(")\n")
+                }
+            }
+            ext_i = ext_i + 1usize
+        }
+        header.push_str("\n")
+
         header.push_str("@.empty_str = private unnamed_addr constant [1 x i8] c\"\\00\", align 1\n")
         header.push_str("@.fprint_fmt = private unnamed_addr constant [4 x i8] c\"%f\\0A\\00\", align 1\n")
         header.push_str("@.iprint_fmt = private unnamed_addr constant [6 x i8] c\"%lld\\0A\\00\", align 1\n\n")
@@ -2239,8 +2440,12 @@ impl Codegen {
         var fn_ir = String.new()
         var f_idx = 0usize
         while f_idx < self.parser.functions.len {
-            self.current_func_idx = f_idx
             let func = self.parser.functions.ptr[f_idx]
+            if func.body.len == 0usize {
+                f_idx = f_idx + 1usize
+                continue
+            }
+            self.current_func_idx = f_idx
             let fname = func.fn_name.as_ptr() as str
 
             fn_ir.push_str("define ")
@@ -2351,6 +2556,20 @@ impl Codegen {
                             self.ir.push_str("  ret ptr %")
                             self.ir.push_str(int_to_str(final_reg).as_ptr() as str)
                             self.ir.push_str("\n")
+                        } else if str_eq(ret_ty, "double") || str_eq(ret_ty, "float") {
+                            var final_reg = r + 0
+                            if !self.is_expr_float(self.parser.stmts.ptr[stmt_id].expr_id) {
+                                let cvt = self.alloc_ssa()
+                                self.ir.push_str("  %")
+                                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                                self.ir.push_str(" = sitofp i64 %")
+                                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                                self.ir.push_str(" to double\n")
+                                final_reg = cvt
+                            }
+                            self.ir.push_str("  ret double %")
+                            self.ir.push_str(int_to_str(final_reg).as_ptr() as str)
+                            self.ir.push_str("\n")
                         } else {
                             var final_reg = r + 0
                             if self.is_expr_ptr(self.parser.stmts.ptr[stmt_id].expr_id) {
@@ -2358,6 +2577,14 @@ impl Codegen {
                                 self.ir.push_str("  %")
                                 self.ir.push_str(int_to_str(cvt).as_ptr() as str)
                                 self.ir.push_str(" = ptrtoint ptr %")
+                                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                                self.ir.push_str(" to i64\n")
+                                final_reg = cvt
+                            } else if self.is_expr_float(self.parser.stmts.ptr[stmt_id].expr_id) {
+                                let cvt = self.alloc_ssa()
+                                self.ir.push_str("  %")
+                                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                                self.ir.push_str(" = fptosi double %")
                                 self.ir.push_str(int_to_str(r).as_ptr() as str)
                                 self.ir.push_str(" to i64\n")
                                 final_reg = cvt
@@ -2390,6 +2617,8 @@ impl Codegen {
                     fn_ir.push_str("  ret i32 0\n")
                 } else if str_eq(ret_ty, "ptr") {
                     fn_ir.push_str("  ret ptr null\n")
+                } else if str_eq(ret_ty, "double") || str_eq(ret_ty, "float") {
+                    fn_ir.push_str("  ret double 0.0\n")
                 } else {
                     fn_ir.push_str("  ret i64 0\n")
                 }

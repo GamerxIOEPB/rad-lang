@@ -137,7 +137,7 @@ fn read_file_str(path: str) -> String {
 }
 
 fn find_radc_compiler(argv0: str) -> String {
-    // 1. Check if radc lives right next to the running rad binary
+    // 1. Check if radc lives right next to the running rad binary (sibling path)
     let len = str_len(argv0)
     if len > 0usize {
         let p: *raw u8 = argv0 as *raw u8
@@ -167,13 +167,38 @@ fn find_radc_compiler(argv0: str) -> String {
         }
     }
 
-    // 2. Check if radc is in PATH
-    let code = system("which radc >/dev/null 2>&1")
-    if code == 0 {
-        return String.from_str("radc")
+    // 2. Check $RAD_HOME/bin/radc
+    let env_rad_home = getenv("RAD_HOME")
+    if (env_rad_home as usize) != 0usize {
+        var p_rad = String.new()
+        p_rad.push_str(env_rad_home as str)
+        p_rad.push_str("/bin/radc")
+        let fp_rad = fopen(p_rad.as_ptr() as str, "rb")
+        if (fp_rad as usize) != 0usize {
+            let _c = fclose(fp_rad)
+            return p_rad
+        }
     }
 
-    // 3. Check common local paths
+    // 3. Check $HOME/.rad/bin/radc
+    let env_home = getenv("HOME")
+    if (env_home as usize) != 0usize {
+        var p_home = String.new()
+        p_home.push_str(env_home as str)
+        p_home.push_str("/.rad/bin/radc")
+        let fp_home = fopen(p_home.as_ptr() as str, "rb")
+        if (fp_home as usize) != 0usize {
+            let _c = fclose(fp_home)
+            return p_home
+        }
+    }
+
+    // 4. Check common local paths
+    let fp0 = fopen("bin/radc", "rb")
+    if (fp0 as usize) != 0usize {
+        let _c = fclose(fp0)
+        return String.from_str("bin/radc")
+    }
     let fp1 = fopen("target/radc", "rb")
     if (fp1 as usize) != 0usize {
         let _c = fclose(fp1)
@@ -188,6 +213,16 @@ fn find_radc_compiler(argv0: str) -> String {
     if (fp3 as usize) != 0usize {
         let _c = fclose(fp3)
         return String.from_str("./radc")
+    }
+
+    // 5. Check if radc is in PATH
+    let code = system("radc --version >/dev/null 2>&1")
+    if code == 0 {
+        return String.from_str("radc")
+    }
+    let code_which = system("which radc >/dev/null 2>&1")
+    if code_which == 0 {
+        return String.from_str("radc")
     }
 
     return String.from_str("radc")
@@ -241,16 +276,89 @@ fn cmd_new(name: str, is_lib: bool) -> i32 {
     return 0
 }
 
-fn cmd_init(is_lib: bool) -> i32 {
-    println("Initializing Rad package in current directory...")
-    let _m = system("mkdir -p src")
-    write_file_str("rad.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\n")
-    write_file_str(".gitignore", "/target\n*.ll\n*.o\n")
-    if is_lib {
-        write_file_str("src/lib.rad", "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n")
+fn cmd_init(target_dir: str, is_lib: bool) -> i32 {
+    var base_dir = String.new()
+    var pkg_name = String.new()
+    if str_len(target_dir) > 0usize && !str_eq(target_dir, ".") {
+        base_dir.push_str(target_dir)
+        pkg_name = path_basename(target_dir)
     } else {
-        write_file_str("src/main.rad", "fn main() -> i32 {\n    println(\"Hello from Rad Package!\")\n    0\n}\n")
+        base_dir.push_str(".")
+        pkg_name = String.from_str("app")
     }
+
+    var msg = String.new()
+    msg.push_str("Initializing Rad package in ")
+    msg.push_str(base_dir.as_ptr() as str)
+    msg.push_str("...")
+    println(msg.as_ptr() as str)
+
+    var mkdir_cmd = String.new()
+    mkdir_cmd.push_str("mkdir -p ")
+    mkdir_cmd.push_str(base_dir.as_ptr() as str)
+    mkdir_cmd.push_str("/src")
+    let _m = system(mkdir_cmd.as_ptr() as str)
+
+    var toml_path = String.new()
+    if str_eq(base_dir.as_ptr() as str, ".") {
+        toml_path.push_str("rad.toml")
+    } else {
+        toml_path.push_str(base_dir.as_ptr() as str)
+        toml_path.push_str("/rad.toml")
+    }
+
+    let fp_toml = fopen(toml_path.as_ptr() as str, "rb")
+    if (fp_toml as usize) != 0usize {
+        let _c1 = fclose(fp_toml)
+    } else {
+        var toml_content = String.new()
+        toml_content.push_str("[package]\nname = \"")
+        toml_content.push_str(pkg_name.as_ptr() as str)
+        toml_content.push_str("\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[dependencies]\n")
+        let _w1 = write_file_str(toml_path.as_ptr() as str, toml_content.as_ptr() as str)
+    }
+
+    var gitignore_path = String.new()
+    if str_eq(base_dir.as_ptr() as str, ".") {
+        gitignore_path.push_str(".gitignore")
+    } else {
+        gitignore_path.push_str(base_dir.as_ptr() as str)
+        gitignore_path.push_str("/.gitignore")
+    }
+    let fp_git = fopen(gitignore_path.as_ptr() as str, "rb")
+    if (fp_git as usize) != 0usize {
+        let _c2 = fclose(fp_git)
+    } else {
+        let _w2 = write_file_str(gitignore_path.as_ptr() as str, "/target\n*.ll\n*.o\n")
+    }
+
+    var src_file = String.new()
+    if str_eq(base_dir.as_ptr() as str, ".") {
+        if is_lib {
+            src_file.push_str("src/lib.rad")
+        } else {
+            src_file.push_str("src/main.rad")
+        }
+    } else {
+        src_file.push_str(base_dir.as_ptr() as str)
+        if is_lib {
+            src_file.push_str("/src/lib.rad")
+        } else {
+            src_file.push_str("/src/main.rad")
+        }
+    }
+
+    let fp_src = fopen(src_file.as_ptr() as str, "rb")
+    if (fp_src as usize) != 0usize {
+        let _c3 = fclose(fp_src)
+    } else {
+        if is_lib {
+            let _w3 = write_file_str(src_file.as_ptr() as str, "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n")
+        } else {
+            let _w4 = write_file_str(src_file.as_ptr() as str, "fn main() -> i32 {\n    println(\"Hello from Rad Package!\")\n    0\n}\n")
+        }
+    }
+
     println("Initialized package successfully!")
     return 0
 }
@@ -286,17 +394,33 @@ fn cmd_build(is_release: bool, target_triple: str, argv0: str) -> i32 {
     bin_path.push_str(out_dir.as_ptr() as str)
     bin_path.push_str("/main")
 
-    // Determine entry point (src/main.rad or src/lib.rad)
-    var entry_file = "src/main.rad"
+    // Determine entry point and sources
+    var src_spec = String.new()
+    var has_src = false
     let test_main = fopen("src/main.rad", "rb")
     if (test_main as usize) != 0usize {
-        let _c = fclose(test_main)
+        let _cm = fclose(test_main)
+        src_spec.push_str("src/*.rad")
+        has_src = true
     } else {
         let test_lib = fopen("src/lib.rad", "rb")
         if (test_lib as usize) != 0usize {
-            let _c = fclose(test_lib)
-            entry_file = "src/lib.rad"
+            let _cl = fclose(test_lib)
+            src_spec.push_str("src/*.rad")
+            has_src = true
+        } else {
+            let test_root = fopen("main.rad", "rb")
+            if (test_root as usize) != 0usize {
+                let _cr = fclose(test_root)
+                src_spec.push_str("*.rad")
+                has_src = true
+            }
         }
+    }
+
+    if !has_src {
+        println("error: could not find `src/main.rad` or `src/lib.rad`")
+        return 1
     }
 
     let radc_bin = find_radc_compiler(argv0)
@@ -305,7 +429,7 @@ fn cmd_build(is_release: bool, target_triple: str, argv0: str) -> i32 {
     var radc_cmd = String.new()
     radc_cmd.push_str(radc_bin.as_ptr() as str)
     radc_cmd.push_str(" ")
-    radc_cmd.push_str(entry_file)
+    radc_cmd.push_str(src_spec.as_ptr() as str)
     radc_cmd.push_str(" -o ")
     radc_cmd.push_str(bin_path.as_ptr() as str)
     if is_release {
@@ -320,12 +444,22 @@ fn cmd_build(is_release: bool, target_triple: str, argv0: str) -> i32 {
 
     println("Compiling project with radc...")
     let status = system(radc_cmd.as_ptr() as str)
+    var build_ok = false
     if status == 0 {
+        let fp_chk = fopen(bin_path.as_ptr() as str, "rb")
+        if (fp_chk as usize) != 0usize {
+            fclose(fp_chk)
+            build_ok = true
+        }
+    }
+
+    if build_ok {
         println("Finished build successfully.")
+        return 0
     } else {
         println("Build failed.")
+        return 1
     }
-    return status
 }
 
 fn cmd_run(is_release: bool, target_triple: str, run_args: str, argv0: str) -> i32 {
@@ -334,12 +468,23 @@ fn cmd_run(is_release: bool, target_triple: str, run_args: str, argv0: str) -> i
         return build_status
     }
 
-    var run_cmd = String.new()
+    var bin_exec = String.new()
     if is_release {
-        run_cmd.push_str("./target/release/main ")
+        bin_exec.push_str("./target/release/main")
     } else {
-        run_cmd.push_str("./target/debug/main ")
+        bin_exec.push_str("./target/debug/main")
     }
+
+    let fp_run_chk = fopen(bin_exec.as_ptr() as str, "rb")
+    if (fp_run_chk as usize) == 0usize {
+        println("error: compiled binary not found to run")
+        return 1
+    }
+    let _c_run = fclose(fp_run_chk)
+
+    var run_cmd = String.new()
+    run_cmd.push_str(bin_exec.as_ptr() as str)
+    run_cmd.push_str(" ")
     if str_len(run_args) > 0usize {
         run_cmd.push_str(run_args)
     }
@@ -381,9 +526,19 @@ fn cmd_doctor(argv0: str) -> i32 {
 
     // 1. Check radc
     let radc_path = find_radc_compiler(argv0)
-    let fp_radc = fopen(radc_path.as_ptr() as str, "rb")
-    if (fp_radc as usize) != 0usize {
-        fclose(fp_radc)
+    var radc_ok = false
+    let radc_ver_status = system("radc --version >/dev/null 2>&1")
+    if radc_ver_status == 0 {
+        radc_ok = true
+    } else {
+        let fp_radc = fopen(radc_path.as_ptr() as str, "rb")
+        if (fp_radc as usize) != 0usize {
+            fclose(fp_radc)
+            radc_ok = true
+        }
+    }
+
+    if radc_ok {
         var msg = String.new()
         msg.push_str("  [OK] radc compiler: found (")
         msg.push_str(radc_path.as_ptr() as str)
@@ -540,10 +695,18 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
 
     if str_eq(cmd, "init") {
         var is_lib = false
-        if argc >= 3 && str_eq(argv[2] as str, "--lib") {
-            is_lib = true
+        var target_dir = ""
+        var i = 2
+        while i < argc {
+            let arg = argv[i] as str
+            if str_eq(arg, "--lib") {
+                is_lib = true
+            } else if !str_starts_with(arg, "-") {
+                target_dir = arg
+            }
+            i = i + 1
         }
-        return cmd_init(is_lib)
+        return cmd_init(target_dir, is_lib)
     }
 
     if str_eq(cmd, "clean") {

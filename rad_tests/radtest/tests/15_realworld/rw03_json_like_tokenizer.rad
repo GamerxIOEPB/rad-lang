@@ -1,0 +1,92 @@
+fn str_len(s: str) -> usize {
+    let p = s as *raw u8;
+    var i = 0usize;
+    while p[i] != 0u8 {
+        i = i + 1usize;
+    }
+    return i;
+}
+
+struct JsonToken {
+    kind: i64,
+    text: String,
+}
+
+fn tokenize_json(src: str) -> Vec<JsonToken> {
+    var tokens = Vec.new();
+    let p = src as *raw u8;
+    let len = str_len(src);
+    var i = 0usize;
+
+    while i < len {
+        let ch = p[i];
+        if ch == 32u8 || ch == 10u8 || ch == 9u8 || ch == 13u8 {
+            i = i + 1usize;
+            continue;
+        }
+        if ch == 123u8 { // '{'
+            var t = JsonToken { kind: 1, text: String.from_str("{") };
+            tokens.push(t);
+            i = i + 1usize;
+            continue;
+        }
+        if ch == 125u8 { // '}'
+            var t = JsonToken { kind: 2, text: String.from_str("}") };
+            tokens.push(t);
+            i = i + 1usize;
+            continue;
+        }
+        if ch == 58u8 { // ':'
+            var t = JsonToken { kind: 3, text: String.from_str(":") };
+            tokens.push(t);
+            i = i + 1usize;
+            continue;
+        }
+        if ch == 44u8 { // ','
+            var t = JsonToken { kind: 4, text: String.from_str(",") };
+            tokens.push(t);
+            i = i + 1usize;
+            continue;
+        }
+        if ch == 34u8 { // '"'
+            i = i + 1usize;
+            var val = String.new();
+            while i < len && p[i] != 34u8 {
+                val.push_byte(p[i]);
+                i = i + 1usize;
+            }
+            if i < len && p[i] == 34u8 {
+                i = i + 1usize;
+            }
+            var t = JsonToken { kind: 5, text: val };
+            tokens.push(t);
+            continue;
+        }
+        if ch >= 48u8 && ch <= 57u8 {
+            var num = String.new();
+            while i < len && p[i] >= 48u8 && p[i] <= 57u8 {
+                num.push_byte(p[i]);
+                i = i + 1usize;
+            }
+            var t = JsonToken { kind: 6, text: num };
+            tokens.push(t);
+            continue;
+        }
+        i = i + 1usize;
+    }
+    return tokens;
+}
+
+fn main() -> i32 {
+    let json = "{\"name\": \"rad_engine\", \"version\": 1, \"active\": 1}";
+    let tokens = tokenize_json(json);
+
+    println("Token count: {}", tokens.len);
+    var i = 0usize;
+    while i < tokens.len {
+        let t = tokens.ptr[i];
+        println("T[{}] kind={} val='{}'", i, t.kind, t.text.as_ptr() as str);
+        i = i + 1usize;
+    }
+    0
+}

@@ -1,0 +1,25 @@
+extern "C" {
+    fn cpp_template_clamp(val: i32, low: i32, high: i32) -> i32;
+    fn cpp_create_rect(w: i32, h: i32) -> *raw u8;
+    fn cpp_create_square(s: i32) -> *raw u8;
+    fn cpp_shape_area(shape: *raw u8) -> i32;
+    fn cpp_shape_perimeter(shape: *raw u8) -> i32;
+    fn cpp_shape_destroy(shape: *raw u8) -> void;
+}
+
+fn main() -> i32 {
+    let c1 = cpp_template_clamp(5, 10, 20);
+    let c2 = cpp_template_clamp(15, 10, 20);
+    let c3 = cpp_template_clamp(25, 10, 20);
+    println("clamp=[{}, {}, {}]", c1, c2, c3);
+
+    let rect = cpp_create_rect(4, 5);
+    let sq = cpp_create_square(6);
+
+    println("rect: area={}, peri={}", cpp_shape_area(rect), cpp_shape_perimeter(rect));
+    println("sq: area={}, peri={}", cpp_shape_area(sq), cpp_shape_perimeter(sq));
+
+    cpp_shape_destroy(rect);
+    cpp_shape_destroy(sq);
+    0
+}

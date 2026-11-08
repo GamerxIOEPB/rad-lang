@@ -11,6 +11,7 @@ import linker;
 
 struct CompilerOptions {
     input_paths: Vec<String>,
+    extra_objects: Vec<String>,
     output_path: String,
     emit_llvm: bool,
     check_only: bool,
@@ -22,6 +23,7 @@ struct CompilerOptions {
 
 fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
     var input_paths = Vec.new()
+    var extra_objects = Vec.new()
     var output_path = String.new()
     var emit_llvm = false
     var check_only = false
@@ -59,9 +61,25 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
         } else if str_eq(arg, "--linker") && i + 1usize < total {
             i = i + 1usize
             linker_cmd = String.from_str(argv[i] as str)
+        } else if str_eq(arg, "-L") && i + 1usize < total {
+            i = i + 1usize
+            var lflag = String.from_str("-L")
+            lflag.push_str(argv[i] as str)
+            extra_objects.push(lflag)
+        } else if str_eq(arg, "-l") && i + 1usize < total {
+            i = i + 1usize
+            var lflag = String.from_str("-l")
+            lflag.push_str(argv[i] as str)
+            extra_objects.push(lflag)
+        } else if str_starts_with(arg, "-l") || str_starts_with(arg, "-L") {
+            extra_objects.push(String.from_str(arg))
         } else if !str_starts_with(arg, "-") {
-            var path_str = String.from_str(arg)
-            input_paths.push(path_str)
+            if str_ends_with(arg, ".o") || str_ends_with(arg, ".a") || str_ends_with(arg, ".so") {
+                extra_objects.push(String.from_str(arg))
+            } else {
+                var path_str = String.from_str(arg)
+                input_paths.push(path_str)
+            }
         }
         i = i + 1usize
     }
@@ -90,6 +108,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
 
     return CompilerOptions {
         input_paths: input_paths,
+        extra_objects: extra_objects,
         output_path: output_path,
         emit_llvm: emit_llvm,
         check_only: check_only,
@@ -271,7 +290,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         return 1
     }
 
-    let link_status = invoke_linker(tmp_ir_path, opts.output_path, opts.opt_level, opts.linker_cmd)
+    let link_status = invoke_linker(tmp_ir_path, opts.output_path, opts.opt_level, opts.linker_cmd, opts.extra_objects)
 
     // Clean up temporary LLVM IR
     var rm_cmd = String.new()

@@ -1,0 +1,7 @@
+verbose: 1
+dry_run: 1
+output: app.out
+threads: 4
+pos_count: 2
+pos[0]: src/main.rad
+pos[1]: lib/util.rad

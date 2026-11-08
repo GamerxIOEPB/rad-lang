@@ -1,0 +1,94 @@
+struct CacheEntry {
+    key: String,
+    val: i64,
+    age: i64,
+}
+
+struct LruCache {
+    entries: Vec<CacheEntry>,
+    cap: usize,
+    clock: i64,
+}
+
+impl LruCache {
+    fn new(capacity: usize) -> LruCache {
+        return LruCache {
+            entries: Vec.new(),
+            cap: capacity,
+            clock: 0,
+        };
+    }
+
+    fn put(var self, key: str, val: i64) {
+        self.clock = self.clock + 1;
+
+        // Check existing
+        var i = 0usize;
+        while i < self.entries.len {
+            let k = self.entries.ptr[i].key.as_ptr() as str;
+            if k == key {
+                self.entries.ptr[i].val = val;
+                self.entries.ptr[i].age = self.clock;
+                return;
+            }
+            i = i + 1usize;
+        }
+
+        // If at capacity, find least recently used (lowest age) and replace
+        if self.entries.len >= self.cap {
+            var min_idx = 0usize;
+            var min_age = self.entries.ptr[0usize].age;
+            var j = 1usize;
+            while j < self.entries.len {
+                if self.entries.ptr[j].age < min_age {
+                    min_age = self.entries.ptr[j].age;
+                    min_idx = j;
+                }
+                j = j + 1usize;
+            }
+            println("Evicted: {}", self.entries.ptr[min_idx].key.as_ptr() as str);
+            self.entries.ptr[min_idx].key = String.from_str(key);
+            self.entries.ptr[min_idx].val = val;
+            self.entries.ptr[min_idx].age = self.clock;
+            return;
+        }
+
+        var entry = CacheEntry {
+            key: String.from_str(key),
+            val: val,
+            age: self.clock,
+        };
+        self.entries.push(entry);
+    }
+
+    fn get(var self, key: str) -> i64 {
+        self.clock = self.clock + 1;
+        var i = 0usize;
+        while i < self.entries.len {
+            let k = self.entries.ptr[i].key.as_ptr() as str;
+            if k == key {
+                self.entries.ptr[i].age = self.clock;
+                return self.entries.ptr[i].val;
+            }
+            i = i + 1usize;
+        }
+        return -1;
+    }
+}
+
+fn main() -> i32 {
+    var cache = LruCache.new(3usize);
+
+    cache.put("A", 100);
+    cache.put("B", 200);
+    cache.put("C", 300);
+
+    println("get(A): {}", cache.get("A"));
+
+    cache.put("D", 400);
+
+    println("get(B): {}", cache.get("B"));
+    println("get(C): {}", cache.get("C"));
+    println("get(D): {}", cache.get("D"));
+    0
+}

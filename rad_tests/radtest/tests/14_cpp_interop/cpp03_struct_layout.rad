@@ -1,0 +1,27 @@
+struct Point3D {
+    x: i64,
+    y: i64,
+    z: i64,
+}
+
+extern "C" {
+    fn cpp_point_magnitude_sq(pt: *raw Point3D) -> i64;
+    fn cpp_translate_point(pt: *raw Point3D, dx: i64, dy: i64, dz: i64) -> void;
+}
+
+fn main() -> i32 {
+    var p = Point3D {
+        x: 2,
+        y: 3,
+        z: 6,
+    };
+    let mag1 = cpp_point_magnitude_sq(&p as *raw Point3D);
+    println("mag1={}", mag1);
+
+    cpp_translate_point(&p as *raw Point3D, 1, 1, 1);
+    println("p=({}, {}, {})", p.x, p.y, p.z);
+
+    let mag2 = cpp_point_magnitude_sq(&p as *raw Point3D);
+    println("mag2={}", mag2);
+    0
+}

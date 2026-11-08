@@ -1,0 +1,20 @@
+struct Rect {
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+}
+
+fn rect_intersects(a: Rect, b: Rect) -> bool {
+    if a.x + a.w <= b.x || b.x + b.w <= a.x {
+        return false;
+    }
+    if a.y + a.h <= b.y || b.y + b.h <= a.y {
+        return false;
+    }
+    return true;
+}
+
+fn rect_area(r: Rect) -> i64 {
+    r.w * r.h
+}

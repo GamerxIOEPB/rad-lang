@@ -1,0 +1,39 @@
+struct PipelineStats {
+    count: i64,
+    sum: i64,
+    min_val: i64,
+    max_val: i64,
+    avg: i64,
+}
+
+extern "C" {
+    fn cpp_pipeline_create() -> *raw u8;
+    fn cpp_pipeline_ingest(pipe: *raw u8, csv: str) -> void;
+    fn cpp_pipeline_get_stats(pipe: *raw u8, out_stats: *raw PipelineStats) -> i32;
+    fn cpp_pipeline_destroy(pipe: *raw u8) -> void;
+}
+
+fn main() -> i32 {
+    let pipe = cpp_pipeline_create();
+    cpp_pipeline_ingest(pipe, "10,25,5,40");
+    cpp_pipeline_ingest(pipe, "70,10,30");
+
+    var stats = PipelineStats {
+        count: 0,
+        sum: 0,
+        min_val: 0,
+        max_val: 0,
+        avg: 0,
+    };
+
+    let rc = cpp_pipeline_get_stats(pipe, &stats as *raw PipelineStats);
+    println("rc={}", rc);
+    println("count={}", stats.count);
+    println("sum={}", stats.sum);
+    println("min={}", stats.min_val);
+    println("max={}", stats.max_val);
+    println("avg={}", stats.avg);
+
+    cpp_pipeline_destroy(pipe);
+    0
+}

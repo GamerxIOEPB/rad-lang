@@ -1,0 +1,4 @@
+div ok: rc=0, val=25
+div err: rc=1
+parse ok: rc=0, val=12345
+parse err: rc=-1

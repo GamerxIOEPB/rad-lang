@@ -1,0 +1,27 @@
+extern "C" {
+    fn cpp_map_create() -> *raw u8;
+    fn cpp_map_put(map: *raw u8, key: str, val: i32) -> void;
+    fn cpp_map_get(map: *raw u8, key: str, default_val: i32) -> i32;
+    fn cpp_map_size(map: *raw u8) -> i32;
+    fn cpp_map_destroy(map: *raw u8) -> void;
+}
+
+fn main() -> i32 {
+    let m = cpp_map_create();
+    cpp_map_put(m, "apple", 15);
+    cpp_map_put(m, "banana", 30);
+    cpp_map_put(m, "cherry", 45);
+
+    let sz = cpp_map_size(m);
+    let v_b = cpp_map_get(m, "banana", -1);
+    let v_c = cpp_map_get(m, "cherry", -1);
+    let v_m = cpp_map_get(m, "mango", -1);
+
+    println("sz={}", sz);
+    println("banana={}", v_b);
+    println("cherry={}", v_c);
+    println("mango={}", v_m);
+
+    cpp_map_destroy(m);
+    0
+}

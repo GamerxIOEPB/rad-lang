@@ -1,0 +1,3 @@
+clamp=[10, 15, 20]
+rect: area=20, peri=18
+sq: area=36, peri=24
