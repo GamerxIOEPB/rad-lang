@@ -136,6 +136,17 @@ fn read_file_str(path: str) -> String {
     return res
 }
 
+fn is_executable_radc(candidate: str) -> bool {
+    if str_len(candidate) == 0usize {
+        return false
+    }
+    var cmd = String.new()
+    cmd.push_str(candidate)
+    cmd.push_str(" --version >/dev/null 2>&1")
+    let ret = system(cmd.as_ptr() as str)
+    return ret == 0
+}
+
 fn find_radc_compiler(argv0: str) -> String {
     // 1. Check if radc lives right next to the running rad binary (sibling path)
     let len = str_len(argv0)
@@ -159,9 +170,7 @@ fn find_radc_compiler(argv0: str) -> String {
                 i = i + 1usize
             }
             sibling.push_str("radc")
-            let fp = fopen(sibling.as_ptr() as str, "rb")
-            if (fp as usize) != 0usize {
-                let _c = fclose(fp)
+            if is_executable_radc(sibling.as_ptr() as str) {
                 return sibling
             }
         }
@@ -173,9 +182,7 @@ fn find_radc_compiler(argv0: str) -> String {
         var p_rad = String.new()
         p_rad.push_str(env_rad_home as str)
         p_rad.push_str("/bin/radc")
-        let fp_rad = fopen(p_rad.as_ptr() as str, "rb")
-        if (fp_rad as usize) != 0usize {
-            let _c = fclose(fp_rad)
+        if is_executable_radc(p_rad.as_ptr() as str) {
             return p_rad
         }
     }
@@ -186,43 +193,25 @@ fn find_radc_compiler(argv0: str) -> String {
         var p_home = String.new()
         p_home.push_str(env_home as str)
         p_home.push_str("/.rad/bin/radc")
-        let fp_home = fopen(p_home.as_ptr() as str, "rb")
-        if (fp_home as usize) != 0usize {
-            let _c = fclose(fp_home)
+        if is_executable_radc(p_home.as_ptr() as str) {
             return p_home
         }
     }
 
-    // 4. Check common local paths
-    let fp0 = fopen("bin/radc", "rb")
-    if (fp0 as usize) != 0usize {
-        let _c = fclose(fp0)
-        return String.from_str("bin/radc")
-    }
-    let fp1 = fopen("target/radc", "rb")
-    if (fp1 as usize) != 0usize {
-        let _c = fclose(fp1)
-        return String.from_str("./target/radc")
-    }
-    let fp2 = fopen("target/release/radc", "rb")
-    if (fp2 as usize) != 0usize {
-        let _c = fclose(fp2)
-        return String.from_str("./target/release/radc")
-    }
-    let fp3 = fopen("radc", "rb")
-    if (fp3 as usize) != 0usize {
-        let _c = fclose(fp3)
-        return String.from_str("./radc")
+    // 4. Check if radc is in PATH
+    if is_executable_radc("radc") {
+        return String.from_str("radc")
     }
 
-    // 5. Check if radc is in PATH
-    let code = system("radc --version >/dev/null 2>&1")
-    if code == 0 {
-        return String.from_str("radc")
+    // 5. Check repository development paths (verified executable)
+    if is_executable_radc("bin/radc") {
+        return String.from_str("bin/radc")
     }
-    let code_which = system("which radc >/dev/null 2>&1")
-    if code_which == 0 {
-        return String.from_str("radc")
+    if is_executable_radc("./target/release/radc") {
+        return String.from_str("./target/release/radc")
+    }
+    if is_executable_radc("./target/radc") {
+        return String.from_str("./target/radc")
     }
 
     return String.from_str("radc")
@@ -424,6 +413,11 @@ fn cmd_build(is_release: bool, target_triple: str, argv0: str) -> i32 {
     }
 
     let radc_bin = find_radc_compiler(argv0)
+    if !is_executable_radc(radc_bin.as_ptr() as str) {
+        println("error: radc compiler not found or not executable.")
+        println("       Please ensure radc is installed in ~/.rad/bin, $RAD_HOME/bin, or in PATH.")
+        return 1
+    }
 
     // Invoke radc compiler
     var radc_cmd = String.new()
@@ -525,15 +519,13 @@ fn cmd_doctor(argv0: str) -> i32 {
     var all_ok = true
 
     // 1. Check radc
-    let radc_path = find_radc_compiler(argv0)
+    var radc_path = find_radc_compiler(argv0)
     var radc_ok = false
     let radc_ver_status = system("radc --version >/dev/null 2>&1")
     if radc_ver_status == 0 {
         radc_ok = true
     } else {
-        let fp_radc = fopen(radc_path.as_ptr() as str, "rb")
-        if (fp_radc as usize) != 0usize {
-            fclose(fp_radc)
+        if is_executable_radc(radc_path.as_ptr() as str) {
             radc_ok = true
         }
     }
@@ -651,7 +643,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let argv0 = argv[0] as str
 
     if argc < 2 {
-        println("Rad Package Manager (rad) v0.1.0")
+        println("Rad Package Manager (rad) v0.2.0")
         println("Usage: rad <command> [options]")
         println("")
         println("Commands:")
@@ -669,14 +661,14 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let cmd = argv[1] as str
 
     if str_eq(cmd, "--help") || str_eq(cmd, "-h") || str_eq(cmd, "help") {
-        println("Rad Package Manager (rad) v0.1.0")
+        println("Rad Package Manager (rad) v0.2.0")
         println("Usage: rad <command> [options]")
         println("Commands: new, init, build, run, test, check, clean, doctor")
         return 0
     }
 
     if str_eq(cmd, "--version") || str_eq(cmd, "-V") || str_eq(cmd, "version") {
-        println("rad 0.1.0 (x86_64-unknown-linux-gnu)")
+        println("rad 0.2.0 (x86_64-unknown-linux-gnu)")
         return 0
     }
 

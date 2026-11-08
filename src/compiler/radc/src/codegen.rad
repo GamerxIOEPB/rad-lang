@@ -310,7 +310,7 @@ impl Codegen {
         if str_eq(fname, "fread") || str_eq(fname, "fwrite") || str_eq(fname, "ftell") {
             return "i64"
         }
-        if str_eq(fname, "main") || str_eq(fname, "println") || str_eq(fname, "puts") || str_eq(fname, "system") || str_eq(fname, "fclose") || str_eq(fname, "printf") {
+        if str_eq(fname, "main") || str_eq(fname, "println") || str_eq(fname, "puts") || str_eq(fname, "system") || str_eq(fname, "fclose") || str_eq(fname, "printf") || str_eq(fname, "remove") {
             return "i32"
         }
         return "i64"
@@ -410,6 +410,7 @@ impl Codegen {
         if str_eq(field_name, "target_triple") { return 6i64 }
         if str_eq(field_name, "linker_cmd") { return 7i64 }
         if str_eq(field_name, "show_version") { return 8i64 }
+        if str_eq(field_name, "compile_only") { return 9i64 }
 
         var si = 0usize
         while si < self.parser.structs.len {
@@ -868,7 +869,7 @@ impl Codegen {
                    str_eq(callee_name, "fread") || str_eq(callee_name, "fwrite") || str_eq(callee_name, "fseek") ||
                    str_eq(callee_name, "ftell") || str_eq(callee_name, "getenv") || str_eq(callee_name, "strcmp") ||
                    str_eq(callee_name, "dprintf") || str_eq(callee_name, "eprintln") || str_eq(callee_name, "system") ||
-                   str_eq(callee_name, "sqrt") || self.is_struct_name(callee_name) {
+                   str_eq(callee_name, "sqrt") || str_eq(callee_name, "remove") || self.is_struct_name(callee_name) {
                     is_known = true
                 }
             }
@@ -2351,7 +2352,8 @@ impl Codegen {
         header.push_str("declare i32 @strcmp(ptr, ptr)\n")
         header.push_str("declare void @exit(i32)\n")
         header.push_str("declare i32 @dprintf(i32, ptr, ...)\n")
-        header.push_str("declare double @sqrt(double)\n\n")
+        header.push_str("declare double @sqrt(double)\n")
+        header.push_str("declare i32 @remove(ptr)\n\n")
 
         // Emit extern function declarations
         var ext_i = 0usize
@@ -2364,21 +2366,32 @@ impl Codegen {
                    !str_eq(fname, "fopen") && !str_eq(fname, "fclose") && !str_eq(fname, "fread") &&
                    !str_eq(fname, "fwrite") && !str_eq(fname, "fseek") && !str_eq(fname, "ftell") &&
                    !str_eq(fname, "getenv") && !str_eq(fname, "strcmp") && !str_eq(fname, "exit") &&
-                   !str_eq(fname, "dprintf") && !str_eq(fname, "sqrt") {
-                    header.push_str("declare ")
-                    header.push_str(self.emit_llvm_type(func.ret_type.as_ptr() as str))
-                    header.push_str(" @")
-                    header.push_str(fname)
-                    header.push_str("(")
-                    var pi = 0usize
-                    while pi < func.param_types.len {
-                        if pi > 0usize {
-                            header.push_str(", ")
+                   !str_eq(fname, "dprintf") && !str_eq(fname, "sqrt") && !str_eq(fname, "remove") {
+                    var already_declared = false
+                    var prev_i = 0usize
+                    while prev_i < ext_i {
+                        if str_eq(self.parser.functions.ptr[prev_i].fn_name.as_ptr() as str, fname) {
+                            already_declared = true
+                            break
                         }
-                        header.push_str(self.emit_llvm_type(func.param_types.ptr[pi].as_ptr() as str))
-                        pi = pi + 1usize
+                        prev_i = prev_i + 1usize
                     }
-                    header.push_str(")\n")
+                    if !already_declared {
+                        header.push_str("declare ")
+                        header.push_str(self.emit_llvm_type(func.ret_type.as_ptr() as str))
+                        header.push_str(" @")
+                        header.push_str(fname)
+                        header.push_str("(")
+                        var pi = 0usize
+                        while pi < func.param_types.len {
+                            if pi > 0usize {
+                                header.push_str(", ")
+                            }
+                            header.push_str(self.emit_llvm_type(func.param_types.ptr[pi].as_ptr() as str))
+                            pi = pi + 1usize
+                        }
+                        header.push_str(")\n")
+                    }
                 }
             }
             ext_i = ext_i + 1usize

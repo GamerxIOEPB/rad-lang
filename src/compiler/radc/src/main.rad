@@ -19,6 +19,7 @@ struct CompilerOptions {
     target_triple: String,
     linker_cmd: String,
     show_version: bool,
+    compile_only: bool,
 }
 
 fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
@@ -31,6 +32,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
     var target_triple = String.from_str("x86_64-unknown-linux-gnu")
     var linker_cmd = String.new()
     var show_version = false
+    var compile_only = false
 
     var i = 1usize
     let total = argc as usize
@@ -39,6 +41,8 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
         let arg = argv[i] as str
         if str_eq(arg, "-V") || str_eq(arg, "--version") {
             show_version = true
+        } else if str_eq(arg, "-c") {
+            compile_only = true
         } else if str_eq(arg, "-o") && i + 1usize < total {
             i = i + 1usize
             output_path = String.from_str(argv[i] as str)
@@ -116,6 +120,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
         target_triple: target_triple,
         linker_cmd: linker_cmd,
         show_version: show_version,
+        compile_only: compile_only,
     }
 }
 
@@ -123,7 +128,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let opts = parse_cli_args(argc, argv)
 
     if opts.show_version {
-        println("radc 0.1.0 (self-hosted x86_64-unknown-linux-gnu)")
+        println("radc 0.2.0 (self-hosted x86_64-unknown-linux-gnu)")
         return 0
     }
 
@@ -133,6 +138,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("")
         println("Options:")
         println("  -o <path>       Set output binary path")
+        println("  -c              Compile to object file (.o) without linking")
         println("  --emit-llvm     Emit textual LLVM IR (.ll) without linking")
         println("  --check         Check source syntax and structure without code generation")
         println("  -O0, -O2, -O3   Set optimization level (default: -O2)")
@@ -280,6 +286,44 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         return 0
     }
 
+    if opts.compile_only {
+        var obj_out = String.new()
+        if opts.output_path.len() > 0usize {
+            obj_out.push_str(opts.output_path.as_ptr() as str)
+        } else {
+            obj_out.push_str("output.o")
+        }
+        var err_buf = malloc(2048usize) as *raw var u8
+        var opt_num = 2i32
+        let opt_s = opts.opt_level.as_ptr() as str
+        if str_eq(opt_s, "0") {
+            opt_num = 0i32
+        } else if str_eq(opt_s, "1") {
+            opt_num = 1i32
+        } else if str_eq(opt_s, "3") {
+            opt_num = 3i32
+        }
+
+        let r = rad_llvm_emit_obj(ir.as_ptr() as str, ir.len(), obj_out.as_ptr() as str, opt_num, opts.target_triple.as_ptr() as str, err_buf as *raw u8, 2048usize)
+        if r != 0 {
+            var tmp_ll = String.new()
+            tmp_ll.push_str(obj_out.as_ptr() as str)
+            tmp_ll.push_str(".tmp.ll")
+            write_file_string(tmp_ll.as_ptr() as str, ir)
+            var llc_cmd = String.new()
+            llc_cmd.push_str("rad-llc -filetype=obj -relocation-model=pic -O")
+            llc_cmd.push_str(opts.opt_level.as_ptr() as str)
+            llc_cmd.push_str(" ")
+            llc_cmd.push_str(tmp_ll.as_ptr() as str)
+            llc_cmd.push_str(" -o ")
+            llc_cmd.push_str(obj_out.as_ptr() as str)
+            let st = run_cmd(llc_cmd.as_ptr() as str)
+            let _ = remove(tmp_ll.as_ptr() as str)
+            return st
+        }
+        return 0
+    }
+
     // Step 3: Write temporary IR and invoke Mode A Linker Cascade
     var tmp_ir_path = String.new()
     tmp_ir_path.push_str(opts.output_path.as_ptr() as str)
@@ -293,10 +337,6 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let link_status = invoke_linker(tmp_ir_path, opts.output_path, opts.opt_level, opts.linker_cmd, opts.extra_objects)
 
     // Clean up temporary LLVM IR
-    var rm_cmd = String.new()
-    rm_cmd.push_str("rm -f ")
-    rm_cmd.push_str(tmp_ir_path.as_ptr() as str)
-    system(rm_cmd.as_ptr() as str)
-
+    let _ = remove(tmp_ir_path.as_ptr() as str)
     return link_status
 }

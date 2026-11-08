@@ -1,6 +1,12 @@
 // ==============================================================================
-// radc/src/linker.rad — Mode A Linker Cascade Driver
+// radc/src/linker.rad — Mode A Linker Cascade Driver (In-Process LLVM & LLD)
 // ==============================================================================
+
+extern "C" {
+    fn rad_llvm_init() -> void;
+    fn rad_llvm_emit_obj(ir_str: str, ir_len: usize, out_obj_path: str, opt_level: i32, target_triple: str, err_buf: *raw u8, err_buf_len: usize) -> i32;
+    fn rad_lld_link_str(cmd_str: str, err_buf: *raw u8, err_buf_len: usize) -> i32;
+}
 
 fn parse_exit_status(raw_status: i32) -> i32 {
     if raw_status == 0 {
@@ -30,6 +36,8 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
     let ir = ir_path.as_ptr() as str
     let out = out_path.as_ptr() as str
     let opt = opt_level.as_ptr() as str
+
+    let ir_content = read_file_string(ir)
 
     var extra_str = String.new()
     var needs_cxx = false
@@ -65,26 +73,46 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
     obj_path.push_str(out)
     obj_path.push_str(".o")
 
-    var llc_cmd = String.new()
-    llc_cmd.push_str("rad-llc -filetype=obj -relocation-model=pic -O")
-    llc_cmd.push_str(opt)
-    llc_cmd.push_str(" ")
-    llc_cmd.push_str(ir)
-    llc_cmd.push_str(" -o ")
-    llc_cmd.push_str(obj_path.as_ptr() as str)
-    llc_cmd.push_str(" 2>/dev/null")
-    var llc_status = run_cmd(llc_cmd.as_ptr() as str)
+    var opt_num = 2i32
+    if str_eq(opt, "0") {
+        opt_num = 0i32
+    } else if str_eq(opt, "1") {
+        opt_num = 1i32
+    } else if str_eq(opt, "3") {
+        opt_num = 3i32
+    }
 
+    var err_buf = malloc(2048usize) as *raw var u8
+    var llc_status = 1i32
+
+    // Primary: In-process LLVM code generation
+    if ir_content.len() > 0usize {
+        llc_status = rad_llvm_emit_obj(ir_content.as_ptr() as str, ir_content.len(), obj_path.as_ptr() as str, opt_num, "x86_64-unknown-linux-musl", err_buf as *raw u8, 2048usize)
+    }
+
+    // Fallback: rad-llc process
     if llc_status != 0 {
-        var llc_cmd_fb = String.new()
-        llc_cmd_fb.push_str("llc -filetype=obj -relocation-model=pic -O")
-        llc_cmd_fb.push_str(opt)
-        llc_cmd_fb.push_str(" ")
-        llc_cmd_fb.push_str(ir)
-        llc_cmd_fb.push_str(" -o ")
-        llc_cmd_fb.push_str(obj_path.as_ptr() as str)
-        llc_cmd_fb.push_str(" 2>/dev/null")
-        llc_status = run_cmd(llc_cmd_fb.as_ptr() as str)
+        var llc_cmd = String.new()
+        llc_cmd.push_str("rad-llc -filetype=obj -relocation-model=pic -O")
+        llc_cmd.push_str(opt)
+        llc_cmd.push_str(" ")
+        llc_cmd.push_str(ir)
+        llc_cmd.push_str(" -o ")
+        llc_cmd.push_str(obj_path.as_ptr() as str)
+        llc_cmd.push_str(" 2>/dev/null")
+        llc_status = run_cmd(llc_cmd.as_ptr() as str)
+
+        if llc_status != 0 {
+            var llc_cmd_fb = String.new()
+            llc_cmd_fb.push_str("llc -filetype=obj -relocation-model=pic -O")
+            llc_cmd_fb.push_str(opt)
+            llc_cmd_fb.push_str(" ")
+            llc_cmd_fb.push_str(ir)
+            llc_cmd_fb.push_str(" -o ")
+            llc_cmd_fb.push_str(obj_path.as_ptr() as str)
+            llc_cmd_fb.push_str(" 2>/dev/null")
+            llc_status = run_cmd(llc_cmd_fb.as_ptr() as str)
+        }
     }
 
     if llc_status == 0 {
@@ -187,45 +215,47 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
             ld_cmd.push_str(sysroot.as_ptr() as str)
             ld_cmd.push_str("/crt/crtn.o 2>/dev/null")
 
-            var ld_status = run_cmd(ld_cmd.as_ptr() as str)
+            // Primary: In-process LLD linking
+            var ld_status = rad_lld_link_str(ld_cmd.as_ptr() as str, err_buf as *raw u8, 2048usize)
             if ld_status != 0 {
-                var ld_cmd_fb = String.new()
-                ld_cmd_fb.push_str("ld.lld -flavor gnu -m elf_x86_64 -static -pie --no-dynamic-linker --eh-frame-hdr -z text -z noexecstack -o ")
-                ld_cmd_fb.push_str(out)
-                ld_cmd_fb.push_str(" ")
-                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
-                ld_cmd_fb.push_str("/crt/rcrt1.o ")
-                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
-                ld_cmd_fb.push_str("/crt/crti.o ")
-                ld_cmd_fb.push_str(obj_path.as_ptr() as str)
-                ld_cmd_fb.push_str(extra_str.as_ptr() as str)
-                ld_cmd_fb.push_str(" -L")
-                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
-                ld_cmd_fb.push_str("/lib ")
-                if needs_cxx && cxx_lib_dir.len() > 0usize {
-                    ld_cmd_fb.push_str("-L")
-                    ld_cmd_fb.push_str(cxx_lib_dir.as_ptr() as str)
+                // Fallback to external rad-lld process
+                ld_status = run_cmd(ld_cmd.as_ptr() as str)
+                if ld_status != 0 {
+                    var ld_cmd_fb = String.new()
+                    ld_cmd_fb.push_str("ld.lld -flavor gnu -m elf_x86_64 -static -pie --no-dynamic-linker --eh-frame-hdr -z text -z noexecstack -o ")
+                    ld_cmd_fb.push_str(out)
                     ld_cmd_fb.push_str(" ")
+                    ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                    ld_cmd_fb.push_str("/crt/rcrt1.o ")
+                    ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                    ld_cmd_fb.push_str("/crt/crti.o ")
+                    ld_cmd_fb.push_str(obj_path.as_ptr() as str)
+                    ld_cmd_fb.push_str(extra_str.as_ptr() as str)
+                    ld_cmd_fb.push_str(" -L")
+                    ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                    ld_cmd_fb.push_str("/lib ")
+                    if needs_cxx && cxx_lib_dir.len() > 0usize {
+                        ld_cmd_fb.push_str("-L")
+                        ld_cmd_fb.push_str(cxx_lib_dir.as_ptr() as str)
+                        ld_cmd_fb.push_str(" ")
+                    }
+                    ld_cmd_fb.push_str("--start-group ")
+                    ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                    ld_cmd_fb.push_str("/lib/libc.a ")
+                    ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                    ld_cmd_fb.push_str("/lib/libclang_rt.builtins-x86_64.a ")
+                    if needs_cxx {
+                        ld_cmd_fb.push_str("-lstdc++ -lunwind ")
+                    }
+                    ld_cmd_fb.push_str("--end-group ")
+                    ld_cmd_fb.push_str(sysroot.as_ptr() as str)
+                    ld_cmd_fb.push_str("/crt/crtn.o")
+                    ld_status = run_cmd(ld_cmd_fb.as_ptr() as str)
                 }
-                ld_cmd_fb.push_str("--start-group ")
-                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
-                ld_cmd_fb.push_str("/lib/libc.a ")
-                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
-                ld_cmd_fb.push_str("/lib/libclang_rt.builtins-x86_64.a ")
-                if needs_cxx {
-                    ld_cmd_fb.push_str("-lstdc++ -lunwind ")
-                }
-                ld_cmd_fb.push_str("--end-group ")
-                ld_cmd_fb.push_str(sysroot.as_ptr() as str)
-                ld_cmd_fb.push_str("/crt/crtn.o")
-                ld_status = run_cmd(ld_cmd_fb.as_ptr() as str)
             }
 
             if ld_status == 0 {
-                var rm_cmd = String.new()
-                rm_cmd.push_str("rm -f ")
-                rm_cmd.push_str(obj_path.as_ptr() as str)
-                system(rm_cmd.as_ptr() as str)
+                let _ = remove(obj_path.as_ptr() as str)
                 return 0
             }
         }
@@ -245,6 +275,10 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
     }
     clang_cmd.push_str(" -no-pie -lm -lpthread 2>/dev/null")
     let clang_status = run_cmd(clang_cmd.as_ptr() as str)
+    let _ = remove(obj_path.as_ptr() as str)
+    if clang_status == 0 {
+        return 0
+    }
     if clang_status == 0 {
         return 0
     }

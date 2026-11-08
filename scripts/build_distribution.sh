@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 HOST_TRIPLE="x86_64-unknown-linux-gnu"
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
 REPO="GamerxIOEPB/rad-lang"
