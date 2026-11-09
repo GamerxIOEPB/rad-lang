@@ -178,21 +178,31 @@ cp -r "$ROOT_DIR/library/std" "$DIST_ROOT/lib/rad/"
 # C headers
 if [ -d "$HOME/.rad/lib/targets/$TARGET_TRIPLE/include" ]; then
     cp -a "$HOME/.rad/lib/targets/$TARGET_TRIPLE/include" "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/" 2>/dev/null || true
-elif [ -d /usr/include ]; then
-    cp -r /usr/include/* "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/include/" 2>/dev/null || true
+fi
+if [ ! -d "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/include" ] || [ -z "$(ls -A "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/include" 2>/dev/null)" ]; then
+    docker run --rm -v "$DIST_ROOT:/dist" "rad-musl-builder:3.23" bash -c '
+        mkdir -p /dist/lib/targets/x86_64-unknown-linux-musl/include
+        cp -r /usr/include/* /dist/lib/targets/x86_64-unknown-linux-musl/include/ 2>/dev/null || true
+    ' || true
 fi
 
 # C++ static libraries and headers
 if [ -d "$HOME/.rad/lib/cxx/$TARGET_TRIPLE" ]; then
     cp -a "$HOME/.rad/lib/cxx/$TARGET_TRIPLE"/* "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/" 2>/dev/null || true
-else
-    if [ -f /usr/lib/gcc/x86_64-pc-linux-gnu/16/libstdc++.a ]; then
-        cp /usr/lib/gcc/x86_64-pc-linux-gnu/16/libstdc++.a "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib/" 2>/dev/null || true
-    fi
+fi
+if [ ! -f "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib/libstdc++.a" ]; then
+    docker run --rm -v "$DIST_ROOT:/dist" "rad-musl-builder:3.23" bash -c '
+        mkdir -p /dist/lib/cxx/x86_64-unknown-linux-musl/lib /dist/lib/cxx/x86_64-unknown-linux-musl/include
+        [ -f /usr/lib/libstdc++.a ] && cp /usr/lib/libstdc++.a /dist/lib/cxx/x86_64-unknown-linux-musl/lib/
+        if [ -d /usr/include/c++ ]; then
+            for d in /usr/include/c++/*; do
+                if [ -d "$d" ]; then
+                    cp -r "$d"/* /dist/lib/cxx/x86_64-unknown-linux-musl/include/ 2>/dev/null || true
+                fi
+            done
+        fi
+    ' || true
     cp "$SYSROOT_DIR/lib/libunwind.a" "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib/" 2>/dev/null || true
-    if [ -d /usr/include/c++/16 ]; then
-        cp -r /usr/include/c++/16/* "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/include/" 2>/dev/null || true
-    fi
 fi
 
 # Documentation & top-level files
@@ -347,21 +357,28 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
     echo ""
     echo "==> Uploading release to GitHub (${REPO})..."
     if command -v gh >/dev/null 2>&1; then
-        # Re-create release so GitHub stamps a fresh publishedAt timestamp
         if gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then
-            echo "  -> Re-creating existing release $RELEASE_TAG for a fresh published date..."
-            gh release delete "$RELEASE_TAG" --yes --repo "$REPO"
+            echo "  -> Updating existing release $RELEASE_TAG..."
+            gh release upload "$RELEASE_TAG" \
+                "$DIST_OUT/${DIST_NAME}.tar.gz" \
+                "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+                "$DIST_OUT/SHA256SUMS" \
+                --clobber --repo "$REPO"
+            gh release edit "$RELEASE_TAG" \
+                --title "$RELEASE_TITLE" \
+                --notes "$RELEASE_DESC" \
+                --latest --repo "$REPO"
+        else
+            echo "  -> Creating release $RELEASE_TAG..."
+            gh release create "$RELEASE_TAG" \
+                "$DIST_OUT/${DIST_NAME}.tar.gz" \
+                "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+                "$DIST_OUT/SHA256SUMS" \
+                --repo "$REPO" \
+                --title "$RELEASE_TITLE" \
+                --notes "$RELEASE_DESC" \
+                --latest
         fi
-
-        echo "  -> Creating release $RELEASE_TAG..."
-        gh release create "$RELEASE_TAG" \
-            "$DIST_OUT/${DIST_NAME}.tar.gz" \
-            "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            "$DIST_OUT/SHA256SUMS" \
-            --repo "$REPO" \
-            --title "$RELEASE_TITLE" \
-            --notes "$RELEASE_DESC" \
-            --latest
 
         echo "  [✓] Release uploaded successfully to GitHub!"
         echo "  URL: https://github.com/${REPO}/releases/tag/${RELEASE_TAG}"

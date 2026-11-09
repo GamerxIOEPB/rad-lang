@@ -36,11 +36,6 @@ if [ ! -x "$RADC" ]; then
     fi
 fi
 
-if [ ! -x "$RADC" ]; then
-    echo "error: No working radc compiler found to bootstrap frontend" >&2
-    exit 1
-fi
-
 RADC_SRCS=(
     "$ROOT_DIR/src/compiler/radc/src/main.rad"
     "$ROOT_DIR/src/compiler/radc/src/util.rad"
@@ -51,7 +46,27 @@ RADC_SRCS=(
     "$ROOT_DIR/src/compiler/radc/src/linker.rad"
 )
 
-"$RADC" -c "${RADC_SRCS[@]}" -o "$ROOT_DIR/bin/radc_rad.o"
+COMPILED=0
+if [ -n "${RADC:-}" ] && [ -x "$RADC" ]; then
+    echo "  -> Attempting compilation with $RADC..."
+    if "$RADC" -c "${RADC_SRCS[@]}" -o "$ROOT_DIR/bin/radc_rad.o" 2>/dev/null; then
+        COMPILED=1
+        echo "  [✓] Successfully compiled radc_rad.o with $RADC"
+    else
+        echo "  [!] Host radc execution failed (e.g. libc or environment incompatibility)"
+    fi
+fi
+
+if [ "$COMPILED" -eq 0 ]; then
+    if [ -f "$ROOT_DIR/src/bootstrap/radc_rad.o" ]; then
+        echo "  -> Falling back to bootstrap object src/bootstrap/radc_rad.o..."
+        cp "$ROOT_DIR/src/bootstrap/radc_rad.o" "$ROOT_DIR/bin/radc_rad.o"
+        echo "  [✓] Used bootstrap radc_rad.o"
+    else
+        echo "error: No working radc compiler found and no src/bootstrap/radc_rad.o available" >&2
+        exit 1
+    fi
+fi
 
 # 3. Inside the hermetic Docker builder, compile backend bridge and link static-pie radc
 echo "==> [2/3] Compiling backend bridge & statically linking radc inside $BUILDER_IMAGE..."

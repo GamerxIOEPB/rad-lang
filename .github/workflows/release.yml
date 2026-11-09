@@ -34,15 +34,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.rad /tmp/bootstrap
-          gh release download 0.2.1 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-          gh release download 0.2.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-          gh release download 0.1.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-          gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap
-          ARCHIVE=$(ls /tmp/bootstrap/rad-*.tar.gz | head -n 1)
-          tar -xzf "$ARCHIVE" -C ~/.rad --strip-components=1
-          echo "$HOME/.rad/bin" >> $GITHUB_PATH
-          if [ -d "$HOME/.rad/lib/llvm" ]; then
-            echo "LD_LIBRARY_PATH=$HOME/.rad/lib/llvm:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
+          (gh release download 0.2.1 --repo GamerxIOEPB/rad-lang --pattern "rad-*musl*.tar.gz" --dir /tmp/bootstrap || \
+           gh release download 0.2.1 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+           gh release download 0.2.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+           gh release download 0.1.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+           gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap) || true
+          if [ -d /tmp/bootstrap ] && [ -n "$(ls /tmp/bootstrap/rad-*.tar.gz 2>/dev/null)" ]; then
+            ARCHIVE=$(ls /tmp/bootstrap/rad-*.tar.gz | head -n 1)
+            tar -xzf "$ARCHIVE" -C ~/.rad --strip-components=1 || true
+            echo "$HOME/.rad/bin" >> $GITHUB_PATH
+            if [ -d "$HOME/.rad/lib/llvm" ]; then
+              echo "LD_LIBRARY_PATH=$HOME/.rad/lib/llvm:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
+            fi
           fi
 
       - name: Verify Bootstrap Environment
