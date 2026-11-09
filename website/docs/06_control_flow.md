@@ -170,3 +170,31 @@ fn run_engine() {
     }
 }
 ```
+
+---
+
+## 6.6 Block Scope & Statement Separation Rules
+
+Every block `{ ... }` in Rad (function bodies, `if`/`else` branches, `while`/`loop` bodies, `match` arms) enforces explicit statement separation:
+
+1. **Newline separation**: Semicolons are optional between statements located on distinct lines:
+   ```rad
+   let a = 1
+   let b = 2
+   ```
+
+2. **Same-line semicolons**: If two or more statements share the same source line, they must be separated with `;`:
+   ```rad
+   let a = 1; let b = 2
+   if condition { do_something() }; println("next")
+   ```
+
+3. **Rejection of unseparated same-line statements**:
+   ```rad
+   let a = 1 let b = 2 // Syntax Error: expected ';' or newline between statements on the same line
+   ```
+
+4. **Empty statements & trailing separators**:
+   - Consecutive semicolons (`x = 1;; y = 2`) are tolerated as empty statements.
+   - Semicolons before a closing brace `}` are optional (`{ foo(); }` and `{ foo() }` are both valid).
+

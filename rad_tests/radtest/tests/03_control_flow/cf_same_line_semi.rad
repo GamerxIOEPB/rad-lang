@@ -1,0 +1,46 @@
+// [cf_same_line_semi] Positive tests for same-line statement separators, newlines, and empty statements.
+
+fn add(a: i32, b: i32) -> i32 {
+    return a + b
+}
+
+fn main() -> i32 {
+    // 1. Newline-separated statements without semicolons
+    let a = 10
+    let b = 20
+    println("a+b={}", a + b)
+
+    // 2. Multiple same-line statements with semicolons
+    let c = 30; let d = 40; let e = c + d
+    println("c+d={}", e)
+
+    // 3. Empty statements and consecutive semicolons
+    ;;;
+    var x = 1;
+    ;;;
+    x = x + 1;;; x = x * 2;
+    println("x={}", x)
+
+    // 4. Optional trailing semicolon before closing brace
+    if x > 0 {
+        println("x is positive");
+    }
+
+    // 5. Same-line control flow separated by semicolons
+    var flag = false
+    if x == 4 { flag = true }; if flag { println("flag is true") }
+
+    // 6. Multiline expressions and calls
+    let sum = (
+        100 +
+        200 +
+        300
+    )
+    let res = add(
+        10,
+        20
+    )
+    println("sum={}, res={}", sum, res)
+
+    return 0;
+}

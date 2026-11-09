@@ -198,6 +198,30 @@ fn main() -> i32 {
 }
 ```
 
+### Statement Separation Rules
+
+Rad recognizes both newlines and semicolons as statement separators:
+- **Newline-separated statements**: Statements placed on separate lines do not require terminating semicolons:
+  ```rad
+  println("Hello")
+  println("World")
+
+  let x = 10
+  let y = 20
+  ```
+- **Same-line statements**: Multiple statements placed on the same line must be explicitly separated by semicolons:
+  ```rad
+  println("Hello"); println("World")
+  let x = 10; let y = 20
+  ```
+- **Same-line rejection without separators**: Adjacent statements on the same line without a semicolon are rejected at compile time with a clear syntax error (`error[E0001]`):
+  ```rad
+  println("Hello") println("World") // Error: expected ';' or newline between statements on the same line
+  ```
+- **Optional trailing semicolons & empty statements**: Trailing semicolons before closing braces (`let x = 10; }`) and consecutive semicolons (`x = 1;; y = 2;`) representing empty statements are fully accepted.
+- **Multiline expressions**: Expressions spanning across lines (parentheses, binary operators, method chains) preserve their natural continuation without requiring semicolons.
+- **Struct fields**: Fields can be separated by commas (`,`), semicolons (`;`), or newlines. Same-line struct fields require an explicit separator (`struct Point { x: i32, y: i32 }` or `struct Point { x: i32; y: i32 }`).
+
 ---
 
 ## 1.4 How Rad Compares to Other Languages

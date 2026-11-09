@@ -1,0 +1,5 @@
+// Must fail: adjacent control-flow statements on the same line require a semicolon.
+fn main() {
+    var x = 0
+    if true { x = 1 } if false { x = 2 }
+}

@@ -1,0 +1,4 @@
+// Must fail: adjacent statements on the same line require a semicolon.
+fn main() {
+    println("Hello") println("World")
+}

@@ -1,0 +1,4 @@
+// Must fail: adjacent let statements on the same line require a semicolon.
+fn main() {
+    let x = 10 let y = 20
+}

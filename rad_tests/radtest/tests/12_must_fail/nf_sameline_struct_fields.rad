@@ -1,0 +1,7 @@
+// Must fail: adjacent struct fields on the same line require a comma or semicolon.
+struct BadPoint {
+    x: i32 y: i32
+}
+
+fn main() {
+}

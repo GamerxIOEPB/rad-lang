@@ -792,7 +792,6 @@ impl Parser {
                     self.moved_vars.push(self.exprs.ptr[init_id].str_val)
                 }
             }
-            self.match_tok(TOK_SEMI)
             res_id = self.add_stmt(Stmt {
                 kind: s_kind,
                 name: v_name,
@@ -807,11 +806,7 @@ impl Parser {
             self.advance()
             let cond_id = self.parse_expr(0)
             self.expect_tok(TOK_LBRACE, "{")
-            var then_stmts = Vec.new()
-            while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
-                let st = self.parse_stmt()
-                then_stmts.push(st)
-            }
+            let then_stmts = self.parse_block_stmts()
             self.expect_tok(TOK_RBRACE, "}")
             var else_stmts = Vec.new()
             if self.match_tok(TOK_ELSE) {
@@ -820,10 +815,7 @@ impl Parser {
                     else_stmts.push(elif_st)
                 } else {
                     let _lb = self.expect_tok(TOK_LBRACE, "{")
-                    while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
-                        let st = self.parse_stmt()
-                        else_stmts.push(st)
-                    }
+                    else_stmts = self.parse_block_stmts()
                     let _rb = self.expect_tok(TOK_RBRACE, "}")
                 }
             }
@@ -841,11 +833,7 @@ impl Parser {
             self.advance()
             let cond_id = self.parse_expr(0)
             self.expect_tok(TOK_LBRACE, "{")
-            var body_stmts = Vec.new()
-            while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
-                let st = self.parse_stmt()
-                body_stmts.push(st)
-            }
+            let body_stmts = self.parse_block_stmts()
             self.expect_tok(TOK_RBRACE, "}")
             res_id = self.add_stmt(Stmt {
                 kind: STMT_WHILE,
@@ -860,11 +848,7 @@ impl Parser {
         } else if k == TOK_LOOP {
             self.advance()
             self.expect_tok(TOK_LBRACE, "{")
-            var body_stmts = Vec.new()
-            while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
-                let st = self.parse_stmt()
-                body_stmts.push(st)
-            }
+            let body_stmts = self.parse_block_stmts()
             self.expect_tok(TOK_RBRACE, "}")
             let true_expr = self.add_expr(Expr {
                 kind: EXPR_BOOL,
@@ -966,14 +950,17 @@ impl Parser {
                     arm_stmts.push(let_stmt)
                 }
                 if self.match_tok(TOK_LBRACE) {
-                    while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
-                        let st = self.parse_stmt()
-                        arm_stmts.push(st)
+                    let bstmts = self.parse_block_stmts()
+                    var bi = 0usize
+                    while bi < bstmts.len {
+                        arm_stmts.push(bstmts.ptr[bi])
+                        bi = bi + 1usize
                     }
                     let _disc = self.expect_tok(TOK_RBRACE, "}")
                 } else {
                     let st = self.parse_stmt()
                     arm_stmts.push(st)
+                    self.match_tok(TOK_SEMI)
                 }
                 self.match_tok(TOK_COMMA)
                 arms.push(MatchArm {
@@ -1011,12 +998,15 @@ impl Parser {
                 res_id = current_else.ptr[0usize]
             }
         } else if k == TOK_RETURN {
+            let ret_pos = self.pos
+            let ret_line = self.tokens.ptr[ret_pos].line
             self.advance()
             var ret_val = 0usize
-            if self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_RBRACE {
-                ret_val = self.parse_expr(0)
+            if self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+                if self.pos < self.tokens.len && self.tokens.ptr[self.pos].line == ret_line {
+                    ret_val = self.parse_expr(0)
+                }
             }
-            self.match_tok(TOK_SEMI)
             res_id = self.add_stmt(Stmt {
                 kind: STMT_RETURN,
                 name: String.new(),
@@ -1029,7 +1019,6 @@ impl Parser {
             })
         } else if k == TOK_BREAK {
             self.advance()
-            self.match_tok(TOK_SEMI)
             res_id = self.add_stmt(Stmt {
                 kind: STMT_BREAK,
                 name: String.new(),
@@ -1042,7 +1031,6 @@ impl Parser {
             })
         } else if k == TOK_CONTINUE {
             self.advance()
-            self.match_tok(TOK_SEMI)
             res_id = self.add_stmt(Stmt {
                 kind: STMT_CONTINUE,
                 name: String.new(),
@@ -1058,7 +1046,6 @@ impl Parser {
             let lhs = self.parse_expr(0)
             if self.match_tok(TOK_EQ) {
                 let rhs = self.parse_expr(0)
-                self.match_tok(TOK_SEMI)
                 let ep = self.exprs.ptr
                 if ep[lhs].kind == EXPR_IDENT {
                     let vname = ep[lhs].str_val.as_ptr() as str
@@ -1130,7 +1117,6 @@ impl Parser {
                     })
                 }
             } else {
-                self.match_tok(TOK_SEMI)
                 res_id = self.add_stmt(Stmt {
                     kind: STMT_EXPR,
                     name: String.new(),
@@ -1147,6 +1133,55 @@ impl Parser {
             self.advance()
         }
         return res_id
+    }
+
+    fn parse_block_stmts(var self) -> Vec<usize> {
+        var stmts = Vec.new()
+        while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+            // 1. Consume leading or standalone semicolons (empty statements)
+            while self.match_tok(TOK_SEMI) {
+            }
+            if self.peek_kind() == TOK_RBRACE || self.peek_kind() == TOK_EOF {
+                break
+            }
+
+            let start_p = self.pos
+            let st = self.parse_stmt()
+            stmts.push(st)
+
+            // 2. Determine end line of the parsed statement
+            var end_line = 0i64
+            if self.pos > 0usize && self.pos - 1usize < self.tokens.len {
+                end_line = self.tokens.ptr[self.pos - 1usize].line
+            }
+
+            // 3. Consume any semicolons following the statement
+            var had_semi = false
+            while self.match_tok(TOK_SEMI) {
+                had_semi = true
+            }
+
+            // 4. If block terminates or EOF reached, no separator required before '}'
+            let next_k = self.peek_kind()
+            if next_k == TOK_RBRACE || next_k == TOK_EOF {
+                break
+            }
+
+            // 5. Another token / statement follows on the same line without semicolon
+            if self.pos < self.tokens.len {
+                let next_line = self.tokens.ptr[self.pos].line
+                if !had_semi && next_line == end_line {
+                    let next_col = self.tokens.ptr[self.pos].col
+                    self.report_error("E0001", "expected ';' or newline between statements on the same line", next_line, next_col)
+                }
+            }
+
+            // 6. Guarantee parser makes forward progress
+            if self.pos == start_p {
+                self.advance()
+            }
+        }
+        return stmts
     }
 
     fn parse_function(var self, prefix: str) {
@@ -1196,11 +1231,7 @@ impl Parser {
         }
 
         self.expect_tok(TOK_LBRACE, "{")
-        var body = Vec.new()
-        while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
-            let st = self.parse_stmt()
-            body.push(st)
-        }
+        let body = self.parse_block_stmts()
         self.expect_tok(TOK_RBRACE, "}")
 
         self.functions.push(FunctionDef {
@@ -1256,11 +1287,23 @@ impl Parser {
         self.advance() // skip 'struct'
         let s_name = String.from_str(self.peek_text())
         self.match_tok(TOK_IDENT)
+        if self.peek_kind() == TOK_LT {
+            while self.peek_kind() != TOK_GT && self.peek_kind() != TOK_EOF {
+                self.advance()
+            }
+            if self.peek_kind() == TOK_GT {
+                self.advance()
+            }
+        }
         self.expect_tok(TOK_LBRACE, "{")
 
         var f_names = Vec.new()
         var f_types = Vec.new()
         while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+            while self.match_tok(TOK_COMMA) || self.match_tok(TOK_SEMI) {}
+            if self.peek_kind() == TOK_RBRACE || self.peek_kind() == TOK_EOF {
+                break
+            }
             if self.peek_kind() == TOK_PUB {
                 self.advance()
             }
@@ -1271,14 +1314,32 @@ impl Parser {
             let fnm = String.from_str(self.peek_text())
             self.match_tok(TOK_IDENT)
             self.match_tok(TOK_COLON)
-            var fty = String.new()
-            while self.peek_kind() != TOK_COMMA && self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
-                fty.push_str(self.peek_text())
-                self.advance()
-            }
-            self.match_tok(TOK_COMMA)
+            let fty = self.parse_type_str()
             f_names.push(fnm)
             f_types.push(fty)
+
+            var end_line = 0i64
+            if self.pos > 0usize && self.pos - 1usize < self.tokens.len {
+                end_line = self.tokens.ptr[self.pos - 1usize].line
+            }
+
+            var had_sep = false
+            while self.match_tok(TOK_COMMA) || self.match_tok(TOK_SEMI) {
+                had_sep = true
+            }
+
+            if self.peek_kind() == TOK_RBRACE || self.peek_kind() == TOK_EOF {
+                break
+            }
+
+            if self.pos < self.tokens.len {
+                let next_line = self.tokens.ptr[self.pos].line
+                if !had_sep && next_line == end_line {
+                    let next_col = self.tokens.ptr[self.pos].col
+                    self.report_error("E0001", "expected separator (',', ';', or newline) between struct fields on the same line", next_line, next_col)
+                }
+            }
+
             if self.pos == start_pos {
                 self.advance()
             }
