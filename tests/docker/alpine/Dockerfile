@@ -6,7 +6,7 @@
 # STRICTLY NO compilers, NO glibc/gcompat, NO LLVM/LLD, NO libstdc++.
 # ==============================================================================
 
-FROM --platform=linux/amd64 alpine:3.23
+FROM alpine:3.23
 
 RUN apk add --no-cache \
     bash \

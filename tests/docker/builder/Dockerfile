@@ -6,7 +6,7 @@
 # Statically links LLVM and LLD in-process backend directly into radc.
 # ==============================================================================
 
-FROM --platform=linux/amd64 alpine:3.23
+FROM alpine:3.23
 
 # 1. Install build toolchain and LLVM 21 static libraries
 RUN apk add --no-cache \
@@ -29,7 +29,7 @@ RUN for f in libLLVMTestingAnnotations.a libLLVMTestingSupport.a libllvm_gtest.a
     done
 
 # 3. Clone and build static LLD libraries (liblldELF.a and liblldCommon.a) with position-independent code (-fPIC)
-RUN git clone --depth 1 --branch llvmorg-21.1.2 --filter=blob:none --sparse https://github.com/llvm/llvm-project.git /tmp/llvm-lld && \
+RUN git clone -q --depth 1 --branch llvmorg-21.1.2 --filter=blob:none --sparse https://github.com/llvm/llvm-project.git /tmp/llvm-lld 2>/dev/null && \
     cd /tmp/llvm-lld && \
     git sparse-checkout set lld cmake llvm/cmake && \
     mkdir -p /tmp/llvm-lld/build && cd /tmp/llvm-lld/build && \
@@ -38,7 +38,9 @@ RUN git clone --depth 1 --branch llvmorg-21.1.2 --filter=blob:none --sparse http
       -DLLVM_DIR=/usr/lib/llvm21/lib/cmake/llvm \
       -DBUILD_SHARED_LIBS=OFF \
       -DLLVM_LINK_LLVM_DYLIB=OFF \
-      -DCMAKE_POSITION_INDEPENDENT_CODE=ON && \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_C_FLAGS="-w" \
+      -DCMAKE_CXX_FLAGS="-w" && \
     ninja lldELF lldCommon && \
     mkdir -p /usr/local/lib/lld /usr/local/include && \
     cp lib/liblldELF.a lib/liblldCommon.a /usr/local/lib/lld/ && \
