@@ -15,7 +15,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.23}"
 TEST_IMAGE_TAG="rad-alpine-test:3.23"
 DIST_DIR="$ROOT_DIR/target/dist"
-ARCHIVE_NAME="rad-0.2.1-x86_64-unknown-linux-musl.tar.gz"
+ARCHIVE_NAME="rad-0.2.1-linux-x86_64.tar.gz"
 
 BOLD="\033[1m"
 GREEN="\033[32m"
@@ -367,7 +367,8 @@ docker run --rm \
         export RAD_HOME="$HOME/.rad-glibc"
         export RAD_DIST_DIR=/workspace/target/dist
 
-        tar -xzf /workspace/target/dist/rad-0.2.1-x86_64-unknown-linux-musl.tar.gz -C "$HOME"
+        ARCH=$(ls /workspace/target/dist/rad-0.2.1-*.tar.gz | head -n 1)
+        tar -xzf "$ARCH" -C "$HOME"
         mv "$HOME"/rad-0.2.1-* "$RAD_HOME"
         export PATH="$RAD_HOME/bin:$PATH"
 

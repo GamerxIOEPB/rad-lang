@@ -26,7 +26,7 @@ REPO="GamerxIOEPB/rad-lang"
 DIST_OUT="$ROOT_DIR/target/dist"
 BUILD_TMP="$ROOT_DIR/target/dist_build"
 
-DIST_NAME="rad-${VERSION}-${TARGET_TRIPLE}"
+DIST_NAME="rad-${VERSION}-linux-x86_64"
 DIST_ROOT="$BUILD_TMP/$DIST_NAME"
 
 DO_UPLOAD=0
@@ -277,7 +277,7 @@ echo "LLVM Apache 2.0 with LLVM Exception" > "$DIST_ROOT/share/rad/LICENSES/LICE
 echo "MIT License (Musl libc)" > "$DIST_ROOT/share/rad/LICENSES/LICENSE-MUSL"
 
 # ------------------------------------------------------------------------------
-# 3. Archive Unified Package & Compatibility Alias
+# 3. Archive Unified Package
 # ------------------------------------------------------------------------------
 echo "==> [3/4] Packaging unified tarball..."
 
@@ -285,15 +285,10 @@ tar -czf "$DIST_OUT/${DIST_NAME}.tar.gz" -C "$BUILD_TMP" "$DIST_NAME"
 sha256sum "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}' > "$DIST_OUT/${DIST_NAME}.tar.gz.sha256"
 echo "  [✓] Created ${DIST_NAME}.tar.gz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}'))"
 
-# Compatibility alias for x86_64-unknown-linux-gnu
-cp "$DIST_OUT/${DIST_NAME}.tar.gz" "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-cp "$DIST_OUT/${DIST_NAME}.tar.gz.sha256" "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256"
-echo "  [✓] Created compatibility alias rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-
-# Generate unified SHA256SUMS manifest
+# Generate SHA256SUMS manifest
 (
     cd "$DIST_OUT"
-    sha256sum "${DIST_NAME}.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" > SHA256SUMS
+    sha256sum "${DIST_NAME}.tar.gz" > SHA256SUMS
 )
 echo "  [✓] Generated SHA256SUMS manifest"
 
@@ -361,7 +356,6 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
             echo "  -> Updating existing release $RELEASE_TAG..."
             gh release upload "$RELEASE_TAG" \
                 "$DIST_OUT/${DIST_NAME}.tar.gz" \
-                "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
                 "$DIST_OUT/SHA256SUMS" \
                 --clobber --repo "$REPO"
             gh release edit "$RELEASE_TAG" \
@@ -372,7 +366,6 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
             echo "  -> Creating release $RELEASE_TAG..."
             gh release create "$RELEASE_TAG" \
                 "$DIST_OUT/${DIST_NAME}.tar.gz" \
-                "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
                 "$DIST_OUT/SHA256SUMS" \
                 --repo "$REPO" \
                 --title "$RELEASE_TITLE" \

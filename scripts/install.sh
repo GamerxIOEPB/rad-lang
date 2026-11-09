@@ -236,41 +236,20 @@ validate_version "$VERSION"
 
 # 1. Platform Verification
 if [ "$OS" != "Linux" ] || [ "$ARCH" != "x86_64" ]; then
-    log_error "Rad toolchain currently only supports Linux x86-64 (x86_64-unknown-linux-gnu)."
+    log_error "Rad toolchain currently supports Linux x86-64 (linux-x86_64)."
     log_error "Detected platform: OS='${OS}', Arch='${ARCH}'"
     log_error "Please build from source or report this at https://github.com/${REPO}/issues."
     exit 1
 fi
 
-# Detect target triple (prefer musl for self-contained portability)
-if [ -n "${RAD_TARGET_TRIPLE:-}" ]; then
-    TARGET_TRIPLE="$RAD_TARGET_TRIPLE"
-elif [ -n "${RAD_DIST_DIR:-}" ] && [ -f "$RAD_DIST_DIR/rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" ]; then
-    TARGET_TRIPLE="x86_64-unknown-linux-musl"
-else
-    TARGET_TRIPLE="x86_64-unknown-linux-musl"
-fi
-
-# Determine archive name
-if [ "$PACKAGE_TYPE" = "full" ]; then
-    ARCHIVE_NAME="rad-${VERSION}-${TARGET_TRIPLE}.tar.gz"
-else
-    ARCHIVE_NAME="rad-core-${VERSION}-${TARGET_TRIPLE}.tar.gz"
-fi
-
-# If using local distribution directory, fall back to gnu if musl is not found
-if [ -n "${RAD_DIST_DIR:-}" ]; then
-    if [ ! -f "$RAD_DIST_DIR/$ARCHIVE_NAME" ] && [ -f "$RAD_DIST_DIR/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" ]; then
-        TARGET_TRIPLE="x86_64-unknown-linux-gnu"
-        ARCHIVE_NAME="rad-${VERSION}-${TARGET_TRIPLE}.tar.gz"
-    fi
-fi
+TARGET_PLATFORM="linux-x86_64"
+ARCHIVE_NAME="rad-${VERSION}-${TARGET_PLATFORM}.tar.gz"
 
 printf "${BOLD}======================================================================${RESET}\n"
 printf "${BOLD} Installing Rad Programming Language Toolchain v${VERSION}${RESET}\n"
 printf " Target Prefix: %s\n" "$RAD_HOME"
-printf " Architecture:  %s\n" "$TARGET_TRIPLE"
-printf " Package Type:  %s (%s)\n" "$PACKAGE_TYPE" "$ARCHIVE_NAME"
+printf " Architecture:  %s\n" "$TARGET_PLATFORM"
+printf " Package Name:  %s\n" "$ARCHIVE_NAME"
 printf "${BOLD}======================================================================${RESET}\n\n"
 
 # Create secure temporary directory on the same filesystem as RAD_HOME for atomic operations
@@ -368,8 +347,8 @@ Rad Programming Language
 Version: ${VERSION}
 Commit:  $(git -C "$LOCAL_REPO" rev-parse HEAD 2>/dev/null || echo "offline")
 Built:   $(date -u +"%Y-%m-%dT%H:%M:%SZ")
-Host:    ${TARGET_TRIPLE}
-Target:  ${TARGET_TRIPLE}
+Host:    linux-x86_64
+Target:  x86_64-unknown-linux-musl
 EOF
     fi
 else
@@ -380,10 +359,19 @@ else
 
     if [ -n "${RAD_DIST_DIR:-}" ] && [ -d "$RAD_DIST_DIR" ]; then
         log_step "Using local distribution directory: $RAD_DIST_DIR"
-        if [ ! -f "$RAD_DIST_DIR/$ARCHIVE_NAME" ]; then
+        FOUND_ARCHIVE=""
+        for cand in "$ARCHIVE_NAME" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
+            if [ -f "$RAD_DIST_DIR/$cand" ]; then
+                FOUND_ARCHIVE="$cand"
+                break
+            fi
+        done
+        if [ -z "$FOUND_ARCHIVE" ]; then
             log_error "Archive $ARCHIVE_NAME not found in local directory $RAD_DIST_DIR"
             exit 1
         fi
+        ARCHIVE_NAME="$FOUND_ARCHIVE"
+        ARCHIVE_PATH="$TMP_DIR/$ARCHIVE_NAME"
         cp "$RAD_DIST_DIR/$ARCHIVE_NAME" "$ARCHIVE_PATH"
         if [ -f "$RAD_DIST_DIR/SHA256SUMS" ]; then
             cp "$RAD_DIST_DIR/SHA256SUMS" "$MANIFEST_PATH"
@@ -396,25 +384,39 @@ else
         else
             BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
         fi
-        ARCHIVE_URL="${BASE_URL}/${ARCHIVE_NAME}"
         MANIFEST_URL="${BASE_URL}/SHA256SUMS"
 
-        log_step "Downloading $ARCHIVE_URL..."
+        log_step "Downloading Rad release archive from $BASE_URL..."
+        DOWNLOAD_OK=0
+        for cand in "${ARCHIVE_NAME}" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
+            cand_url="${BASE_URL}/${cand}"
+            if command -v curl >/dev/null 2>&1; then
+                if curl -fSL --progress-bar "$cand_url" -o "$TMP_DIR/$cand" 2>/dev/null; then
+                    ARCHIVE_NAME="$cand"
+                    ARCHIVE_PATH="$TMP_DIR/$cand"
+                    DOWNLOAD_OK=1
+                    break
+                fi
+            elif command -v wget >/dev/null 2>&1; then
+                if wget -q --show-progress "$cand_url" -O "$TMP_DIR/$cand" 2>/dev/null; then
+                    ARCHIVE_NAME="$cand"
+                    ARCHIVE_PATH="$TMP_DIR/$cand"
+                    DOWNLOAD_OK=1
+                    break
+                fi
+            fi
+        done
+
+        if [ "$DOWNLOAD_OK" -eq 0 ]; then
+            log_error "Failed to download Rad release package from $BASE_URL"
+            exit 1
+        fi
+
+        # Download SHA256SUMS
         if command -v curl >/dev/null 2>&1; then
-            curl -fSL --progress-bar "$ARCHIVE_URL" -o "$ARCHIVE_PATH" || {
-                log_error "Failed to download $ARCHIVE_URL"
-                exit 1
-            }
             curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_PATH" 2>/dev/null || true
         elif command -v wget >/dev/null 2>&1; then
-            wget -q --show-progress "$ARCHIVE_URL" -O "$ARCHIVE_PATH" || {
-                log_error "Failed to download $ARCHIVE_URL"
-                exit 1
-            }
             wget -q "$MANIFEST_URL" -O "$MANIFEST_PATH" 2>/dev/null || true
-        else
-            log_error "Neither curl nor wget is available. Please install curl or wget."
-            exit 1
         fi
     fi
 

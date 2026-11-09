@@ -10,7 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/i
 
 ### What the Installer Does:
 1. Detects your host architecture (`x86_64`) and operating system (`Linux`).
-2. Downloads the official release archive (`rad-0.2.0-x86_64-unknown-linux-gnu.tar.gz`) from GitHub Releases.
+2. Downloads the official self-contained release archive (`rad-0.2.1-linux-x86_64.tar.gz`) from GitHub Releases.
 3. Verifies the cryptographic SHA-256 integrity hash against `SHA256SUMS`.
 4. Extracts all binaries, libraries, standard library modules, target sysroots, and embedded LLVM runtime components to `~/.rad`.
 5. Automatically configures your shell environment (`~/.bashrc`, `~/.zshrc`, or `~/.profile`) to ensure `~/.rad/bin` is exported in your `PATH`.
