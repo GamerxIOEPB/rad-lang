@@ -12,7 +12,9 @@ DEFAULT_VERSION="0.2.1"
 DEFAULT_REPO="GamerxIOEPB/rad-lang"
 DEFAULT_RAD_HOME="$HOME/.rad"
 
-VERSION="$DEFAULT_VERSION"
+VERSION="${VERSION:-$DEFAULT_VERSION}"
+VERSION="${VERSION#v}"
+VERSION_EXPLICIT=0
 REPO="$DEFAULT_REPO"
 RAD_HOME="${RAD_HOME:-$DEFAULT_RAD_HOME}"
 PACKAGE_TYPE="full"   # "full" or "core"
@@ -63,6 +65,78 @@ log_error() {
     printf "${RED}error:${RESET} %s\n" "$1" >&2
 }
 
+list_versions() {
+    REPO="${RAD_REPO:-$REPO}"
+    printf "${BOLD}Available Rad Toolchain Releases:${RESET}\n\n"
+
+    FETCHED=""
+    if command -v curl >/dev/null 2>&1; then
+        FETCHED="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | sed -E 's/^v//' || true)"
+    elif command -v wget >/dev/null 2>&1; then
+        FETCHED="$(wget -qO- "https://api.github.com/repos/${REPO}/releases" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/' | sed -E 's/^v//' || true)"
+    fi
+
+    if [ -n "$FETCHED" ]; then
+        FIRST=1
+        for ver in $FETCHED; do
+            if [ "$FIRST" -eq 1 ]; then
+                printf "  * ${GREEN}%s${RESET} (latest)\n" "$ver"
+                FIRST=0
+            else
+                printf "  * %s\n" "$ver"
+            fi
+        done
+    else
+        printf "  * ${GREEN}0.2.1${RESET} (latest)\n"
+        printf "  * 0.2.0\n"
+        printf "  * 0.1.0\n"
+    fi
+
+    printf "\nTo install a specific version, run:\n"
+    printf "  curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh -s -- --version <version>\n\n"
+}
+
+validate_version() {
+    REQ_VER="$1"
+
+    # Known stable releases
+    case "$REQ_VER" in
+        "0.2.1"|"0.2.0"|"0.1.0")
+            return 0
+            ;;
+    esac
+
+    if [ "$OFFLINE_MODE" -eq 1 ]; then
+        return 0
+    fi
+
+    # Probe GitHub releases for the requested version tag
+    REPO="${RAD_REPO:-$REPO}"
+    CHECK_URL="https://github.com/${REPO}/releases/tag/${REQ_VER}"
+    CHECK_URL_V="https://github.com/${REPO}/releases/tag/v${REQ_VER}"
+    EXISTS=0
+
+    if command -v curl >/dev/null 2>&1; then
+        if curl -fsIL "$CHECK_URL" >/dev/null 2>&1 || curl -fsIL "$CHECK_URL_V" >/dev/null 2>&1; then
+            EXISTS=1
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if wget --spider -q "$CHECK_URL" 2>/dev/null || wget --spider -q "$CHECK_URL_V" 2>/dev/null; then
+            EXISTS=1
+        fi
+    fi
+
+    if [ "$EXISTS" -ne 1 ]; then
+        log_error "Version '${REQ_VER}' is not a valid or published Rad release."
+        printf "\n${BOLD}Available releases:${RESET}\n"
+        printf "  * 0.2.1 (latest)\n"
+        printf "  * 0.2.0\n"
+        printf "  * 0.1.0\n\n"
+        printf "Run '$0 --list' to view all available releases.\n\n"
+        exit 1
+    fi
+}
+
 print_help() {
     cat << EOF
 Rad Programming Language Installer
@@ -72,6 +146,7 @@ Usage:
 
 Options:
     -h, --help              Show this help message and exit
+    -l, --list              List available Rad releases and exit
     -v, --version <version> Specify Rad version to install (default: ${DEFAULT_VERSION})
     -p, --prefix <dir>      Installation directory (default: ~/.rad, or \$RAD_HOME)
     --core                  Install minimal core toolchain only (default: full toolchain)
@@ -84,10 +159,17 @@ Environment Variables:
     RAD_HOME                Installation directory prefix
     RAD_DIST_DIR            Local directory containing release archives for offline install
     RAD_RELEASE_URL         Custom base URL for release downloads
-    RAD_REPO                GitHub repository owner/repo (default: rad-lang/rad)
+    RAD_REPO                GitHub repository owner/repo (default: ${DEFAULT_REPO})
 
-Example:
-    curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/install.sh | sh
+Examples:
+    # Install the latest stable release (v0.2.1):
+    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/scripts/install.sh | sh
+
+    # Install a specific version (e.g. v0.2.0):
+    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/scripts/install.sh | sh -s -- --version 0.2.0
+
+    # List all available releases:
+    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/scripts/install.sh | sh -s -- --list
 EOF
 }
 
@@ -98,12 +180,17 @@ while [ $# -gt 0 ]; do
             print_help
             exit 0
             ;;
+        -l|--list)
+            list_versions
+            exit 0
+            ;;
         -v|--version)
             if [ -z "${2:-}" ]; then
                 log_error "Option --version requires an argument"
                 exit 1
             fi
-            VERSION="$2"
+            VERSION="${2#v}"
+            VERSION_EXPLICIT=1
             shift 2
             ;;
         -p|--prefix)
@@ -143,6 +230,9 @@ while [ $# -gt 0 ]; do
 done
 
 REPO="${RAD_REPO:-$REPO}"
+
+# Validate requested version
+validate_version "$VERSION"
 
 # 1. Platform Verification
 if [ "$OS" != "Linux" ] || [ "$ARCH" != "x86_64" ]; then
@@ -286,10 +376,10 @@ else
     else
         if [ -n "${RAD_RELEASE_URL:-}" ]; then
             BASE_URL="$RAD_RELEASE_URL"
-        elif [ "$VERSION" != "$DEFAULT_VERSION" ]; then
-            BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
-        else
+        elif [ "$VERSION_EXPLICIT" -eq 0 ] && [ "$VERSION" = "$DEFAULT_VERSION" ]; then
             BASE_URL="https://github.com/${REPO}/releases/latest/download"
+        else
+            BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
         fi
         ARCHIVE_URL="${BASE_URL}/${ARCHIVE_NAME}"
         MANIFEST_URL="${BASE_URL}/SHA256SUMS"

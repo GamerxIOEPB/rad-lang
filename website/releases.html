@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All Releases — Rad Programming Language</title>
+    <meta name="description" content="Official releases, release notes, standalone archives, and version-specific install scripts for the Rad programming language.">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="stylesheet" href="style.css?v=0.2.1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <header class="navbar">
+        <div class="container nav-container">
+            <a href="index.html" class="brand">
+                <span class="brand-logo">⚡</span>
+                <span class="brand-name">Rad</span>
+                <span class="brand-badge">v0.2.1</span>
+            </a>
+            <nav class="nav-links">
+                <a href="index.html#features">Features</a>
+                <a href="docs.html" style="color:var(--accent); font-weight:600;">Documentation</a>
+                <a href="releases.html" style="color:var(--text-primary); font-weight:600;">Releases</a>
+                <a href="index.html#install">Install</a>
+                <a href="index.html#code">Examples</a>
+                <a href="https://github.com/GamerxIOEPB/rad-lang" target="_blank" rel="noopener" class="github-link">
+                    <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    <span>GitHub</span>
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="releases-page">
+        <div class="container">
+            <div class="releases-hero">
+                <h1>Rad Releases</h1>
+                <p>All official versions of the self-contained Rad toolchain, direct standalone archive downloads, SHA256 checksums, and version-specific install commands.</p>
+            </div>
+
+            <!-- Version 0.2.1 (Latest) -->
+            <article class="release-card latest-card" id="v0.2.1">
+                <div class="release-card-header">
+                    <div class="release-title-group">
+                        <span class="release-version">Rad v0.2.1</span>
+                        <span class="release-badge-pill release-badge-latest">Latest Stable</span>
+                        <span class="release-date">Released November 9, 2026</span>
+                    </div>
+                    <a href="https://github.com/GamerxIOEPB/rad-lang/releases/tag/0.2.1" target="_blank" rel="noopener" class="github-release-btn">
+                        <span>View on GitHub ↗</span>
+                    </a>
+                </div>
+
+                <div class="release-section-title">Quick Install (v0.2.1)</div>
+                <div class="release-install-box">
+                    <code id="cmd-0-2-1">curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/install.sh | sh -s -- --version 0.2.1</code>
+                    <button class="copy-btn" onclick="copySnippet('cmd-0-2-1', this)">Copy</button>
+                </div>
+
+                <div class="release-highlights">
+                    <div class="release-section-title">Key Improvements & Features</div>
+                    <ul>
+                        <li><strong>Runtime Bounds Checking:</strong> Guard checks for arrays and slices with detailed diagnostic abort messages reporting index, length, and source location.</li>
+                        <li><strong>Zero-Division Safety:</strong> Automatic runtime trap handlers catching division and modulo by zero cleanly without crashing the process.</li>
+                        <li><strong>Range & Collection Loops:</strong> Full language support for <code>for i in 0..10</code>, <code>for i in 0..=10</code>, and <code>for item in collection</code> iterators.</li>
+                        <li><strong>Dynamic Slice Views:</strong> Return type inference and dynamic sizing for collection slices and sub-arrays.</li>
+                        <li><strong>Tuple Variable Swap:</strong> First-class generic swapping (<code>swap(&mut a, &mut b)</code>).</li>
+                        <li><strong>Statement Separator Diagnostics:</strong> Explicit enforcement of statement separation via newlines or semicolons with friendly compiler errors.</li>
+                        <li><strong>Expanded Test Suite:</strong> 188 automated regression, algorithmic (Bubble Sort, Merge Sort with up to 1,000 elements), and runtime safety tests.</li>
+                    </ul>
+                </div>
+
+                <div class="release-assets-box">
+                    <div class="release-section-title">Standalone Package & Checksums</div>
+                    <div class="release-asset-item">
+                        <div class="asset-info">
+                            <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.1/rad-0.2.1-x86_64-unknown-linux-gnu.tar.gz" class="asset-name">
+                                rad-0.2.1-x86_64-unknown-linux-gnu.tar.gz (189.6 MB)
+                            </a>
+                            <span class="asset-hash">SHA256: <code>b2cf0231b70f1a00b6da6031703b0ebe9be8fb3086a80b361c2dd24d2656ba30</code></span>
+                        </div>
+                        <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.1/rad-0.2.1-x86_64-unknown-linux-gnu.tar.gz" class="btn-download">
+                            Download ↓
+                        </a>
+                    </div>
+                </div>
+            </article>
+
+            <!-- Version 0.2.0 -->
+            <article class="release-card" id="v0.2.0">
+                <div class="release-card-header">
+                    <div class="release-title-group">
+                        <span class="release-version">Rad v0.2.0</span>
+                        <span class="release-badge-pill release-badge-stable">Stable</span>
+                        <span class="release-date">Released November 8, 2026</span>
+                    </div>
+                    <a href="https://github.com/GamerxIOEPB/rad-lang/releases/tag/0.2.0" target="_blank" rel="noopener" class="github-release-btn">
+                        <span>View on GitHub ↗</span>
+                    </a>
+                </div>
+
+                <div class="release-section-title">Install Version 0.2.0</div>
+                <div class="release-install-box">
+                    <code id="cmd-0-2-0">curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/install.sh | sh -s -- --version 0.2.0</code>
+                    <button class="copy-btn" onclick="copySnippet('cmd-0-2-0', this)">Copy</button>
+                </div>
+
+                <div class="release-highlights">
+                    <div class="release-section-title">Key Improvements & Features</div>
+                    <ul>
+                        <li><strong>In-Process LLVM Backend:</strong> Direct C++ bridge integrating LLVM code generation directly into <code>radc</code>, eliminating child-process spawning overhead.</li>
+                        <li><strong>Built-In LLD Static-PIE Linker:</strong> Embedded LLD linker directly executing in-process for sub-second builds.</li>
+                        <li><strong>Pure Rad System Interfaces:</strong> Low-level terminal, ANSI color, and raw keyboard syscall layers implemented in pure Rad.</li>
+                        <li><strong>Self-Contained Musl Toolchain:</strong> Bundled sysroot and compiler headers for static binary generation.</li>
+                    </ul>
+                </div>
+
+                <div class="release-assets-box">
+                    <div class="release-section-title">Standalone Package & Checksums</div>
+                    <div class="release-asset-item">
+                        <div class="asset-info">
+                            <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.0/rad-0.2.0-x86_64-unknown-linux-gnu.tar.gz" class="asset-name">
+                                rad-0.2.0-x86_64-unknown-linux-gnu.tar.gz (188.4 MB)
+                            </a>
+                            <span class="asset-hash">SHA256: <code>b3c6db15787578768f7279d94642b1017b71ad78615bc3ad9538955f43447c73</code></span>
+                        </div>
+                        <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.0/rad-0.2.0-x86_64-unknown-linux-gnu.tar.gz" class="btn-download">
+                            Download ↓
+                        </a>
+                    </div>
+                </div>
+            </article>
+
+            <!-- Version 0.1.0 -->
+            <article class="release-card" id="v0.1.0">
+                <div class="release-card-header">
+                    <div class="release-title-group">
+                        <span class="release-version">Rad v0.1.0</span>
+                        <span class="release-badge-pill release-badge-stable">Initial Release</span>
+                        <span class="release-date">Released November 8, 2026</span>
+                    </div>
+                    <a href="https://github.com/GamerxIOEPB/rad-lang/releases/tag/0.1.0" target="_blank" rel="noopener" class="github-release-btn">
+                        <span>View on GitHub ↗</span>
+                    </a>
+                </div>
+
+                <div class="release-section-title">Install Version 0.1.0</div>
+                <div class="release-install-box">
+                    <code id="cmd-0-1-0">curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/install.sh | sh -s -- --version 0.1.0</code>
+                    <button class="copy-btn" onclick="copySnippet('cmd-0-1-0', this)">Copy</button>
+                </div>
+
+                <div class="release-highlights">
+                    <div class="release-section-title">Key Improvements & Features</div>
+                    <ul>
+                        <li><strong>Initial Release:</strong> First official public distribution of the Rad compiler toolchain.</li>
+                        <li><strong>Self-Contained Static PIE:</strong> Produces position-independent executables with zero glibc dependencies.</li>
+                        <li><strong>Core Standard Library:</strong> Basic I/O, string formatting, dynamic vectors, and memory allocation.</li>
+                        <li><strong>Developer Tooling:</strong> Project scaffolding with <code>rad new</code>, build diagnostics with <code>rad doctor</code>.</li>
+                    </ul>
+                </div>
+
+                <div class="release-assets-box">
+                    <div class="release-section-title">Standalone Package & Checksums</div>
+                    <div class="release-asset-item">
+                        <div class="asset-info">
+                            <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.1.0/rad-0.1.0-x86_64-unknown-linux-gnu.tar.gz" class="asset-name">
+                                rad-0.1.0-x86_64-unknown-linux-gnu.tar.gz (189.6 MB)
+                            </a>
+                            <span class="asset-hash">SHA256: <code>fd1c9b0f7d07878126f8baa466279409eed9ee58c853767aebbfb4445970cdac</code></span>
+                        </div>
+                        <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.1.0/rad-0.1.0-x86_64-unknown-linux-gnu.tar.gz" class="btn-download">
+                            Download ↓
+                        </a>
+                    </div>
+                </div>
+            </article>
+
+            <!-- Switching & Managing Versions Tips -->
+            <div class="version-switch-tip">
+                <h3>💡 Managing Versions from the Command Line</h3>
+                <p>The official Rad installer supports listing and installing any available release tag directly:</p>
+                <pre><code># Query all published release versions:
+curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/install.sh | sh -s -- --list
+
+# Install or switch to a specific version (e.g. 0.2.0):
+curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/install.sh | sh -s -- --version 0.2.0
+
+# Verify currently installed version:
+rad --version</code></pre>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container footer-container">
+            <div class="footer-left">
+                <p>© 2026 Rad Language Contributors. Open source under the Apache 2.0 / MIT licenses.</p>
+            </div>
+            <div class="footer-links">
+                <a href="index.html">Home</a>
+                <a href="docs.html">Documentation</a>
+                <a href="releases.html">Releases</a>
+                <a href="https://github.com/GamerxIOEPB/rad-lang">GitHub</a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        function copySnippet(elementId, btn) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            const text = el.innerText || el.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = btn.innerText;
+                btn.innerText = 'Copied!';
+                btn.style.borderColor = 'var(--accent)';
+                btn.style.color = 'var(--accent)';
+                setTimeout(() => {
+                    btn.innerText = originalText;
+                    btn.style.borderColor = '';
+                    btn.style.color = '';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
