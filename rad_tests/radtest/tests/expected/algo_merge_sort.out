@@ -5,3 +5,6 @@
 38
 43
 82
+sort_32: PASS
+sort_100: PASS
+sort_1000: PASS

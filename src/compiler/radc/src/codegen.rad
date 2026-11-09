@@ -127,6 +127,17 @@ impl Codegen {
                             if self.is_struct_name(cname) {
                                 return cname
                             }
+                            var fi = 0usize
+                            while fi < self.parser.functions.len {
+                                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, cname) {
+                                    let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                    if str_len(raw_r) > 0usize && !str_eq(raw_r, "i64") && !str_eq(raw_r, "void") {
+                                        return raw_r
+                                    }
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
                         }
                     }
                 }

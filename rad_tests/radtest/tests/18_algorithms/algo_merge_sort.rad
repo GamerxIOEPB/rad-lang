@@ -1,59 +1,138 @@
-fn merge(var arr: []i64, l: usize, m: usize, r: usize) {
-    let n1 = m - l + 1usize
-    let n2 = r - m
-
-    var left = [0, 0, 0, 0, 0, 0, 0, 0]
-    var right = [0, 0, 0, 0, 0, 0, 0, 0]
-
-    for i in 0..n1 {
-        left[i] = arr[l + i]
-    }
-    for j in 0..n2 {
-        right[j] = arr[m + 1usize + j]
-    }
-
-    var i = 0usize
-    var j = 0usize
+fn merge(var arr: []i64, temp: *raw var i64, l: usize, m: usize, r: usize) {
+    var i = l
+    var j = m + 1usize
     var k = l
 
-    while i < n1 && j < n2 {
-        if left[i] <= right[j] {
-            arr[k] = left[i]
+    while i <= m && j <= r {
+        if arr[i] <= arr[j] {
+            temp[k] = arr[i]
             i = i + 1usize
         } else {
-            arr[k] = right[j]
+            temp[k] = arr[j]
             j = j + 1usize
         }
         k = k + 1usize
     }
 
-    while i < n1 {
-        arr[k] = left[i]
+    while i <= m {
+        temp[k] = arr[i]
         i = i + 1usize
         k = k + 1usize
     }
 
-    while j < n2 {
-        arr[k] = right[j]
+    while j <= r {
+        temp[k] = arr[j]
         j = j + 1usize
         k = k + 1usize
     }
-}
 
-fn merge_sort(var arr: []i64, l: usize, r: usize) {
-    if l < r {
-        let m = l + (r - l) / 2usize
-        merge_sort(arr, l, m)
-        merge_sort(arr, m + 1usize, r)
-        merge(arr, l, m, r)
+    for idx in l..(r + 1usize) {
+        arr[idx] = temp[idx]
     }
 }
 
-fn main() -> i32 {
+fn merge_sort_rec(var arr: []i64, temp: *raw var i64, l: usize, r: usize) {
+    if l < r {
+        let m = l + (r - l) / 2usize
+        merge_sort_rec(arr, temp, l, m)
+        merge_sort_rec(arr, temp, m + 1usize, r)
+        merge(arr, temp, l, m, r)
+    }
+}
+
+fn merge_sort(var arr: []i64) {
+    let n = arr.len
+    if n <= 1usize {
+        return
+    }
+    let temp = malloc(n * 8usize) as *raw var i64
+    merge_sort_rec(arr, temp, 0usize, n - 1usize)
+    free(temp as *raw u8)
+}
+
+fn is_sorted(arr: []i64) -> bool {
+    let n = arr.len
+    if n <= 1usize {
+        return true
+    }
+    for i in 0..(n - 1usize) {
+        if arr[i] > arr[i + 1usize] {
+            return false
+        }
+    }
+    return true
+}
+
+fn alloc_slice(n: usize) -> []i64 {
+    let buf = malloc(n * 8usize) as *raw var i64
+    let desc = malloc(24usize) as *raw var usize
+    desc[0] = buf as usize
+    desc[1] = n
+    desc[2] = n
+    return desc as []i64
+}
+
+fn free_slice(s: []i64) {
+    let desc = (s as usize) as *raw var usize
+    let buf = desc[0] as *raw u8
+    free(buf)
+    free(desc as *raw u8)
+}
+
+fn test_7() {
     var arr = [38, 27, 43, 3, 9, 82, 10]
-    merge_sort(arr, 0usize, arr.len - 1usize)
+    merge_sort(arr)
     for x in arr {
         println(x)
     }
+}
+
+fn test_32() {
+    var arr = alloc_slice(32usize)
+    for i in 0..arr.len {
+        arr[i] = ((i * 37usize + 13usize) % 100usize) as i64
+    }
+    merge_sort(arr)
+    if is_sorted(arr) {
+        println("sort_32: PASS")
+    } else {
+        println("sort_32: FAIL")
+    }
+    free_slice(arr)
+}
+
+fn test_100() {
+    var arr = alloc_slice(100usize)
+    for i in 0..arr.len {
+        arr[i] = ((i * 73usize + 19usize) % 1000usize) as i64
+    }
+    merge_sort(arr)
+    if is_sorted(arr) {
+        println("sort_100: PASS")
+    } else {
+        println("sort_100: FAIL")
+    }
+    free_slice(arr)
+}
+
+fn test_1000() {
+    var arr = alloc_slice(1000usize)
+    for i in 0..arr.len {
+        arr[i] = ((i * 104729usize + 563usize) % 50000usize) as i64
+    }
+    merge_sort(arr)
+    if is_sorted(arr) {
+        println("sort_1000: PASS")
+    } else {
+        println("sort_1000: FAIL")
+    }
+    free_slice(arr)
+}
+
+fn main() -> i32 {
+    test_7()
+    test_32()
+    test_100()
+    test_1000()
     return 0
 }
