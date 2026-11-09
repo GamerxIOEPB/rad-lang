@@ -271,7 +271,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let opts = parse_cli_args(argc, argv)
 
     if opts.show_version {
-        println("radc 0.2.1 (self-hosted x86_64-unknown-linux-gnu)")
+        println("radc 0.2.2 (self-hosted x86_64-linux)")
         return 0
     }
 

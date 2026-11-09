@@ -8,7 +8,7 @@
 set -eu
 
 # Default configuration
-DEFAULT_VERSION="0.2.1"
+DEFAULT_VERSION="0.2.2"
 DEFAULT_REPO="GamerxIOEPB/rad-lang"
 DEFAULT_RAD_HOME="$HOME/.rad"
 
@@ -87,7 +87,8 @@ list_versions() {
             fi
         done
     else
-        printf "  * ${GREEN}0.2.1${RESET} (latest)\n"
+        printf "  * ${GREEN}0.2.2${RESET} (latest)\n"
+        printf "  * 0.2.1\n"
         printf "  * 0.2.0\n"
         printf "  * 0.1.0\n"
     fi
@@ -101,7 +102,7 @@ validate_version() {
 
     # Known stable releases
     case "$REQ_VER" in
-        "0.2.1"|"0.2.0"|"0.1.0")
+        "0.2.2"|"0.2.1"|"0.2.0"|"0.1.0")
             return 0
             ;;
     esac
@@ -129,7 +130,8 @@ validate_version() {
     if [ "$EXISTS" -ne 1 ]; then
         log_error "Version '${REQ_VER}' is not a valid or published Rad release."
         printf "\n${BOLD}Available releases:${RESET}\n"
-        printf "  * 0.2.1 (latest)\n"
+        printf "  * 0.2.2 (latest)\n"
+        printf "  * 0.2.1\n"
         printf "  * 0.2.0\n"
         printf "  * 0.1.0\n\n"
         printf "Run '$0 --list' to view all available releases.\n\n"
@@ -290,8 +292,8 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
     log_step "Staging toolchain binaries..."
     cp "$LOCAL_REPO/bin/radc" "$STAGE_DIR/bin/radc"
     cp "$LOCAL_REPO/bin/rad" "$STAGE_DIR/bin/rad"
-    cp "$LOCAL_REPO/bin/rad-clang" "$STAGE_DIR/bin/rad-clang"
-    cp "$LOCAL_REPO/bin/rad-clang++" "$STAGE_DIR/bin/rad-clang++"
+    [ -f "$LOCAL_REPO/bin/rad-clang" ] && cp "$LOCAL_REPO/bin/rad-clang" "$STAGE_DIR/bin/rad-clang"
+    [ -f "$LOCAL_REPO/bin/rad-clang++" ] && cp "$LOCAL_REPO/bin/rad-clang++" "$STAGE_DIR/bin/rad-clang++"
     chmod 755 "$STAGE_DIR/bin"/*
 
     log_step "Staging Rad standard library..."
@@ -460,13 +462,16 @@ fi
 
 # 5. Pre-installation Executable Validation
 log_info "Validating toolchain components..."
-for bin in rad radc rad-clang rad-clang++; do
+for bin in rad radc; do
     if [ ! -f "$STAGE_DIR/bin/$bin" ]; then
         log_error "Essential executable missing in distribution: bin/$bin"
         exit 1
     fi
     chmod 755 "$STAGE_DIR/bin/$bin"
 done
+if [ -f "$STAGE_DIR/bin/rad-clang" ]; then
+    chmod 755 "$STAGE_DIR/bin/rad-clang"* 2>/dev/null || true
+fi
 
 # Basic executable functionality tests on staged binaries before replacing RAD_HOME
 STAGE_RAD_VER="$("$STAGE_DIR/bin/rad" --version 2>/dev/null || true)"
@@ -478,12 +483,6 @@ fi
 STAGE_RADC_VER="$("$STAGE_DIR/bin/radc" --version 2>/dev/null || true)"
 if [ -z "$STAGE_RADC_VER" ]; then
     log_error "Staged 'radc' binary failed basic execution test in current environment."
-    exit 1
-fi
-
-STAGE_CLANG_VER="$("$STAGE_DIR/bin/rad-clang" --version 2>/dev/null || true)"
-if [ -z "$STAGE_CLANG_VER" ]; then
-    log_error "Staged 'rad-clang' launcher failed basic execution test in current environment."
     exit 1
 fi
 

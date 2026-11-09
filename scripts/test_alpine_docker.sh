@@ -4,7 +4,8 @@
 #
 # Tests the standalone Rad distribution on a clean, isolated Alpine Linux (musl)
 # environment via local Docker, verifying zero external shared dependencies,
-# static PIE execution, compiler functionality, relocation, and glibc compatibility.
+# static PIE execution, compiler functionality, relocation, external toolchain
+# discovery (Envs A-D), rad toolchain CLI (Env G), and glibc compatibility (Env E).
 # ==============================================================================
 
 set -euo pipefail
@@ -15,7 +16,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.23}"
 TEST_IMAGE_TAG="rad-alpine-test:3.23"
 DIST_DIR="$ROOT_DIR/target/dist"
-ARCHIVE_NAME="rad-0.2.1-linux-x86_64.tar.gz"
+ARCHIVE_NAME="rad-0.2.2-linux-x86_64.tar.gz"
 
 BOLD="\033[1m"
 GREEN="\033[32m"
@@ -70,8 +71,10 @@ if ! docker image inspect "$TEST_IMAGE_TAG" >/dev/null 2>&1; then
 fi
 log_pass "Test container image ready: $TEST_IMAGE_TAG"
 
-# 4. Execute Alpine Portability Test Suite Inside Isolated Container
-log_info "Running isolated Alpine Linux portability verification suite..."
+# ------------------------------------------------------------------------------
+# 4. Environment A: Clean Alpine Core (No Compilers, No Libc Headers, Pure Rad)
+# ------------------------------------------------------------------------------
+log_info "Running Environment A: Clean isolated Alpine (musl, zero external compilers)..."
 
 docker run --rm \
     --platform linux/amd64 \
@@ -81,7 +84,7 @@ docker run --rm \
     bash -c '
         set -euo pipefail
 
-        echo "=== [Step 1/6] Installing Rad from distribution archive ==="
+        echo "=== [Step 1/7] Installing Rad from distribution archive ==="
         export HOME=/tmp/rad-test-home
         mkdir -p "$HOME"
         export RAD_HOME="$HOME/.rad-alpine-test"
@@ -89,19 +92,21 @@ docker run --rm \
 
         # Run installer
         sh /workspace/scripts/install.sh \
-            -v 0.2.1 \
+            -v 0.2.2 \
             -y \
             --no-modify-path
 
         export PATH="$RAD_HOME/bin:$PATH"
 
-        echo "=== [Step 2/6] Validating mandatory binaries ==="
+        echo "=== [Step 2/7] Validating mandatory core binaries ==="
         rad --version
         radc --version
-        rad doctor || true
 
-        echo "=== [Step 3/6] Inspecting ELF properties (Static PIE verification) ==="
-        for bin in rad radc rad-clang rad-clang++; do
+        echo "=== [Step 3/7] Running rad doctor in clean environment (MUST PASS WITH ZERO COMPILERS) ==="
+        rad doctor
+
+        echo "=== [Step 4/7] Inspecting ELF properties (Static PIE verification) ==="
+        for bin in rad radc; do
             TARGET="$RAD_HOME/bin/$bin"
             echo "Checking $bin:"
             file "$TARGET"
@@ -120,12 +125,12 @@ docker run --rm \
             echo "  -> [OK] Pure static-pie verified with zero external dynamic dependencies."
         done
 
-        echo "=== [Step 4/6] Compiling & Executing Algorithmic Test Programs ==="
+        echo "=== [Step 5/7] Compiling & Executing Algorithmic Test Programs ==="
         WORK="/tmp/rad_algo_tests"
         mkdir -p "$WORK"
         cd "$WORK"
 
-        # 4.1 Hello World
+        # 5.1 Hello World
         cat << "EOF" > test_hello.rad
 fn main() {
     println("Hello from clean Alpine Linux!")
@@ -140,7 +145,7 @@ EOF
         fi
         echo "  [PASS] Hello World"
 
-        # 4.2 Fibonacci
+        # 5.2 Fibonacci
         cat << "EOF" > test_fibo.rad
 fn fib(n: i64) -> i64 {
     if n <= 1 { return n }
@@ -159,7 +164,7 @@ EOF
         fi
         echo "  [PASS] Fibonacci recursive (fib(10) = 55)"
 
-        # 4.3 Factorial
+        # 5.3 Factorial
         cat << "EOF" > test_fact.rad
 fn factorial(n: i64) -> i64 {
     var res: i64 = 1
@@ -182,7 +187,7 @@ EOF
         fi
         echo "  [PASS] Factorial iterative (7! = 5040)"
 
-        # 4.4 Bubble Sort
+        # 5.4 Bubble Sort
         cat << "EOF" > test_bubble.rad
 fn bubble_sort(var arr: []i64) {
     let n = arr.len
@@ -213,7 +218,7 @@ EOF
         fi
         echo "  [PASS] Bubble Sort"
 
-        # 4.5 Merge Sort (1,000 Elements)
+        # 5.5 Merge Sort (1,000 Elements)
         cat << "EOF" > test_merge.rad
 fn merge(var arr: []i64, temp: *raw var i64, l: usize, m: usize, r: usize) {
     var i = l
@@ -311,7 +316,7 @@ EOF
         fi
         echo "  [PASS] Merge Sort (1,000 Elements Dynamic Vector)"
 
-        # 4.6 Multi-file Module
+        # 5.6 Multi-file Module
         cat << "EOF" > math_helper.rad
 fn square(x: i64) -> i64 {
     return x * x
@@ -332,7 +337,12 @@ EOF
         fi
         echo "  [PASS] Multi-file Rad compilation"
 
-        echo "=== [Step 5/6] Testing Relocation to New Path ==="
+        echo "=== [Step 6/7] Testing rad toolchain CLI (Env G) ==="
+        rad toolchain info
+        rad toolchain list
+        rad toolchain update --check
+
+        echo "=== [Step 7/7] Testing Relocation to New Path (Env F) ==="
         RELOC_DIR="/tmp/relocated-rad-dir"
         mv "$RAD_HOME" "$RELOC_DIR"
         export RAD_HOME="$RELOC_DIR"
@@ -347,14 +357,128 @@ EOF
             exit 1
         fi
         echo "  [PASS] Toolchain successfully relocated and fully functional at $RELOC_DIR"
-
-        echo "=== [Step 6/6] All Alpine Portability Checks Passed Cleanly ==="
     '
+log_pass "Environment A (Clean Alpine Portability): PASSED"
 
-log_pass "Alpine Linux portability acceptance tests passed successfully!"
+# ------------------------------------------------------------------------------
+# 5. Environment B: External Compatible C Compiler Discovery
+# ------------------------------------------------------------------------------
+log_info "Running Environment B: Alpine with external C compiler (gcc musl-dev)..."
+docker run --rm \
+    --platform linux/amd64 \
+    -v "$ROOT_DIR:/workspace:ro" \
+    alpine:3.23 \
+    sh -c '
+        set -eu
+        apk add --no-cache bash binutils file tar coreutils gcc musl-dev >/dev/null 2>&1
 
-# 5. Clean glibc Compatibility Test (Minimal Debian Slim)
-log_info "Verifying cross-distro compatibility on clean glibc container (debian:bookworm-slim)..."
+        export HOME=/tmp/rad-test-b
+        mkdir -p "$HOME"
+        export RAD_HOME="$HOME/.rad"
+        export RAD_DIST_DIR=/workspace/target/dist
+
+        sh /workspace/scripts/install.sh -v 0.2.2 -y --no-modify-path
+        export PATH="$RAD_HOME/bin:$PATH"
+
+        echo "Running rad doctor with external GCC installed:"
+        DOCTOR_OUT="$(rad doctor)"
+        echo "$DOCTOR_OUT"
+
+        if ! echo "$DOCTOR_OUT" | grep -q "External C compiler:.*gcc"; then
+            echo "FAIL: rad doctor failed to detect external GCC compiler!" >&2
+            exit 1
+        fi
+        if ! echo "$DOCTOR_OUT" | grep -q "compatible musl"; then
+            echo "FAIL: rad doctor did not mark Alpine GCC as compatible musl!" >&2
+            exit 1
+        fi
+        echo "  [PASS] External compatible C compiler successfully discovered and verified."
+    '
+log_pass "Environment B (Compatible C Compiler Discovery): PASSED"
+
+# ------------------------------------------------------------------------------
+# 6. Environment C: External Compatible C++ Compiler Discovery
+# ------------------------------------------------------------------------------
+log_info "Running Environment C: Alpine with external C++ compiler (g++ musl-dev)..."
+docker run --rm \
+    --platform linux/amd64 \
+    -v "$ROOT_DIR:/workspace:ro" \
+    alpine:3.23 \
+    sh -c '
+        set -eu
+        apk add --no-cache bash binutils file tar coreutils g++ musl-dev >/dev/null 2>&1
+
+        export HOME=/tmp/rad-test-c
+        mkdir -p "$HOME"
+        export RAD_HOME="$HOME/.rad"
+        export RAD_DIST_DIR=/workspace/target/dist
+
+        sh /workspace/scripts/install.sh -v 0.2.2 -y --no-modify-path
+        export PATH="$RAD_HOME/bin:$PATH"
+
+        echo "Running rad doctor with external G++ installed:"
+        DOCTOR_OUT="$(rad doctor)"
+        echo "$DOCTOR_OUT"
+
+        if ! echo "$DOCTOR_OUT" | grep -q "External C++ compiler:.*g++"; then
+            echo "FAIL: rad doctor failed to detect external G++ compiler!" >&2
+            exit 1
+        fi
+        if ! echo "$DOCTOR_OUT" | grep -q "compatible musl"; then
+            echo "FAIL: rad doctor did not mark Alpine G++ as compatible musl!" >&2
+            exit 1
+        fi
+        echo "  [PASS] External compatible C++ compiler successfully discovered and verified."
+    '
+log_pass "Environment C (Compatible C++ Compiler Discovery): PASSED"
+
+# ------------------------------------------------------------------------------
+# 7. Environment D: ABI Mismatch Diagnostics
+# ------------------------------------------------------------------------------
+log_info "Running Environment D: Target ABI mismatch warning simulation..."
+docker run --rm \
+    --platform linux/amd64 \
+    -v "$ROOT_DIR:/workspace:ro" \
+    "$TEST_IMAGE_TAG" \
+    bash -c '
+        set -euo pipefail
+        export HOME=/tmp/rad-test-d
+        mkdir -p "$HOME/fake_bin"
+        export RAD_HOME="$HOME/.rad"
+        export RAD_DIST_DIR=/workspace/target/dist
+
+        # Create mock glibc compiler stub
+        cat << "EOF" > "$HOME/fake_bin/fake-glibc-gcc"
+#!/bin/sh
+if [ "$1" = "-dumpmachine" ]; then
+    echo "x86_64-pc-linux-gnu"
+    exit 0
+fi
+echo "fake glibc gcc"
+exit 0
+EOF
+        chmod 755 "$HOME/fake_bin/fake-glibc-gcc"
+
+        sh /workspace/scripts/install.sh -v 0.2.2 -y --no-modify-path
+        export PATH="$RAD_HOME/bin:$PATH"
+        export CC="$HOME/fake_bin/fake-glibc-gcc"
+
+        echo "Running rad doctor with simulated glibc host CC:"
+        DOCTOR_OUT="$(rad doctor)"
+        echo "$DOCTOR_OUT"
+
+        if ! echo "$DOCTOR_OUT" | grep -q "glibc host target; use musl flags"; then
+            echo "FAIL: rad doctor did not emit glibc ABI warning!" >&2
+            exit 1
+        fi
+        echo "  [PASS] Target ABI mismatch diagnostic correctly emitted."
+    '
+log_pass "Environment D (ABI Mismatch Diagnostics): PASSED"
+
+# ------------------------------------------------------------------------------
+# 8. Environment E: Clean glibc Compatibility Test (Minimal Debian Slim)
+# ------------------------------------------------------------------------------
+log_info "Running Environment E: Cross-distro compatibility on clean glibc container (debian:bookworm-slim)..."
 docker run --rm \
     --platform linux/amd64 \
     --network none \
@@ -367,9 +491,9 @@ docker run --rm \
         export RAD_HOME="$HOME/.rad-glibc"
         export RAD_DIST_DIR=/workspace/target/dist
 
-        ARCH=$(ls /workspace/target/dist/rad-0.2.1-*.tar.gz | head -n 1)
+        ARCH=$(ls /workspace/target/dist/rad-0.2.2-*.tar.gz | head -n 1)
         tar -xzf "$ARCH" -C "$HOME"
-        mv "$HOME"/rad-0.2.1-* "$RAD_HOME"
+        mv "$HOME"/rad-0.2.2-* "$RAD_HOME"
         export PATH="$RAD_HOME/bin:$PATH"
 
         rad --version
@@ -389,8 +513,8 @@ EOF
         fi
         echo "  [PASS] Rad runs and compiles natively on clean glibc distribution."
     '
-log_pass "Cross-distribution glibc compatibility verified successfully!"
+log_pass "Environment E (Cross-Distribution glibc Compatibility): PASSED"
 
 printf "\n${GREEN}${BOLD}======================================================================${RESET}\n"
-printf "${GREEN}${BOLD} ALL ALPINE AND GLIBC PORTABILITY ACCEPTANCE TESTS PASSED!${RESET}\n"
+printf "${GREEN}${BOLD} ALL ALPINE AND GLIBC PORTABILITY ACCEPTANCE ENVIRONMENTS PASSED!${RESET}\n"
 printf "${GREEN}${BOLD}======================================================================${RESET}\n\n"

@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
 HOST_TRIPLE="x86_64-unknown-linux-musl"
 REPO="GamerxIOEPB/rad-lang"
@@ -33,7 +33,7 @@ DO_UPLOAD=0
 AUTO_CONFIRM=0
 RELEASE_TITLE=""
 RELEASE_DESC=""
-RELEASE_TAG="0.2.1"
+RELEASE_TAG="0.2.2"
 
 # Parse command line options
 while [ $# -gt 0 ]; do
@@ -103,9 +103,6 @@ mkdir -p "$DIST_OUT" "$BUILD_TMP"
 mkdir -p "$DIST_ROOT/bin" \
          "$DIST_ROOT/lib/rad" \
          "$DIST_ROOT/lib/targets/$TARGET_TRIPLE" \
-         "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/include" \
-         "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib" \
-         "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/include" \
          "$DIST_ROOT/share/rad/LICENSES"
 
 # ------------------------------------------------------------------------------
@@ -113,29 +110,16 @@ mkdir -p "$DIST_ROOT/bin" \
 # ------------------------------------------------------------------------------
 echo "==> [1/4] Building hermetic musl toolchain binaries..."
 
-# 1.1 Compile static-pie radc via build_musl_compiler.sh
+# 1.1 Compile static-pie radc via build_musl_compiler.sh (with selective LLVM)
 bash "$SCRIPT_DIR/build_musl_compiler.sh"
 
 # 1.2 Compile static-pie rad package manager using the new radc
 "$ROOT_DIR/bin/radc" "$ROOT_DIR/src/tools/rad_pm/src/main.rad" -o "$ROOT_DIR/bin/rad" -O2
 strip "$ROOT_DIR/bin/rad"
 
-# 1.3 Compile static-pie rad-clang and rad-clang++ launchers inside docker builder
-docker run --rm \
-    --platform linux/amd64 \
-    -v "$ROOT_DIR:/workspace" \
-    "rad-musl-builder:3.23" \
-    bash -c '
-        set -euo pipefail
-        cd /workspace
-        gcc -O2 -static-pie -fPIE scripts/launcher.c -o bin/rad-clang
-        cp bin/rad-clang bin/rad-clang++
-        strip bin/rad-clang bin/rad-clang++
-    '
-
-# 1.4 Rigorous ELF verification of all binaries
+# 1.3 Rigorous ELF verification of core binaries
 echo "==> Verifying binary properties (static-pie, zero dynamic dependencies)..."
-for b in radc rad rad-clang rad-clang++; do
+for b in radc rad; do
     BIN_PATH="$ROOT_DIR/bin/$b"
     if [ ! -x "$BIN_PATH" ]; then
         echo "error: Expected binary $BIN_PATH missing or not executable" >&2
@@ -159,51 +143,21 @@ done
 
 cp "$ROOT_DIR/bin/radc" "$DIST_ROOT/bin/radc"
 cp "$ROOT_DIR/bin/rad" "$DIST_ROOT/bin/rad"
-cp "$ROOT_DIR/bin/rad-clang" "$DIST_ROOT/bin/rad-clang"
-cp "$ROOT_DIR/bin/rad-clang++" "$DIST_ROOT/bin/rad-clang++"
 chmod 755 "$DIST_ROOT/bin"/*
 
 # ------------------------------------------------------------------------------
-# 2. Bundle Canonical Target Sysroot, Standard Library, and C/C++ Assets
+# 2. Bundle Canonical Target Sysroot and Pure Rad Standard Library
 # ------------------------------------------------------------------------------
-echo "==> [2/4] Bundling canonical target sysroot, standard library, and C/C++ assets..."
+echo "==> [2/4] Bundling canonical target sysroot and pure Rad standard library..."
 SYSROOT_DIR="$ROOT_DIR/lib/targets/$TARGET_TRIPLE"
-cp -r "$SYSROOT_DIR"/* "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/"
+mkdir -p "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/crt" "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/lib"
+cp -r "$SYSROOT_DIR/crt"/* "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/crt/"
+cp -r "$SYSROOT_DIR/lib"/* "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/lib/"
 
 # Standard library sources
 cp -r "$ROOT_DIR/library/core" "$DIST_ROOT/lib/rad/"
 cp -r "$ROOT_DIR/library/alloc" "$DIST_ROOT/lib/rad/"
 cp -r "$ROOT_DIR/library/std" "$DIST_ROOT/lib/rad/"
-
-# C headers
-if [ -d "$HOME/.rad/lib/targets/$TARGET_TRIPLE/include" ]; then
-    cp -a "$HOME/.rad/lib/targets/$TARGET_TRIPLE/include" "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/" 2>/dev/null || true
-fi
-if [ ! -d "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/include" ] || [ -z "$(ls -A "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/include" 2>/dev/null)" ]; then
-    docker run --rm -v "$DIST_ROOT:/dist" "rad-musl-builder:3.23" bash -c '
-        mkdir -p /dist/lib/targets/x86_64-unknown-linux-musl/include
-        cp -r /usr/include/* /dist/lib/targets/x86_64-unknown-linux-musl/include/ 2>/dev/null || true
-    ' || true
-fi
-
-# C++ static libraries and headers
-if [ -d "$HOME/.rad/lib/cxx/$TARGET_TRIPLE" ]; then
-    cp -a "$HOME/.rad/lib/cxx/$TARGET_TRIPLE"/* "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/" 2>/dev/null || true
-fi
-if [ ! -f "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib/libstdc++.a" ]; then
-    docker run --rm -v "$DIST_ROOT:/dist" "rad-musl-builder:3.23" bash -c '
-        mkdir -p /dist/lib/cxx/x86_64-unknown-linux-musl/lib /dist/lib/cxx/x86_64-unknown-linux-musl/include
-        [ -f /usr/lib/libstdc++.a ] && cp /usr/lib/libstdc++.a /dist/lib/cxx/x86_64-unknown-linux-musl/lib/
-        if [ -d /usr/include/c++ ]; then
-            for d in /usr/include/c++/*; do
-                if [ -d "$d" ]; then
-                    cp -r "$d"/* /dist/lib/cxx/x86_64-unknown-linux-musl/include/ 2>/dev/null || true
-                fi
-            done
-        fi
-    ' || true
-    cp "$SYSROOT_DIR/lib/libunwind.a" "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib/" 2>/dev/null || true
-fi
 
 # Documentation & top-level files
 cp -f "$ROOT_DIR/README.md" "$DIST_ROOT/" 2>/dev/null || true
@@ -229,12 +183,10 @@ default_target = "${TARGET_TRIPLE}"
 [components]
 rad = { path = "bin/rad", role = "package_manager" }
 radc = { path = "bin/radc", role = "compiler" }
-rad-clang = { path = "bin/rad-clang", role = "c_compiler" }
-rad-clangxx = { path = "bin/rad-clang++", role = "cxx_compiler" }
 
 [llvm]
-version = "embedded-llvm-21"
-components = ["embedded-backend", "embedded-lld"]
+version = "embedded-llvm-21-x86"
+components = ["embedded-backend-x86", "embedded-lld"]
 EOF
 
 cat << 'EOF' > "$DIST_ROOT/share/rad/targets.toml"
@@ -264,12 +216,10 @@ name = "rad"
 version = "${VERSION}"
 target = "${TARGET_TRIPLE}"
 host = "${HOST_TRIPLE}"
-description = "Self-contained Rad programming language toolchain (Static-PIE Linux x86_64)"
+description = "Minimal self-contained Rad programming language toolchain (Static-PIE Linux x86_64)"
 
 [components]
 core = true
-c_pack = true
-cxx_pack = true
 EOF
 
 echo "Apache License 2.0 / MIT License" > "$DIST_ROOT/share/rad/LICENSES/LICENSE-RAD"

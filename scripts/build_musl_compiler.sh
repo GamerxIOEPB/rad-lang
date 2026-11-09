@@ -78,21 +78,26 @@ docker run --rm \
         set -euo pipefail
         cd /workspace
 
-        echo "  -> Compiling backend_bridge.cpp (musl)..."
-        g++ -c -O2 -fPIC \
+        echo "  -> Compiling backend_bridge.cpp & llvm_stubs.cpp (musl)..."
+        g++ -c -O2 -fPIC -ffunction-sections -fdata-sections \
             -I/usr/include \
             -I/usr/lib/llvm21/include \
             -I/usr/local/include \
             src/compiler/radc/src/backend_bridge.cpp \
             -o bin/backend_bridge.o
 
-        echo "  -> Statically linking radc (static-pie)..."
-        LLVM_LIBS="$(/usr/lib/llvm21/bin/llvm-config --link-static --libs all-targets option lto irreader)"
+        g++ -c -O2 -fPIC -ffunction-sections -fdata-sections \
+            src/compiler/radc/src/llvm_stubs.cpp \
+            -o bin/llvm_stubs.o
+
+        echo "  -> Statically linking radc with selective LLVM (x86 only)..."
+        LLVM_LIBS="$(/usr/lib/llvm21/bin/llvm-config --link-static --libs x86 core irreader option lto)"
         LLVM_SYSLIBS="-lz -lzstd -lm -lrt -ldl"
 
-        g++ -static-pie -z text -z noexecstack \
+        g++ -static-pie -z text -z noexecstack -Wl,--gc-sections \
             bin/radc_rad.o \
             bin/backend_bridge.o \
+            bin/llvm_stubs.o \
             -L/usr/local/lib/lld \
             -llldELF -llldCommon \
             -L/usr/lib/llvm21/lib \
@@ -102,6 +107,7 @@ docker run --rm \
 
         chmod 755 bin/radc
         strip bin/radc
+        echo "  [✓] Built optimized minimal radc binary: $(du -h bin/radc | cut -f1)"
     '
 
 # 4. Verification of ELF properties
