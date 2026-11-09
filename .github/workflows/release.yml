@@ -6,17 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release Git Tag (default: v0.2.0)'
+        description: 'Release Git Tag (default: 0.2)'
         required: false
-        default: 'v0.2.0'
+        default: '0.2'
       title:
-        description: 'Release Title (leave empty for UTC timestamp e.g. 11/8/2026 12:00 P.M.)'
+        description: 'Release Title'
         required: false
-        default: ''
+        default: 'Rad v0.2.1 - Stabilization, Safety & Language Ergonomics'
       notes:
-        description: 'Release Notes (leave empty for default)'
+        description: 'Release Notes / Description'
         required: false
-        default: ''
+        default: 'Rad v0.2.1 Release: Language ergonomics (range loops, collection loops, array literals, slices, swap, Vec.from), runtime memory safety (bounds checking, division-by-zero traps), explicit statement separators, Rustc-style diagnostics with caret markers, and comprehensive algorithmic test suite.'
 
 jobs:
   release:
@@ -63,9 +63,13 @@ jobs:
           ARGS="--upload --yes"
           if [ -n "${{ github.event.inputs.tag }}" ]; then
             ARGS="$ARGS --tag ${{ github.event.inputs.tag }}"
+          else
+            ARGS="$ARGS --tag 0.2"
           fi
           if [ -n "${{ github.event.inputs.title }}" ]; then
             ARGS="$ARGS --title \"${{ github.event.inputs.title }}\""
+          else
+            ARGS="$ARGS --title \"Rad v0.2.1 - Stabilization, Safety & Language Ergonomics\""
           fi
           if [ -n "${{ github.event.inputs.notes }}" ]; then
             ARGS="$ARGS --notes \"${{ github.event.inputs.notes }}\""

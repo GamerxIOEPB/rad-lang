@@ -1,0 +1,7 @@
+// Invalid for-loop syntax
+fn main() -> i32 {
+    for i in {
+        println(i)
+    }
+    return 0
+}

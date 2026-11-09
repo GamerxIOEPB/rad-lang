@@ -162,7 +162,8 @@ for cat in "${CATS[@]}"; do
                 mismatch=$((mismatch+1)); failed_tests+=("$name(regex)")
             fi
         elif [ -f "$EDIR/$name.contains" ]; then
-            if grep -qF "$(cat "$EDIR/$name.contains")" "$RES/$name/stdout"; then
+            needle="$(cat "$EDIR/$name.contains")"
+            if grep -qF "$needle" "$RES/$name/stdout" || grep -qF "$needle" "$RES/$name/stderr"; then
                 echo "PASS (contains)"
                 record "$name" "$cat" PASS "$rrc"; pass=$((pass+1))
             else

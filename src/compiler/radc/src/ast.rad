@@ -14,6 +14,8 @@ const EXPR_FIELD_ACCESS: i32 = 9
 const EXPR_INDEX: i32 = 10
 const EXPR_CAST: i32 = 11
 const EXPR_FLOAT: i32 = 12
+const EXPR_ARRAY_LITERAL: i32 = 13
+const EXPR_RANGE: i32 = 14
 
 struct Expr {
     kind: i32,
@@ -25,6 +27,8 @@ struct Expr {
     right: usize,
     args: Vec<usize>,
     field_name: String,
+    expr_line: i64,
+    expr_col: i64,
 }
 
 const STMT_LET: i32 = 1
@@ -38,6 +42,8 @@ const STMT_EXPR: i32 = 8
 const STMT_BREAK: i32 = 9
 const STMT_CONTINUE: i32 = 10
 const STMT_ASSIGN_FIELD: i32 = 11
+const STMT_FOR_RANGE: i32 = 12
+const STMT_FOR_IN: i32 = 13
 
 struct Stmt {
     kind: i32,
@@ -48,6 +54,8 @@ struct Stmt {
     then_stmts: Vec<usize>,
     else_stmts: Vec<usize>,
     body_stmts: Vec<usize>,
+    stmt_line: i64,
+    stmt_col: i64,
 }
 
 struct FunctionDef {

@@ -26,6 +26,8 @@ const TOK_CONTINUE: i32 = 23
 const TOK_LOOP: i32 = 24
 const TOK_MATCH: i32 = 25
 const TOK_ENUM: i32 = 26
+const TOK_FOR: i32 = 27
+const TOK_IN: i32 = 28
 
 // Delimiters
 const TOK_LPAREN: i32 = 30    // (
@@ -42,6 +44,7 @@ const TOK_DOT: i32 = 40       // .
 const TOK_COLONCOLON: i32 = 41 // ::
 const TOK_FAT_ARROW: i32 = 42  // =>
 const TOK_HASH: i32 = 43       // #
+const TOK_DOTDOT: i32 = 44     // ..
 
 // Operators
 const TOK_PLUS: i32 = 50      // +
@@ -166,6 +169,10 @@ fn lex_source(src: String) -> Vec<Token> {
                     k = TOK_SHL
                 } else if str_eq(s, "shr") {
                     k = TOK_SHR
+                } else if str_eq(s, "for") {
+                    k = TOK_FOR
+                } else if str_eq(s, "in") {
+                    k = TOK_IN
                 }
 
                 tokens.push(Token {
@@ -371,7 +378,13 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 59u8 {
                     k = TOK_SEMI
                 } else if ch == 46u8 {
-                    k = TOK_DOT
+                    if i + 1usize < len && p[i + 1usize] == 46u8 { // ..
+                        k = TOK_DOTDOT
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    } else {
+                        k = TOK_DOT
+                    }
                 } else if ch == 43u8 {
                     k = TOK_PLUS
                 } else if ch == 42u8 {

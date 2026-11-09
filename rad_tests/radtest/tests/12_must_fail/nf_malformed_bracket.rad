@@ -1,0 +1,5 @@
+// Unclosed array bracket
+fn main() -> i32 {
+    let arr = [1, 2, 3
+    return 0
+}

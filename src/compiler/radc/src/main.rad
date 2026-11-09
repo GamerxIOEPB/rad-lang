@@ -271,7 +271,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let opts = parse_cli_args(argc, argv)
 
     if opts.show_version {
-        println("radc 0.2.0 (self-hosted x86_64-unknown-linux-gnu)")
+        println("radc 0.2.1 (self-hosted x86_64-unknown-linux-gnu)")
         return 0
     }
 
@@ -326,6 +326,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         right: 0usize,
         args: Vec.new(),
         field_name: String.new(),
+        expr_line: 0i64,
+        expr_col: 0i64,
     })
     parser.stmts.push(Stmt {
         kind: 0,
@@ -336,6 +338,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         then_stmts: Vec.new(),
         else_stmts: Vec.new(),
         body_stmts: Vec.new(),
+        stmt_line: 0i64,
+        stmt_col: 0i64,
     })
 
     var loaded_files = Vec.new()
@@ -461,7 +465,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         current_func_idx: 0usize,
     }
     let ir = codegen.generate()
-    if ir.len() == 0usize {
+    if codegen.parser.error_count > 0i64 || ir.len() == 0usize {
         return 1
     }
 
@@ -512,6 +516,9 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
 
         let r = rad_llvm_emit_obj(ir.as_ptr() as str, ir.len(), obj_out.as_ptr() as str, opt_num, opts.target_triple.as_ptr() as str, err_buf as *raw u8, 2048usize)
         if r != 0 {
+            if str_len(err_buf as str) > 0usize {
+                println(err_buf as str)
+            }
             var tmp_ll = String.new()
             tmp_ll.push_str(obj_out.as_ptr() as str)
             tmp_ll.push_str(".tmp.ll")

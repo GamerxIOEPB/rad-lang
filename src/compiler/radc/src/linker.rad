@@ -15,11 +15,11 @@ fn parse_exit_status(raw_status: i32) -> i32 {
     if raw_status < 0 {
         return 1
     }
-    let sig: i32 = raw_status % 128
+    let sig: i32 = raw_status & 127
     if sig != 0 && sig != raw_status {
         return 128 + sig
     }
-    let exit_code: i32 = (raw_status / 256) % 256
+    let exit_code: i32 = (raw_status >> 8) & 255
     if exit_code != 0 {
         return exit_code
     }
@@ -88,6 +88,9 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
     // Primary: In-process LLVM code generation
     if ir_content.len() > 0usize {
         llc_status = rad_llvm_emit_obj(ir_content.as_ptr() as str, ir_content.len(), obj_path.as_ptr() as str, opt_num, "x86_64-unknown-linux-musl", err_buf as *raw u8, 2048usize)
+        if llc_status != 0 && str_len(err_buf as str) > 0usize {
+            println(err_buf as str)
+        }
     }
 
     // Fallback: rad-llc process

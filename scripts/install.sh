@@ -8,7 +8,7 @@
 set -eu
 
 # Default configuration
-DEFAULT_VERSION="0.2.0"
+DEFAULT_VERSION="0.2.1"
 DEFAULT_REPO="GamerxIOEPB/rad-lang"
 DEFAULT_RAD_HOME="$HOME/.rad"
 

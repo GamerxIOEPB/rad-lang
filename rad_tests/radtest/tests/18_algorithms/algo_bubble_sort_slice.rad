@@ -1,0 +1,19 @@
+fn bubble_sort(var arr: []i64) {
+    let n = arr.len
+    for i in 0..n {
+        for j in 0..(n - i - 1usize) {
+            if arr[j] > arr[j + 1usize] {
+                swap(arr[j], arr[j + 1usize])
+            }
+        }
+    }
+}
+
+fn main() -> i32 {
+    var arr = [64, 34, 25, 12, 22, 11, 90]
+    bubble_sort(arr)
+    for x in arr {
+        println(x)
+    }
+    return 0
+}

@@ -1,0 +1,32 @@
+fn binary_search(arr: []i64, target: i64) -> i64 {
+    if arr.len == 0usize {
+        return -1
+    }
+    var l = 0usize
+    var r = arr.len - 1usize
+    while l <= r {
+        let mid = l + (r - l) / 2usize
+        if arr[mid] == target {
+            return mid as i64
+        }
+        if arr[mid] < target {
+            l = mid + 1usize
+        } else {
+            if mid == 0usize {
+                break
+            }
+            r = mid - 1usize
+        }
+    }
+    return -1
+}
+
+fn main() -> i32 {
+    let sorted = [2, 5, 8, 12, 16, 23, 38, 56, 72, 91]
+    println(binary_search(sorted, 23))
+    println(binary_search(sorted, 2))
+    println(binary_search(sorted, 91))
+    println(binary_search(sorted, 100))
+    println(binary_search(sorted, 1))
+    return 0
+}

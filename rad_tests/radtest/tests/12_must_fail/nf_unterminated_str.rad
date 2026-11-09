@@ -1,0 +1,5 @@
+// Unterminated string literal
+fn main() -> i32 {
+    println("hello world
+    return 0
+}

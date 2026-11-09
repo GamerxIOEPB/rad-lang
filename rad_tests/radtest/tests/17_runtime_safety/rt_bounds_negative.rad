@@ -1,0 +1,6 @@
+fn main() -> i32 {
+    let arr = [10, 20, 30]
+    let neg_one = 0 - 1
+    println(arr[neg_one as usize])
+    return 0
+}

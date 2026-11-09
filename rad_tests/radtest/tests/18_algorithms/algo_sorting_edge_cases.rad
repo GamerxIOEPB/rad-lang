@@ -1,0 +1,39 @@
+fn bubble_sort(var arr: []i64) {
+    let n = arr.len
+    if n <= 1usize {
+        return
+    }
+    for i in 0..n {
+        for j in 0..(n - i - 1usize) {
+            if arr[j] > arr[j + 1usize] {
+                swap(arr[j], arr[j + 1usize])
+            }
+        }
+    }
+}
+
+fn print_arr(arr: []i64) {
+    for x in arr {
+        println(x)
+    }
+    println(999999)
+}
+
+fn main() -> i32 {
+    // 1-element array
+    var single = [42]
+    bubble_sort(single)
+    print_arr(single)
+
+    // All identical elements
+    var dupes = [7, 7, 7, 7]
+    bubble_sort(dupes)
+    print_arr(dupes)
+
+    // Reverse sorted
+    var rev = [5, 4, 3, 2, 1]
+    bubble_sort(rev)
+    print_arr(rev)
+
+    return 0
+}

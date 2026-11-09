@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 HOST_TRIPLE="x86_64-unknown-linux-gnu"
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
 REPO="GamerxIOEPB/rad-lang"
@@ -33,7 +33,7 @@ DO_UPLOAD=0
 AUTO_CONFIRM=0
 RELEASE_TITLE=""
 RELEASE_DESC=""
-RELEASE_TAG="v${VERSION}"
+RELEASE_TAG="0.2"
 
 # Parse command line options
 while [ $# -gt 0 ]; do

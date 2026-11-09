@@ -1,0 +1,9 @@
+fn check_slice(s: []i64) {
+    println(s[10])
+}
+
+fn main() -> i32 {
+    let arr = [1, 2, 3, 4]
+    check_slice(arr)
+    return 0
+}

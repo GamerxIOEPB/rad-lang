@@ -15,6 +15,16 @@ impl<T> Vec<T> {
         }
     }
 
+    pub fn from(slice: []T) -> Vec<T> {
+        var v = Vec.new()
+        var i = 0usize
+        while i < slice.len {
+            v.push(slice[i])
+            i = i + 1usize
+        }
+        v
+    }
+
     pub fn len(self) -> usize {
         self.len
     }

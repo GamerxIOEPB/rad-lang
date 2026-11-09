@@ -111,6 +111,34 @@ fn int_to_str(v_in: i32) -> String {
     return i64_to_str(v_in as i64)
 }
 
+fn div10(val: i64) -> i64 {
+    var q = 0i64
+    var r = 0i64
+    var bit = 62i64
+    while bit >= 0i64 {
+        r = (r << 1i64) | ((val >> bit) & 1i64)
+        if r >= 10i64 {
+            r = r - 10i64
+            q = q | (1i64 << bit)
+        }
+        bit = bit - 1i64
+    }
+    return q
+}
+
+fn mod10(val: i64) -> i64 {
+    var r = 0i64
+    var bit = 62i64
+    while bit >= 0i64 {
+        r = (r << 1i64) | ((val >> bit) & 1i64)
+        if r >= 10i64 {
+            r = r - 10i64
+        }
+        bit = bit - 1i64
+    }
+    return r
+}
+
 fn i64_to_str(v_in: i64) -> String {
     var v = v_in + 0i64
     var res = String.new()
@@ -130,9 +158,9 @@ fn i64_to_str(v_in: i64) -> String {
     }
     var digits = Vec.new()
     while v > 0i64 {
-        let d = (v % 10i64) as u8
+        let d = mod10(v) as u8
         digits.push((d + 48u8) as i64)
-        v = v / 10i64
+        v = div10(v)
     }
     if is_neg {
         res.push_byte(45u8) // '-'

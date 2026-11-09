@@ -1,0 +1,31 @@
+fn main() -> i32 {
+    // Sieve of Eratosthenes up to 30
+    var is_prime = [
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1
+    ]
+    is_prime[0] = 0
+    is_prime[1] = 0
+
+    let n = 30usize
+    var p = 2usize
+    while p * p <= n {
+        if is_prime[p] == 1 {
+            var i = p * p
+            while i <= n {
+                is_prime[i] = 0
+                i = i + p
+            }
+        }
+        p = p + 1usize
+    }
+
+    for idx in 0..(n + 1usize) {
+        if is_prime[idx] == 1 {
+            println(idx as i64)
+        }
+    }
+    return 0
+}

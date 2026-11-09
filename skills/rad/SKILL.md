@@ -145,6 +145,58 @@ while i < 10 {
 }
 ```
 
+#### For Loops (`for .. in`)
+Rad provides high-level `for` loops for ranges and collections:
+
+```rad
+// Range loop (0 inclusive up to 10 exclusive)
+for i in 0..10 {
+    println(i)
+}
+
+// Collection loop over slices or vectors
+let items = [10, 20, 30, 40]
+for x in items {
+    println(x)
+}
+```
+
+---
+
+### 2.6 Array Literals, Slices & Memory Safety
+
+#### Array Literals & Slices (`[]T`)
+Array literals allocate memory and lower to 24-byte fat slices `{ ptr, cap, len }`:
+
+```rad
+var numbers = [64, 34, 25, 12, 22, 11, 90]
+let count = numbers.len
+
+// In-place bubble sort with type-safe swap intrinsic
+for i in 0..count {
+    for j in 0..(count - i - 1usize) {
+        if numbers[j] > numbers[j + 1usize] {
+            swap(numbers[j], numbers[j + 1usize])
+        }
+    }
+}
+```
+
+#### Runtime Safety Traps
+- **Bounds Checking**: Accessing `arr[i]` when `i >= arr.len` triggers `@__rad_panic_bounds` with clear panic message and status 1:
+  `rad runtime panic: index out of bounds: index 5 >= len 3`
+- **Zero Division Protection**: Division or modulo by zero traps via `@__rad_panic_div_zero`:
+  `rad runtime panic: attempt to divide by zero`
+- **Zero-Overhead Raw Pointers**: Hardware pointers (`*raw T`, `*raw var T`) bypass bounds checks for bare-metal performance.
+
+#### Statement Separation Rules
+- Newlines and semicolons are valid statement separators.
+- Same-line statements **must** be separated by semicolons:
+  ```rad
+  println("Hello"); println("World") // Valid
+  // println("Hello") println("World") // Syntax error: E0001
+  ```
+
 ---
 
 ### 2.6 Structs & Methods

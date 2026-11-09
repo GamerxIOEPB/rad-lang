@@ -1,0 +1,21 @@
+fn main() -> i32 {
+    let arr = [15, -3, 42, 8, 99, -12, 0, 23]
+    var min_v = arr[0]
+    var max_v = arr[0]
+    var sum = 0
+
+    for x in arr {
+        if x < min_v {
+            min_v = x
+        }
+        if x > max_v {
+            max_v = x
+        }
+        sum = sum + x
+    }
+
+    println(min_v)
+    println(max_v)
+    println(sum)
+    return 0
+}

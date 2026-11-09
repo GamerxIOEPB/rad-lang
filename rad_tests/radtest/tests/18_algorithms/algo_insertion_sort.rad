@@ -1,0 +1,25 @@
+fn insertion_sort(var arr: []i64) {
+    let n = arr.len
+    for i in 1usize..n {
+        let key = arr[i]
+        var j = i
+        while j > 0usize {
+            if arr[j - 1usize] > key {
+                arr[j] = arr[j - 1usize]
+                j = j - 1usize
+            } else {
+                break
+            }
+        }
+        arr[j] = key
+    }
+}
+
+fn main() -> i32 {
+    var arr = [12, 11, 13, 5, 6]
+    insertion_sort(arr)
+    for x in arr {
+        println(x)
+    }
+    return 0
+}

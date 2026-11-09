@@ -629,7 +629,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let argv0 = argv[0] as str
 
     if argc < 2 {
-        println("Rad Package Manager (rad) v0.2.0")
+        println("Rad Package Manager (rad) v0.2.1")
         println("Usage: rad <command> [options]")
         println("")
         println("Commands:")
@@ -647,14 +647,14 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let cmd = argv[1] as str
 
     if str_eq(cmd, "--help") || str_eq(cmd, "-h") || str_eq(cmd, "help") {
-        println("Rad Package Manager (rad) v0.2.0")
+        println("Rad Package Manager (rad) v0.2.1")
         println("Usage: rad <command> [options]")
         println("Commands: new, init, build, run, test, check, clean, doctor")
         return 0
     }
 
     if str_eq(cmd, "--version") || str_eq(cmd, "-V") || str_eq(cmd, "version") {
-        println("rad 0.2.0 (x86_64-unknown-linux-gnu)")
+        println("rad 0.2.1 (x86_64-unknown-linux-gnu)")
         return 0
     }
 
