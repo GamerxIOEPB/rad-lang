@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release Git Tag (default: 0.2)'
+        description: 'Release Git Tag (default: 0.2.1)'
         required: false
-        default: '0.2'
+        default: '0.2.1'
       title:
         description: 'Release Title'
         required: false
@@ -22,16 +22,10 @@ jobs:
   release:
     name: Build & Publish Release
     runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
     permissions:
       contents: write
 
     steps:
-      - name: Install System Dependencies
-        run: |
-          pacman -Syu --noconfirm git github-cli llvm lld clang make tar gzip bash grep coreutils
-
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -40,17 +34,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.rad /tmp/bootstrap
-          gh release download 0.2 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-          gh release download 0.1 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+          gh release download 0.2.1 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+          gh release download 0.2.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+          gh release download 0.1.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
           gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap
           ARCHIVE=$(ls /tmp/bootstrap/rad-*.tar.gz | head -n 1)
           tar -xzf "$ARCHIVE" -C ~/.rad --strip-components=1
           echo "$HOME/.rad/bin" >> $GITHUB_PATH
-          # Clean up any lingering timestamp tags so only clean version tags exist
-          for tag in $(gh release list --repo GamerxIOEPB/rad-lang --json tagName -q '.[].tagName' | grep -E '^v?0\.[0-9]+\.[0-9]+-'); do
-            echo "Deleting test tag $tag..."
-            gh release delete "$tag" --yes --cleanup-tag --repo GamerxIOEPB/rad-lang || true
-          done
 
       - name: Verify Bootstrap Environment
         run: |
@@ -65,7 +55,7 @@ jobs:
         run: |
           ARGS=(--upload --yes)
           TAG="${{ github.event.inputs.tag }}"
-          [ -z "$TAG" ] && TAG="0.2"
+          [ -z "$TAG" ] && TAG="0.2.1"
           ARGS+=(--tag "$TAG")
 
           TITLE="${{ github.event.inputs.title }}"
