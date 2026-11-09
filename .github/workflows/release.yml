@@ -40,11 +40,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.rad /tmp/bootstrap
+          gh release download 0.2 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+          gh release download 0.1 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
           gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap
-          tar -xzf /tmp/bootstrap/*.tar.gz -C ~/.rad --strip-components=1
+          ARCHIVE=$(ls /tmp/bootstrap/rad-*.tar.gz | head -n 1)
+          tar -xzf "$ARCHIVE" -C ~/.rad --strip-components=1
           echo "$HOME/.rad/bin" >> $GITHUB_PATH
           # Clean up any lingering timestamp tags so only clean version tags exist
-          for tag in $(gh release list --repo GamerxIOEPB/rad-lang | awk '{print $3}' | grep -E '^v0\.[0-9]+\.[0-9]+-'); do
+          for tag in $(gh release list --repo GamerxIOEPB/rad-lang --json tagName -q '.[].tagName' | grep -E '^v?0\.[0-9]+\.[0-9]+-'); do
             echo "Deleting test tag $tag..."
             gh release delete "$tag" --yes --cleanup-tag --repo GamerxIOEPB/rad-lang || true
           done
@@ -60,18 +63,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ARGS="--upload --yes"
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            ARGS="$ARGS --tag ${{ github.event.inputs.tag }}"
-          else
-            ARGS="$ARGS --tag 0.2"
+          ARGS=(--upload --yes)
+          TAG="${{ github.event.inputs.tag }}"
+          [ -z "$TAG" ] && TAG="0.2"
+          ARGS+=(--tag "$TAG")
+
+          TITLE="${{ github.event.inputs.title }}"
+          [ -z "$TITLE" ] && TITLE="Rad v0.2.1 - Stabilization, Safety & Language Ergonomics"
+          ARGS+=(--title "$TITLE")
+
+          NOTES="${{ github.event.inputs.notes }}"
+          if [ -n "$NOTES" ]; then
+            ARGS+=(--notes "$NOTES")
           fi
-          if [ -n "${{ github.event.inputs.title }}" ]; then
-            ARGS="$ARGS --title \"${{ github.event.inputs.title }}\""
-          else
-            ARGS="$ARGS --title \"Rad v0.2.1 - Stabilization, Safety & Language Ergonomics\""
-          fi
-          if [ -n "${{ github.event.inputs.notes }}" ]; then
-            ARGS="$ARGS --notes \"${{ github.event.inputs.notes }}\""
-          fi
-          bash scripts/build_distribution.sh $ARGS
+          bash scripts/build_distribution.sh "${ARGS[@]}"
