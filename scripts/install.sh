@@ -242,13 +242,28 @@ if [ "$OS" != "Linux" ] || [ "$ARCH" != "x86_64" ]; then
     exit 1
 fi
 
-TARGET_TRIPLE="x86_64-unknown-linux-gnu"
+# Detect target triple (prefer musl for self-contained portability)
+if [ -n "${RAD_TARGET_TRIPLE:-}" ]; then
+    TARGET_TRIPLE="$RAD_TARGET_TRIPLE"
+elif [ -n "${RAD_DIST_DIR:-}" ] && [ -f "$RAD_DIST_DIR/rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" ]; then
+    TARGET_TRIPLE="x86_64-unknown-linux-musl"
+else
+    TARGET_TRIPLE="x86_64-unknown-linux-musl"
+fi
 
 # Determine archive name
 if [ "$PACKAGE_TYPE" = "full" ]; then
     ARCHIVE_NAME="rad-${VERSION}-${TARGET_TRIPLE}.tar.gz"
 else
     ARCHIVE_NAME="rad-core-${VERSION}-${TARGET_TRIPLE}.tar.gz"
+fi
+
+# If using local distribution directory, fall back to gnu if musl is not found
+if [ -n "${RAD_DIST_DIR:-}" ]; then
+    if [ ! -f "$RAD_DIST_DIR/$ARCHIVE_NAME" ] && [ -f "$RAD_DIST_DIR/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" ]; then
+        TARGET_TRIPLE="x86_64-unknown-linux-gnu"
+        ARCHIVE_NAME="rad-${VERSION}-${TARGET_TRIPLE}.tar.gz"
+    fi
 fi
 
 printf "${BOLD}======================================================================${RESET}\n"
@@ -451,13 +466,26 @@ for bin in rad radc rad-clang rad-clang++; do
     chmod 755 "$STAGE_DIR/bin/$bin"
 done
 
-# Basic executable functionality test
-STAGE_VERSION="$("$STAGE_DIR/bin/rad" --version 2>/dev/null || true)"
-if [ -z "$STAGE_VERSION" ]; then
-    log_error "Staged 'rad' binary failed basic execution test."
+# Basic executable functionality tests on staged binaries before replacing RAD_HOME
+STAGE_RAD_VER="$("$STAGE_DIR/bin/rad" --version 2>/dev/null || true)"
+if [ -z "$STAGE_RAD_VER" ]; then
+    log_error "Staged 'rad' binary failed basic execution test in current environment."
     exit 1
 fi
-log_success "Staged components verified ($STAGE_VERSION)"
+
+STAGE_RADC_VER="$("$STAGE_DIR/bin/radc" --version 2>/dev/null || true)"
+if [ -z "$STAGE_RADC_VER" ]; then
+    log_error "Staged 'radc' binary failed basic execution test in current environment."
+    exit 1
+fi
+
+STAGE_CLANG_VER="$("$STAGE_DIR/bin/rad-clang" --version 2>/dev/null || true)"
+if [ -z "$STAGE_CLANG_VER" ]; then
+    log_error "Staged 'rad-clang' launcher failed basic execution test in current environment."
+    exit 1
+fi
+
+log_success "Staged components verified ($STAGE_RAD_VER, $STAGE_RADC_VER)"
 
 # 6. Atomic Installation / Upgrade
 log_info "Installing to $RAD_HOME..."
@@ -585,12 +613,13 @@ TEST_SRC="$TMP_DIR/verify_install.rad"
 TEST_EXE="$TMP_DIR/verify_install_bin"
 
 cat << 'EOF' > "$TEST_SRC"
-fn main() {
+fn main() -> i32 {
     println("Rad toolchain installation verified successfully!");
+    return 0;
 }
 EOF
 
-if "$RADC_BIN" "$TEST_SRC" -o "$TEST_EXE" -O2 >/dev/null 2>&1; then
+if RAD_HOME="$RAD_HOME" "$RADC_BIN" "$TEST_SRC" -o "$TEST_EXE" -O2 >/dev/null 2>&1; then
     TEST_OUT="$("$TEST_EXE" 2>&1 || true)"
     if echo "$TEST_OUT" | grep -q "Rad toolchain installation verified successfully!"; then
         log_success "Compiler pipeline test passed: minimal program compiled and executed cleanly"

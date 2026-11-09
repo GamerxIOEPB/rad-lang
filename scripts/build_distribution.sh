@@ -19,14 +19,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 VERSION="0.2.1"
-HOST_TRIPLE="x86_64-unknown-linux-gnu"
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
+HOST_TRIPLE="x86_64-unknown-linux-musl"
 REPO="GamerxIOEPB/rad-lang"
 
 DIST_OUT="$ROOT_DIR/target/dist"
 BUILD_TMP="$ROOT_DIR/target/dist_build"
 
-DIST_NAME="rad-${VERSION}-${HOST_TRIPLE}"
+DIST_NAME="rad-${VERSION}-${TARGET_TRIPLE}"
 DIST_ROOT="$BUILD_TMP/$DIST_NAME"
 
 DO_UPLOAD=0
@@ -101,7 +101,6 @@ echo "======================================================================"
 rm -rf "$BUILD_TMP" "$DIST_OUT"
 mkdir -p "$DIST_OUT" "$BUILD_TMP"
 mkdir -p "$DIST_ROOT/bin" \
-         "$DIST_ROOT/lib/llvm" \
          "$DIST_ROOT/lib/rad" \
          "$DIST_ROOT/lib/targets/$TARGET_TRIPLE" \
          "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/include" \
@@ -110,16 +109,53 @@ mkdir -p "$DIST_ROOT/bin" \
          "$DIST_ROOT/share/rad/LICENSES"
 
 # ------------------------------------------------------------------------------
-# 1. Build Toolchain Binaries via Makefile
+# 1. Build Hermetic Musl Toolchain Binaries
 # ------------------------------------------------------------------------------
-echo "==> [1/4] Building production binaries via Makefile..."
-make -C "$ROOT_DIR" all
+echo "==> [1/4] Building hermetic musl toolchain binaries..."
 
-# Safety fallback: if launchers weren't compiled, copy from ~/.rad/bin if available
-if [ ! -f "$ROOT_DIR/bin/rad-clang" ] && [ -f "$HOME/.rad/bin/rad-clang" ]; then
-    cp "$HOME/.rad/bin/rad-clang" "$ROOT_DIR/bin/rad-clang"
-    cp "$HOME/.rad/bin/rad-clang++" "$ROOT_DIR/bin/rad-clang++"
-fi
+# 1.1 Compile static-pie radc via build_musl_compiler.sh
+bash "$SCRIPT_DIR/build_musl_compiler.sh"
+
+# 1.2 Compile static-pie rad package manager using the new radc
+"$ROOT_DIR/bin/radc" "$ROOT_DIR/src/tools/rad_pm/src/main.rad" -o "$ROOT_DIR/bin/rad" -O2
+strip "$ROOT_DIR/bin/rad"
+
+# 1.3 Compile static-pie rad-clang and rad-clang++ launchers inside docker builder
+docker run --rm \
+    --platform linux/amd64 \
+    -v "$ROOT_DIR:/workspace" \
+    "rad-musl-builder:3.23" \
+    bash -c '
+        set -euo pipefail
+        cd /workspace
+        gcc -O2 -static-pie -fPIE scripts/launcher.c -o bin/rad-clang
+        cp bin/rad-clang bin/rad-clang++
+        strip bin/rad-clang bin/rad-clang++
+    '
+
+# 1.4 Rigorous ELF verification of all binaries
+echo "==> Verifying binary properties (static-pie, zero dynamic dependencies)..."
+for b in radc rad rad-clang rad-clang++; do
+    BIN_PATH="$ROOT_DIR/bin/$b"
+    if [ ! -x "$BIN_PATH" ]; then
+        echo "error: Expected binary $BIN_PATH missing or not executable" >&2
+        exit 1
+    fi
+    FILE_INFO="$(file "$BIN_PATH")"
+    if ! echo "$FILE_INFO" | grep -q "static-pie linked"; then
+        echo "error: $BIN_PATH is not static-pie linked!" >&2
+        exit 1
+    fi
+    if readelf -l "$BIN_PATH" | grep -q "INTERP"; then
+        echo "error: $BIN_PATH contains PT_INTERP dynamic interpreter header!" >&2
+        exit 1
+    fi
+    if readelf -d "$BIN_PATH" | grep -q "NEEDED"; then
+        echo "error: $BIN_PATH contains DT_NEEDED shared library dependencies!" >&2
+        exit 1
+    fi
+    echo "  [✓] $b: verified static-pie linked with zero external dependencies"
+done
 
 cp "$ROOT_DIR/bin/radc" "$DIST_ROOT/bin/radc"
 cp "$ROOT_DIR/bin/rad" "$DIST_ROOT/bin/rad"
@@ -128,55 +164,9 @@ cp "$ROOT_DIR/bin/rad-clang++" "$DIST_ROOT/bin/rad-clang++"
 chmod 755 "$DIST_ROOT/bin"/*
 
 # ------------------------------------------------------------------------------
-# 2. Assemble LLVM Runtime Libraries and Real Executables
+# 2. Bundle Canonical Target Sysroot, Standard Library, and C/C++ Assets
 # ------------------------------------------------------------------------------
-echo "==> [2/4] Bundling host LLVM runtime components..."
-if [ -d "$HOME/.rad/lib/llvm" ]; then
-    echo "  -> Using bundled LLVM runtime from $HOME/.rad/lib/llvm..."
-    cp -a "$HOME/.rad/lib/llvm"/. "$DIST_ROOT/lib/llvm/"
-    if [ -d "$HOME/.rad/lib/clang" ]; then
-        cp -a "$HOME/.rad/lib/clang" "$DIST_ROOT/lib/"
-        ln -sf . "$DIST_ROOT/lib/lib"
-    fi
-else
-    if [ -f /usr/bin/llc ]; then
-        cp /usr/bin/llc "$DIST_ROOT/lib/llvm/llc_real"
-    fi
-    if [ -f /usr/bin/ld.lld ]; then
-        cp /usr/bin/ld.lld "$DIST_ROOT/lib/llvm/ld.lld_real"
-        ln -sf ld.lld_real "$DIST_ROOT/lib/llvm/ld.lld"
-    fi
-    chmod 755 "$DIST_ROOT/lib/llvm/llc_real" "$DIST_ROOT/lib/llvm/ld.lld_real" 2>/dev/null || true
-
-    # Copy clang / clang++ binaries
-    if [ -x /usr/bin/clang ]; then
-        cp -L /usr/bin/clang "$DIST_ROOT/lib/llvm/clang"
-        ln -sf clang "$DIST_ROOT/lib/llvm/clang++"
-        chmod 755 "$DIST_ROOT/lib/llvm/clang"
-    fi
-
-    # Copy required LLVM shared libraries from system
-    cp -P /usr/lib/libLLVM*.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-    cp -P /usr/lib/liblld*.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-    cp -P /usr/lib/libclang-cpp*.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-    cp -P /usr/lib/libzstd.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-    cp -P /usr/lib/libxml2.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-    cp -P /usr/lib/libedit.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-    cp -P /usr/lib/libncursesw.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-    cp -P /usr/lib/libicu*.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-    cp -P /usr/lib/libffi.so* "$DIST_ROOT/lib/llvm/" 2>/dev/null || true
-
-    # Clang resource headers
-    if [ -d /usr/lib/clang ]; then
-        cp -r /usr/lib/clang "$DIST_ROOT/lib/"
-        ln -sf . "$DIST_ROOT/lib/lib"
-    fi
-fi
-
-# ------------------------------------------------------------------------------
-# 3. Bundle Canonical Target Sysroot, Standard Library, C/C++ Assets
-# ------------------------------------------------------------------------------
-echo "==> [3/4] Bundling canonical target sysroot, standard library, and C/C++ assets..."
+echo "==> [2/4] Bundling canonical target sysroot, standard library, and C/C++ assets..."
 SYSROOT_DIR="$ROOT_DIR/lib/targets/$TARGET_TRIPLE"
 cp -r "$SYSROOT_DIR"/* "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/"
 
@@ -197,13 +187,17 @@ if [ -d "$HOME/.rad/lib/cxx/$TARGET_TRIPLE" ]; then
     cp -a "$HOME/.rad/lib/cxx/$TARGET_TRIPLE"/* "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/" 2>/dev/null || true
 else
     if [ -f /usr/lib/gcc/x86_64-pc-linux-gnu/16/libstdc++.a ]; then
-        cp /usr/lib/gcc/x86_64-pc-linux-gnu/16/libstdc++.a "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib/"
+        cp /usr/lib/gcc/x86_64-pc-linux-gnu/16/libstdc++.a "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib/" 2>/dev/null || true
     fi
     cp "$SYSROOT_DIR/lib/libunwind.a" "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/lib/" 2>/dev/null || true
     if [ -d /usr/include/c++/16 ]; then
         cp -r /usr/include/c++/16/* "$DIST_ROOT/lib/cxx/$TARGET_TRIPLE/include/" 2>/dev/null || true
     fi
 fi
+
+# Documentation & top-level files
+cp -f "$ROOT_DIR/README.md" "$DIST_ROOT/" 2>/dev/null || true
+cp -f "$ROOT_DIR/LICENSE" "$DIST_ROOT/" 2>/dev/null || true
 
 # Manifests and Licenses
 cat << EOF > "$DIST_ROOT/share/rad/VERSION"
@@ -229,7 +223,7 @@ rad-clang = { path = "bin/rad-clang", role = "c_compiler" }
 rad-clangxx = { path = "bin/rad-clang++", role = "cxx_compiler" }
 
 [llvm]
-version = "23.1.4"
+version = "embedded-llvm-21"
 components = ["embedded-backend", "embedded-lld"]
 EOF
 
@@ -260,7 +254,7 @@ name = "rad"
 version = "${VERSION}"
 target = "${TARGET_TRIPLE}"
 host = "${HOST_TRIPLE}"
-description = "Complete self-contained Rad programming language toolchain"
+description = "Self-contained Rad programming language toolchain (Static-PIE Linux x86_64)"
 
 [components]
 core = true
@@ -273,18 +267,23 @@ echo "LLVM Apache 2.0 with LLVM Exception" > "$DIST_ROOT/share/rad/LICENSES/LICE
 echo "MIT License (Musl libc)" > "$DIST_ROOT/share/rad/LICENSES/LICENSE-MUSL"
 
 # ------------------------------------------------------------------------------
-# 4. Archive Unified Single Package
+# 3. Archive Unified Package & Compatibility Alias
 # ------------------------------------------------------------------------------
-echo "==> [4/4] Packaging unified tarball..."
+echo "==> [3/4] Packaging unified tarball..."
 
 tar -czf "$DIST_OUT/${DIST_NAME}.tar.gz" -C "$BUILD_TMP" "$DIST_NAME"
 sha256sum "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}' > "$DIST_OUT/${DIST_NAME}.tar.gz.sha256"
 echo "  [✓] Created ${DIST_NAME}.tar.gz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}'))"
 
+# Compatibility alias for x86_64-unknown-linux-gnu
+cp "$DIST_OUT/${DIST_NAME}.tar.gz" "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+cp "$DIST_OUT/${DIST_NAME}.tar.gz.sha256" "$DIST_OUT/rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256"
+echo "  [✓] Created compatibility alias rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+
 # Generate unified SHA256SUMS manifest
 (
     cd "$DIST_OUT"
-    sha256sum "${DIST_NAME}.tar.gz" > SHA256SUMS
+    sha256sum "${DIST_NAME}.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" > SHA256SUMS
 )
 echo "  [✓] Generated SHA256SUMS manifest"
 

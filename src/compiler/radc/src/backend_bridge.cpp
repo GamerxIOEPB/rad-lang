@@ -16,11 +16,16 @@ extern "C" {
 
 void rad_llvm_init() {
     if (g_llvm_initialized) return;
-    LLVMInitializeAllTargetInfos();
-    LLVMInitializeAllTargets();
-    LLVMInitializeAllTargetMCs();
-    LLVMInitializeAllAsmPrinters();
-    LLVMInitializeAllAsmParsers();
+    LLVMInitializeNativeTarget();
+    LLVMInitializeNativeAsmPrinter();
+    LLVMInitializeNativeAsmParser();
+    LLVMInitializeNativeDisassembler();
+    LLVMInitializeX86TargetInfo();
+    LLVMInitializeX86Target();
+    LLVMInitializeX86TargetMC();
+    LLVMInitializeX86AsmPrinter();
+    LLVMInitializeX86AsmParser();
+    LLVMInitializeX86Disassembler();
     g_llvm_initialized = true;
 }
 
@@ -32,7 +37,11 @@ int rad_llvm_emit_obj(const char* ir_str, size_t ir_len, const char* out_obj_pat
     LLVMModuleRef mod = nullptr;
     char* err_msg = nullptr;
 
+#if defined(LLVM_VERSION_MAJOR) && LLVM_VERSION_MAJOR >= 23
     if (LLVMParseIRInContext2(ctx, mem_buf, &mod, &err_msg)) {
+#else
+    if (LLVMParseIRInContext(ctx, mem_buf, &mod, &err_msg)) {
+#endif
         if (err_buf && err_buf_len > 0) {
             snprintf(err_buf, err_buf_len, "%s", err_msg ? err_msg : "LLVM IR Parse Error");
         }
@@ -152,10 +161,17 @@ int rad_lld_link_str(const char* cmd_str, char* err_buf, size_t err_buf_len) {
         storage[0] = "ld.lld";
     }
 
-    for (const auto& s : storage) {
+    for (size_t i = 0; i < storage.size(); ++i) {
         // Strip out shell redirects if present
-        if (s == "2>/dev/null" || s == ">/dev/null") continue;
-        args.push_back(s.c_str());
+        if (storage[i] == "2>/dev/null" || storage[i] == ">/dev/null") continue;
+        // Strip out -flavor gnu if present, as lld::elf::link is already the GNU ELF driver
+        if (storage[i] == "-flavor") {
+            if (i + 1 < storage.size() && storage[i + 1] == "gnu") {
+                ++i;
+                continue;
+            }
+        }
+        args.push_back(storage[i].c_str());
     }
 
     return rad_lld_link((int)args.size(), args.data(), err_buf, err_buf_len);
