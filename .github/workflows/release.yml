@@ -41,9 +41,13 @@ jobs:
           ARCHIVE=$(ls /tmp/bootstrap/rad-*.tar.gz | head -n 1)
           tar -xzf "$ARCHIVE" -C ~/.rad --strip-components=1
           echo "$HOME/.rad/bin" >> $GITHUB_PATH
+          if [ -d "$HOME/.rad/lib/llvm" ]; then
+            echo "LD_LIBRARY_PATH=$HOME/.rad/lib/llvm:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
+          fi
 
       - name: Verify Bootstrap Environment
         run: |
+          export LD_LIBRARY_PATH="$HOME/.rad/lib/llvm:${LD_LIBRARY_PATH:-}"
           radc --version || true
           rad --version || true
           ls -la ~/.rad/bin/

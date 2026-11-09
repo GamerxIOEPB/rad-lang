@@ -19,6 +19,14 @@ fi
 # 2. Compile Rad frontend object file on host using existing radc
 echo "==> [1/3] Compiling self-hosted Rad compiler frontend to radc_rad.o..."
 mkdir -p "$ROOT_DIR/bin"
+
+if [ -d "$HOME/.rad/lib/llvm" ]; then
+    export LD_LIBRARY_PATH="$HOME/.rad/lib/llvm:${LD_LIBRARY_PATH:-}"
+fi
+if [ -d "$ROOT_DIR/lib/llvm" ]; then
+    export LD_LIBRARY_PATH="$ROOT_DIR/lib/llvm:${LD_LIBRARY_PATH:-}"
+fi
+
 RADC="${RADC:-$ROOT_DIR/bin/radc}"
 if [ ! -x "$RADC" ]; then
     if [ -x "$HOME/.rad/bin/radc" ]; then
