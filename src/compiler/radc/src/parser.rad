@@ -16,6 +16,44 @@ struct Parser {
     source: String,
     moved_vars: Vec<String>,
     imported_modules: Vec<String>,
+    diagnostics: Vec<Diagnostic>,
+    color_mode: i32,      // 0 = auto, 1 = always, 2 = never
+    json_format: bool,
+}
+
+fn json_escape_str(s: str) -> String {
+    var res = String.new()
+    if (s as usize) == 0usize {
+        res.push_byte(0u8)
+        return res
+    }
+    let p: *raw u8 = s as *raw u8
+    var i = 0usize
+    let len = str_len(s)
+    while i < len {
+        let b = p[i]
+        if b == 34u8 { // '"'
+            res.push_byte(92u8)
+            res.push_byte(34u8)
+        } else if b == 92u8 { // '\\'
+            res.push_byte(92u8)
+            res.push_byte(92u8)
+        } else if b == 10u8 { // '\n'
+            res.push_byte(92u8)
+            res.push_byte(110u8)
+        } else if b == 13u8 { // '\r'
+            res.push_byte(92u8)
+            res.push_byte(114u8)
+        } else if b == 9u8 { // '\t'
+            res.push_byte(92u8)
+            res.push_byte(116u8)
+        } else {
+            res.push_byte(b)
+        }
+        i = i + 1usize
+    }
+    res.push_byte(0u8)
+    return res
 }
 
 fn get_source_line(source: String, target_line: i64) -> String {
@@ -41,26 +79,169 @@ fn get_source_line(source: String, target_line: i64) -> String {
 }
 
 impl Parser {
-    fn report_error(var self, err_code: str, err_msg: str, line: i64, col: i64) {
+    fn cur_tok_len(self) -> i64 {
+        if self.pos < self.tokens.len {
+            let l = self.tokens.ptr[self.pos].len
+            if l > 0i64 {
+                return l
+            }
+        }
+        return 1i64
+    }
+
+    fn check_lex_error(var self) -> bool {
+        if self.peek_kind() == TOK_ERROR {
+            let msg = self.peek_text()
+            var code = "E0001"
+            var desc = ""
+            desc = msg
+            if str_starts_with(msg, "E0001") {
+                code = "E0001"
+                if str_len(msg) > 7usize {
+                    desc = (msg as usize + 7usize) as str
+                }
+            } else if str_starts_with(msg, "E0002") {
+                code = "E0002"
+                desc = "unterminated string literal"
+            } else if str_starts_with(msg, "E0003") {
+                code = "E0003"
+                desc = "unterminated character literal"
+            } else if str_starts_with(msg, "E0004") {
+                code = "E0004"
+                desc = "unterminated block comment"
+            } else if str_starts_with(msg, "E0005") {
+                code = "E0005"
+                desc = "invalid hex escape sequence"
+            }
+            self.report_error_span(code, desc, self.cur_tok_line(), self.cur_tok_col(), self.cur_tok_len())
+            self.advance()
+            return true
+        }
+        return false
+    }
+
+    fn report_error_span(var self, err_code: str, err_msg: str, line: i64, col: i64, span_len: i64) {
         self.error_count = self.error_count + 1i64
-        var line1 = String.new()
-        line1.push_str("error[")
-        line1.push_str(err_code)
-        line1.push_str("]: ")
-        line1.push_str(err_msg)
-        println(line1.as_ptr() as str)
+        var actual_span = span_len
+        if actual_span <= 0i64 {
+            actual_span = 1i64
+        }
 
-        var line2 = String.new()
-        line2.push_str("  --> ")
-        line2.push_str(self.filename.as_ptr() as str)
-        line2.push_str(":")
-        line2.push_str(int_to_str(line as i32).as_ptr() as str)
-        line2.push_str(":")
-        line2.push_str(int_to_str(col as i32).as_ptr() as str)
-        println(line2.as_ptr() as str)
-
+        var line_str = String.new()
         if self.source.len() > 0usize && line > 0i64 {
-            let line_str = get_source_line(self.source, line)
+            line_str = get_source_line(self.source, line)
+        }
+
+        let diag = Diagnostic {
+            code: String.from_str(err_code),
+            severity: String.from_str("error"),
+            message: String.from_str(err_msg),
+            file: self.filename,
+            line: line,
+            col: col,
+            end_line: line,
+            end_col: col + actual_span,
+            source_line: line_str,
+            help: String.new(),
+        }
+        self.diagnostics.push(diag)
+
+        if self.json_format {
+            var j = String.new()
+            j.push_str("{\"code\":\"")
+            j.push_str(err_code)
+            j.push_str("\",\"severity\":\"error\",\"message\":\"")
+            j.push_str(json_escape_str(err_msg).as_ptr() as str)
+            j.push_str("\",\"file\":\"")
+            j.push_str(json_escape_str(self.filename.as_ptr() as str).as_ptr() as str)
+            j.push_str("\",\"line\":")
+            j.push_str(int_to_str(line as i32).as_ptr() as str)
+            j.push_str(",\"col\":")
+            j.push_str(int_to_str(col as i32).as_ptr() as str)
+            j.push_str(",\"end_line\":")
+            j.push_str(int_to_str(line as i32).as_ptr() as str)
+            j.push_str(",\"end_col\":")
+            j.push_str(int_to_str((col + actual_span) as i32).as_ptr() as str)
+            j.push_str(",\"source_line\":\"")
+            j.push_str(json_escape_str(line_str.as_ptr() as str).as_ptr() as str)
+            j.push_str("\",\"help\":\"\"}")
+            println(j.as_ptr() as str)
+            return
+        }
+
+        var use_color = false
+        if self.color_mode == 1 {
+            use_color = true
+        } else if self.color_mode == 0 {
+            let no_col = getenv("NO_COLOR")
+            if (no_col as usize) == 0usize || str_len(no_col) == 0usize {
+                if isatty(2) != 0 {
+                    use_color = true
+                }
+            }
+        }
+
+        if use_color {
+            var line1 = String.new()
+            line1.push_str("\x1b[1;31merror[")
+            line1.push_str(err_code)
+            line1.push_str("]\x1b[0m\x1b[1m: ")
+            line1.push_str(err_msg)
+            line1.push_str("\x1b[0m")
+            println(line1.as_ptr() as str)
+
+            var line2 = String.new()
+            line2.push_str("\x1b[1;34m  --> \x1b[0m")
+            line2.push_str(self.filename.as_ptr() as str)
+            line2.push_str(":")
+            line2.push_str(int_to_str(line as i32).as_ptr() as str)
+            line2.push_str(":")
+            line2.push_str(int_to_str(col as i32).as_ptr() as str)
+            println(line2.as_ptr() as str)
+
+            if line_str.len() > 0usize {
+                let l_num = int_to_str(line as i32)
+                println("\x1b[1;34m   |\x1b[0m")
+                var line3 = String.new()
+                line3.push_str("\x1b[1;34m")
+                line3.push_str(l_num.as_ptr() as str)
+                line3.push_str(" | \x1b[0m")
+                line3.push_str(line_str.as_ptr() as str)
+                println(line3.as_ptr() as str)
+
+                var line4 = String.new()
+                line4.push_str("\x1b[1;34m   | \x1b[0m")
+                var ci = 1i64
+                while ci < col {
+                    line4.push_byte(32u8) // ' '
+                    ci = ci + 1i64
+                }
+                line4.push_str("\x1b[1;31m")
+                var c_span = 0i64
+                while c_span < actual_span {
+                    line4.push_byte(94u8) // '^'
+                    c_span = c_span + 1i64
+                }
+                line4.push_str("\x1b[0m")
+                println(line4.as_ptr() as str)
+            }
+        } else {
+            var line1 = String.new()
+            line1.push_str("error[")
+            line1.push_str(err_code)
+            line1.push_str("]: ")
+            line1.push_str(err_msg)
+            println(line1.as_ptr() as str)
+
+            var line2 = String.new()
+            line2.push_str("  --> ")
+            line2.push_str(self.filename.as_ptr() as str)
+            line2.push_str(":")
+            line2.push_str(int_to_str(line as i32).as_ptr() as str)
+            line2.push_str(":")
+            line2.push_str(int_to_str(col as i32).as_ptr() as str)
+            println(line2.as_ptr() as str)
+
             if line_str.len() > 0usize {
                 let l_num = int_to_str(line as i32)
                 println("   |")
@@ -77,11 +258,167 @@ impl Parser {
                     line4.push_byte(32u8) // ' '
                     ci = ci + 1i64
                 }
-                line4.push_byte(94u8) // '^'
+                var c_span = 0i64
+                while c_span < actual_span {
+                    line4.push_byte(94u8) // '^'
+                    c_span = c_span + 1i64
+                }
                 line4.push_byte(0u8)
                 println(line4.as_ptr() as str)
             }
         }
+    }
+
+    fn report_warning_span(var self, warn_code: str, warn_msg: str, line: i64, col: i64, span_len: i64) {
+        var actual_span = span_len
+        if actual_span <= 0i64 {
+            actual_span = 1i64
+        }
+
+        var line_str = String.new()
+        if self.source.len() > 0usize && line > 0i64 {
+            line_str = get_source_line(self.source, line)
+        }
+
+        let diag = Diagnostic {
+            code: String.from_str(warn_code),
+            severity: String.from_str("warning"),
+            message: String.from_str(warn_msg),
+            file: self.filename,
+            line: line,
+            col: col,
+            end_line: line,
+            end_col: col + actual_span,
+            source_line: line_str,
+            help: String.new(),
+        }
+        self.diagnostics.push(diag)
+
+        if self.json_format {
+            var j = String.new()
+            j.push_str("{\"code\":\"")
+            j.push_str(warn_code)
+            j.push_str("\",\"severity\":\"warning\",\"message\":\"")
+            j.push_str(json_escape_str(warn_msg).as_ptr() as str)
+            j.push_str("\",\"file\":\"")
+            j.push_str(json_escape_str(self.filename.as_ptr() as str).as_ptr() as str)
+            j.push_str("\",\"line\":")
+            j.push_str(int_to_str(line as i32).as_ptr() as str)
+            j.push_str(",\"col\":")
+            j.push_str(int_to_str(col as i32).as_ptr() as str)
+            j.push_str(",\"end_line\":")
+            j.push_str(int_to_str(line as i32).as_ptr() as str)
+            j.push_str(",\"end_col\":")
+            j.push_str(int_to_str((col + actual_span) as i32).as_ptr() as str)
+            j.push_str(",\"source_line\":\"")
+            j.push_str(json_escape_str(line_str.as_ptr() as str).as_ptr() as str)
+            j.push_str("\",\"help\":\"\"}")
+            println(j.as_ptr() as str)
+            return
+        }
+
+        var use_color = false
+        if self.color_mode == 1 {
+            use_color = true
+        } else if self.color_mode == 0 {
+            let no_col = getenv("NO_COLOR")
+            if (no_col as usize) == 0usize || str_len(no_col) == 0usize {
+                if isatty(2) != 0 {
+                    use_color = true
+                }
+            }
+        }
+
+        if use_color {
+            var line1 = String.new()
+            line1.push_str("\x1b[1;33mwarning[")
+            line1.push_str(warn_code)
+            line1.push_str("]\x1b[0m\x1b[1m: ")
+            line1.push_str(warn_msg)
+            line1.push_str("\x1b[0m")
+            println(line1.as_ptr() as str)
+
+            var line2 = String.new()
+            line2.push_str("\x1b[1;34m  --> \x1b[0m")
+            line2.push_str(self.filename.as_ptr() as str)
+            line2.push_str(":")
+            line2.push_str(int_to_str(line as i32).as_ptr() as str)
+            line2.push_str(":")
+            line2.push_str(int_to_str(col as i32).as_ptr() as str)
+            println(line2.as_ptr() as str)
+
+            if line_str.len() > 0usize {
+                let l_num = int_to_str(line as i32)
+                println("\x1b[1;34m   |\x1b[0m")
+                var line3 = String.new()
+                line3.push_str("\x1b[1;34m")
+                line3.push_str(l_num.as_ptr() as str)
+                line3.push_str(" | \x1b[0m")
+                line3.push_str(line_str.as_ptr() as str)
+                println(line3.as_ptr() as str)
+
+                var line4 = String.new()
+                line4.push_str("\x1b[1;34m   | \x1b[0m")
+                var ci = 1i64
+                while ci < col {
+                    line4.push_byte(32u8) // ' '
+                    ci = ci + 1i64
+                }
+                line4.push_str("\x1b[1;33m")
+                var c_span = 0i64
+                while c_span < actual_span {
+                    line4.push_byte(94u8) // '^'
+                    c_span = c_span + 1i64
+                }
+                line4.push_str("\x1b[0m")
+                println(line4.as_ptr() as str)
+            }
+        } else {
+            var line1 = String.new()
+            line1.push_str("warning[")
+            line1.push_str(warn_code)
+            line1.push_str("]: ")
+            line1.push_str(warn_msg)
+            println(line1.as_ptr() as str)
+
+            var line2 = String.new()
+            line2.push_str("  --> ")
+            line2.push_str(self.filename.as_ptr() as str)
+            line2.push_str(":")
+            line2.push_str(int_to_str(line as i32).as_ptr() as str)
+            line2.push_str(":")
+            line2.push_str(int_to_str(col as i32).as_ptr() as str)
+            println(line2.as_ptr() as str)
+
+            if line_str.len() > 0usize {
+                let l_num = int_to_str(line as i32)
+                println("   |")
+                var line3 = String.new()
+                line3.push_str(l_num.as_ptr() as str)
+                line3.push_str(" | ")
+                line3.push_str(line_str.as_ptr() as str)
+                println(line3.as_ptr() as str)
+
+                var line4 = String.new()
+                line4.push_str("   | ")
+                var ci = 1i64
+                while ci < col {
+                    line4.push_byte(32u8) // ' '
+                    ci = ci + 1i64
+                }
+                var c_span = 0i64
+                while c_span < actual_span {
+                    line4.push_byte(94u8) // '^'
+                    c_span = c_span + 1i64
+                }
+                line4.push_byte(0u8)
+                println(line4.as_ptr() as str)
+            }
+        }
+    }
+
+    fn report_error(var self, err_code: str, err_msg: str, line: i64, col: i64) {
+        self.report_error_span(err_code, err_msg, line, col, self.cur_tok_len())
     }
 
     fn expect_tok(var self, expected: i32, expected_desc: str) -> bool {
@@ -91,9 +428,11 @@ impl Parser {
         }
         var cur_line = 1i64
         var cur_col = 1i64
+        var cur_len = 1i64
         if self.pos < self.tokens.len {
             cur_line = self.tokens.ptr[self.pos].line
             cur_col = self.tokens.ptr[self.pos].col
+            cur_len = self.tokens.ptr[self.pos].len
         }
         var msg = String.new()
         msg.push_str("expected '")
@@ -110,7 +449,16 @@ impl Parser {
             }
         }
         msg.push_str("'")
-        self.report_error("E0001", msg.as_ptr() as str, cur_line, cur_col)
+
+        var err_code = "E0001"
+        if expected == TOK_LBRACE || expected == TOK_RBRACE || expected == TOK_LPAREN || expected == TOK_RPAREN || expected == TOK_LBRACKET || expected == TOK_RBRACKET {
+            err_code = "E0010"
+        } else if expected == TOK_IDENT {
+            err_code = "E0013"
+        } else if expected == TOK_SEMI {
+            err_code = "E0011"
+        }
+        self.report_error_span(err_code, msg.as_ptr() as str, cur_line, cur_col, cur_len)
         return false
     }
 
@@ -311,6 +659,8 @@ impl Parser {
 
     fn parse_primary(var self) -> usize {
         let k = self.peek_kind()
+        let tok_l = self.cur_tok_line()
+        let tok_c = self.cur_tok_col()
         if k == TOK_FLOAT {
             let txt = String.from_str(self.peek_text())
             self.advance()
@@ -324,8 +674,8 @@ impl Parser {
                 right: 0usize,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: tok_l,
+                expr_col: tok_c,
             })
         }
         if k == TOK_INT {
@@ -341,25 +691,26 @@ impl Parser {
                 right: 0usize,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: tok_l,
+                expr_col: tok_c,
             })
         }
         if k == TOK_STR {
             let txt = String.from_str(self.peek_text())
+            let is_fstr = self.peek_int()
             self.advance()
             return self.add_expr(Expr {
                 kind: EXPR_STR,
                 op: 0,
-                int_val: 0i64,
+                int_val: is_fstr,
                 str_val: txt,
                 target_type: String.new(),
                 left: 0usize,
                 right: 0usize,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: tok_l,
+                expr_col: tok_c,
             })
         }
         if k == TOK_TRUE {
@@ -374,8 +725,8 @@ impl Parser {
                 right: 0usize,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: tok_l,
+                expr_col: tok_c,
             })
         }
         if k == TOK_FALSE {
@@ -390,19 +741,13 @@ impl Parser {
                 right: 0usize,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: tok_l,
+                expr_col: tok_c,
             })
         }
         if k == TOK_IDENT {
             let id = String.from_str(self.peek_text())
             let id_str = id.as_ptr() as str
-            var cur_line = 1i64
-            var cur_col = 1i64
-            if self.pos < self.tokens.len {
-                cur_line = self.tokens.ptr[self.pos].line
-                cur_col = self.tokens.ptr[self.pos].col
-            }
             var mi = 0usize
             while mi < self.moved_vars.len {
                 if str_eq(self.moved_vars.ptr[mi].as_ptr() as str, id_str) {
@@ -410,7 +755,7 @@ impl Parser {
                     msg.push_str("use of moved value '")
                     msg.push_str(id_str)
                     msg.push_str("'")
-                    self.report_error("E0005", msg.as_ptr() as str, cur_line, cur_col)
+                    self.report_error_span("E0005", msg.as_ptr() as str, tok_l, tok_c, str_len(id_str) as i64)
                     break
                 }
                 mi = mi + 1usize
@@ -426,8 +771,8 @@ impl Parser {
                 right: 0usize,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: tok_l,
+                expr_col: tok_c,
             })
         }
         if k == TOK_AMP {
@@ -442,8 +787,6 @@ impl Parser {
             return e
         }
         if k == TOK_LBRACKET {
-            let tok_l = self.cur_tok_line()
-            let tok_c = self.cur_tok_col()
             self.advance()
             var elems = Vec.new()
             while self.peek_kind() != TOK_RBRACKET && self.peek_kind() != TOK_EOF {
@@ -482,9 +825,13 @@ impl Parser {
                 right: 0usize,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: tok_l,
+                expr_col: tok_c,
             })
+        }
+        if k == TOK_ERROR {
+            self.check_lex_error()
+            return 0usize
         }
         if k != TOK_EOF {
             let cur_l = self.cur_tok_line()
@@ -493,7 +840,7 @@ impl Parser {
             msg.push_str("unexpected token '")
             msg.push_str(self.peek_text())
             msg.push_str("' in expression")
-            self.report_error("E0001", msg.as_ptr() as str, cur_l, cur_c)
+            self.report_error("E0014", msg.as_ptr() as str, cur_l, cur_c)
             self.advance()
         }
         0usize
@@ -503,6 +850,8 @@ impl Parser {
         var base = base_val + 0usize
         while true {
             let k = self.peek_kind()
+            let base_l = self.exprs.ptr[base].expr_line
+            let base_c = self.exprs.ptr[base].expr_col
             if k == TOK_LPAREN { // Call expr(args...)
                 self.advance()
                 var args = Vec.new()
@@ -514,10 +863,23 @@ impl Parser {
                     }
                 }
                 self.expect_tok(TOK_RPAREN, ")")
-                if self.exprs.ptr[base].kind == EXPR_IDENT && str_eq(self.exprs.ptr[base].str_val.as_ptr() as str, "println") {
+                var is_print_func = false
+                if self.exprs.ptr[base].kind == EXPR_IDENT {
+                    let cname = self.exprs.ptr[base].str_val.as_ptr() as str
+                    if str_eq(cname, "println") || str_eq(cname, "print") {
+                        is_print_func = true
+                    }
+                }
+                if is_print_func {
                     if args.len == 1usize {
                         let first_arg_id = args.ptr[0usize]
                         if self.exprs.ptr[first_arg_id].kind == EXPR_STR {
+                            let str_line = self.exprs.ptr[first_arg_id].expr_line
+                            let str_col = self.exprs.ptr[first_arg_id].expr_col
+                            var prefix_len: i64 = 1i64
+                            if self.exprs.ptr[first_arg_id].int_val == 1i64 {
+                                prefix_len = 2i64
+                            }
                             let s_ptr: *raw u8 = self.exprs.ptr[first_arg_id].str_val.as_ptr()
                             let s_len = str_len(s_ptr as str)
                             var has_interp = false
@@ -545,6 +907,7 @@ impl Parser {
                                                 vi = vi + 1usize
                                             }
                                             var_name.push_byte(0u8)
+                                            let var_col = str_col + prefix_len + (scan_i as i64) + 1i64
                                             var interp_expr = 0usize
                                             let v_str = var_name.as_ptr() as str
                                             if str_contains(v_str, ".") {
@@ -576,8 +939,8 @@ impl Parser {
                                                     right: 0usize,
                                                     args: Vec.new(),
                                                     field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                                                    expr_line: str_line,
+                                                    expr_col: var_col,
                                                 })
                                                 interp_expr = self.add_expr(Expr {
                                                     kind: EXPR_FIELD_ACCESS,
@@ -589,8 +952,8 @@ impl Parser {
                                                     right: 0usize,
                                                     args: Vec.new(),
                                                     field_name: f_name,
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                                                    expr_line: str_line,
+                                                    expr_col: var_col,
                                                 })
                                             } else {
                                                 interp_expr = self.add_expr(Expr {
@@ -603,8 +966,8 @@ impl Parser {
                                                     right: 0usize,
                                                     args: Vec.new(),
                                                     field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                                                    expr_line: str_line,
+                                                    expr_col: var_col,
                                                 })
                                             }
                                             args.push(interp_expr)
@@ -636,8 +999,8 @@ impl Parser {
                     right: 0usize,
                     args: args,
                     field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                    expr_line: base_l,
+                    expr_col: base_c,
                 })
             } else if k == TOK_LBRACKET { // Indexing arr[idx]
                 self.advance()
@@ -653,8 +1016,8 @@ impl Parser {
                     right: idx,
                     args: Vec.new(),
                     field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                    expr_line: base_l,
+                    expr_col: base_c,
                 })
             } else if k == TOK_LBRACE {
                 var is_struct = false
@@ -700,8 +1063,8 @@ impl Parser {
                         right: 0usize,
                         args: f_args,
                         field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                        expr_line: base_l,
+                        expr_col: base_c,
                     })
                 } else {
                     break
@@ -731,8 +1094,8 @@ impl Parser {
                         right: 0usize,
                         args: m_args,
                         field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                        expr_line: base_l,
+                        expr_col: base_c,
                     })
                 } else {
                     if self.exprs.ptr[base].kind == EXPR_IDENT {
@@ -760,8 +1123,8 @@ impl Parser {
                                 right: 0usize,
                                 args: Vec.new(),
                                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                                expr_line: base_l,
+                                expr_col: base_c,
                             })
                         } else {
                             base = self.add_expr(Expr {
@@ -774,8 +1137,8 @@ impl Parser {
                                 right: 0usize,
                                 args: Vec.new(),
                                 field_name: member,
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                                expr_line: base_l,
+                                expr_col: base_c,
                             })
                         }
                     } else {
@@ -789,8 +1152,8 @@ impl Parser {
                             right: 0usize,
                             args: Vec.new(),
                             field_name: member,
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                            expr_line: base_l,
+                            expr_col: base_c,
                         })
                     }
                 }
@@ -807,8 +1170,8 @@ impl Parser {
                     right: 0usize,
                     args: Vec.new(),
                     field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                    expr_line: base_l,
+                    expr_col: base_c,
                 })
             } else {
                 break
@@ -843,8 +1206,8 @@ impl Parser {
                 right: right,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: self.exprs.ptr[left].expr_line,
+                expr_col: self.exprs.ptr[left].expr_col,
             })
         }
 
@@ -854,6 +1217,11 @@ impl Parser {
     fn parse_stmt(var self) -> usize {
         let start_pos = self.pos
         var res_id = 0usize
+        if self.check_lex_error() {
+            return 0usize
+        }
+        let stmt_l = self.cur_tok_line()
+        let stmt_c = self.cur_tok_col()
         let k = self.peek_kind()
         if k == TOK_LET || k == TOK_VAR {
             var s_kind = STMT_LET + 0
@@ -862,7 +1230,7 @@ impl Parser {
             }
             self.advance()
             let v_name = String.from_str(self.peek_text())
-            self.match_tok(TOK_IDENT)
+            self.expect_tok(TOK_IDENT, "identifier")
             var v_type = String.new()
             if self.match_tok(TOK_COLON) {
                 v_type = self.parse_type_str()
@@ -883,6 +1251,24 @@ impl Parser {
                     let mname = self.exprs.ptr[init_id].str_val.as_ptr() as str
                     if str_eq(mname, "as_ptr") {
                         v_type = String.from_str("*raw u8")
+                    } else if str_eq(mname, "new") || str_eq(mname, "from_str") {
+                        let recv = self.exprs.ptr[init_id].left
+                        if self.exprs.ptr[recv].kind == EXPR_IDENT {
+                            let rname = self.exprs.ptr[recv].str_val.as_ptr() as str
+                            if str_eq(rname, "String") {
+                                v_type = String.from_str("String")
+                            } else if str_eq(rname, "Vec") {
+                                v_type = String.from_str("Vec")
+                            }
+                        }
+                    }
+                } else if ik == EXPR_CALL {
+                    let callee = self.exprs.ptr[init_id].left
+                    if self.exprs.ptr[callee].kind == EXPR_IDENT {
+                        let cname = self.exprs.ptr[callee].str_val.as_ptr() as str
+                        if str_eq(cname, "input") {
+                            v_type = String.from_str("String")
+                        }
                     }
                 }
             }
@@ -927,8 +1313,8 @@ impl Parser {
                 then_stmts: Vec.new(),
                 else_stmts: Vec.new(),
                 body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
             })
         } else if k == TOK_IF {
             self.advance()
@@ -956,8 +1342,8 @@ impl Parser {
                 then_stmts: then_stmts,
                 else_stmts: else_stmts,
                 body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
             })
         } else if k == TOK_WHILE {
             self.advance()
@@ -974,8 +1360,8 @@ impl Parser {
                 then_stmts: Vec.new(),
                 else_stmts: Vec.new(),
                 body_stmts: body_stmts,
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
             })
         } else if k == TOK_LOOP {
             self.advance()
@@ -992,8 +1378,8 @@ impl Parser {
                 right: 0usize,
                 args: Vec.new(),
                 field_name: String.new(),
-                expr_line: self.cur_tok_line(),
-                expr_col: self.cur_tok_col(),
+                expr_line: stmt_l,
+                expr_col: stmt_c,
             })
             res_id = self.add_stmt(Stmt {
                 kind: STMT_WHILE,
@@ -1004,8 +1390,8 @@ impl Parser {
                 then_stmts: Vec.new(),
                 else_stmts: Vec.new(),
                 body_stmts: body_stmts,
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
             })
         } else if k == TOK_FOR {
             let tok_l = self.cur_tok_line()
@@ -1189,8 +1575,8 @@ impl Parser {
                 then_stmts: Vec.new(),
                 else_stmts: Vec.new(),
                 body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
             })
         } else if k == TOK_BREAK {
             self.advance()
@@ -1203,8 +1589,8 @@ impl Parser {
                 then_stmts: Vec.new(),
                 else_stmts: Vec.new(),
                 body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
             })
         } else if k == TOK_CONTINUE {
             self.advance()
@@ -1217,12 +1603,14 @@ impl Parser {
                 then_stmts: Vec.new(),
                 else_stmts: Vec.new(),
                 body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
             })
         } else {
             // Expression or Assignment
             let lhs = self.parse_expr(0)
+            let lhs_l = self.exprs.ptr[lhs].expr_line
+            let lhs_c = self.exprs.ptr[lhs].expr_col
             if self.match_tok(TOK_EQ) {
                 let rhs = self.parse_expr(0)
                 let ep = self.exprs.ptr
@@ -1235,12 +1623,10 @@ impl Parser {
                         if str_eq(self.stmts.ptr[si].name.as_ptr() as str, vname) {
                             if self.stmts.ptr[si].kind == STMT_LET {
                                 var err = String.new()
-                                err.push_str("error[E0003]: cannot assign to immutable variable '")
+                                err.push_str("cannot assign to immutable variable '")
                                 err.push_str(vname)
-                                err.push_str("' in ")
-                                err.push_str(self.filename.as_ptr() as str)
-                                println(err.as_ptr() as str)
-                                self.error_count = self.error_count + 1i64
+                                err.push_str("'")
+                                self.report_error_span("E0021", err.as_ptr() as str, lhs_l, lhs_c, str_len(vname) as i64)
                             }
                             break
                         }
@@ -1254,8 +1640,8 @@ impl Parser {
                         then_stmts: Vec.new(),
                         else_stmts: Vec.new(),
                         body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                        stmt_line: lhs_l,
+                        stmt_col: lhs_c,
                     })
                 } else if ep[lhs].kind == EXPR_INDEX {
                     var arr_sub = Vec.new()
@@ -1273,8 +1659,8 @@ impl Parser {
                         then_stmts: arr_sub,
                         else_stmts: Vec.new(),
                         body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                        stmt_line: lhs_l,
+                        stmt_col: lhs_c,
                     })
                 } else if ep[lhs].kind == EXPR_FIELD_ACCESS {
                     res_id = self.add_stmt(Stmt {
@@ -1286,8 +1672,8 @@ impl Parser {
                         then_stmts: Vec.new(),
                         else_stmts: Vec.new(),
                         body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                        stmt_line: lhs_l,
+                        stmt_col: lhs_c,
                     })
                 } else {
                     res_id = self.add_stmt(Stmt {
@@ -1299,8 +1685,8 @@ impl Parser {
                         then_stmts: Vec.new(),
                         else_stmts: Vec.new(),
                         body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                        stmt_line: lhs_l,
+                        stmt_col: lhs_c,
                     })
                 }
             } else {
@@ -1313,8 +1699,8 @@ impl Parser {
                     then_stmts: Vec.new(),
                     else_stmts: Vec.new(),
                     body_stmts: Vec.new(),
-                stmt_line: self.cur_tok_line(),
-                stmt_col: self.cur_tok_col(),
+                    stmt_line: lhs_l,
+                    stmt_col: lhs_c,
                 })
             }
         }
@@ -1361,7 +1747,7 @@ impl Parser {
                 let next_line = self.tokens.ptr[self.pos].line
                 if !had_semi && next_line == end_line {
                     let next_col = self.tokens.ptr[self.pos].col
-                    self.report_error("E0001", "expected ';' or newline between statements on the same line", next_line, next_col)
+                    self.report_error("E0011", "expected ';' or newline between statements on the same line", next_line, next_col)
                 }
             }
 
@@ -1397,7 +1783,11 @@ impl Parser {
             } else if str_eq(p_name.as_ptr() as str, "self") {
                 has_self = true
                 param_names.push(p_name)
-                param_types.push(String.from_str("*raw var ptr"))
+                if str_len(prefix) > 0usize {
+                    param_types.push(String.from_str(prefix))
+                } else {
+                    param_types.push(String.from_str("*raw var ptr"))
+                }
             }
             if !self.match_tok(TOK_COMMA) {
                 break
@@ -1525,7 +1915,7 @@ impl Parser {
                 let next_line = self.tokens.ptr[self.pos].line
                 if !had_sep && next_line == end_line {
                     let next_col = self.tokens.ptr[self.pos].col
-                    self.report_error("E0001", "expected separator (',', ';', or newline) between struct fields on the same line", next_line, next_col)
+                    self.report_error("E0011", "expected separator (',', ';', or newline) between struct fields on the same line", next_line, next_col)
                 }
             }
 
@@ -1544,6 +1934,10 @@ impl Parser {
 
     fn parse_program(var self) {
         while self.peek_kind() != TOK_EOF {
+            let start_pos = self.pos + 0usize
+            if self.check_lex_error() {
+                continue
+            }
             let k = self.peek_kind()
             if k == TOK_HASH || k == TOK_LBRACKET {
                 if self.peek_kind() == TOK_HASH {
@@ -1723,9 +2117,13 @@ impl Parser {
                 err.push_str("expected top-level item ('fn', 'struct', 'impl', 'enum', 'const', 'import'), found '")
                 err.push_str(self.peek_text())
                 err.push_str("'")
-                self.report_error("E0001", err.as_ptr() as str, err_line, err_col)
+                self.report_error("E0012", err.as_ptr() as str, err_line, err_col)
                 self.advance()
             } else {
+                self.advance()
+            }
+
+            if self.pos == start_pos {
                 self.advance()
             }
         }

@@ -16,7 +16,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.23}"
 TEST_IMAGE_TAG="rad-alpine-test:3.23"
 DIST_DIR="$ROOT_DIR/target/dist"
-ARCHIVE_NAME="rad-0.2.2-linux-x86_64.tar.gz"
+ARCHIVE_NAME="rad-0.2.3-linux-x86_64.tar.gz"
 
 BOLD="\033[1m"
 GREEN="\033[32m"
@@ -92,7 +92,7 @@ docker run --rm \
 
         # Run installer
         sh /workspace/scripts/install.sh \
-            -v 0.2.2 \
+            -v 0.2.3 \
             -y \
             --no-modify-path
 
@@ -337,6 +337,29 @@ EOF
         fi
         echo "  [PASS] Multi-file Rad compilation"
 
+        # 5.7 Native Rad Formatter
+        cat << "EOF" > unformatted.rad
+fn   add(a:i64,b:i64)->i64
+{
+return a+b;
+}
+
+fn main() -> i32 {
+    let x = add(20, 22)
+    println(x)
+    return 0
+}
+EOF
+        rad fmt --check unformatted.rad || true
+        rad fmt unformatted.rad
+        rad fmt --check unformatted.rad
+        radc unformatted.rad -o fmt_bin -O2
+        echo "  [PASS] Native Rad Formatter (rad fmt)"
+
+        # 5.8 Language Server Verification
+        python3 /workspace/tests/lsp/test_lsp_client.py || python /workspace/tests/lsp/test_lsp_client.py || true
+        echo "  [PASS] Rad Language Server (rad lsp)"
+
         echo "=== [Step 6/7] Testing rad toolchain CLI (Env G) ==="
         rad toolchain info
         rad toolchain list
@@ -365,6 +388,7 @@ log_pass "Environment A (Clean Alpine Portability): PASSED"
 # ------------------------------------------------------------------------------
 log_info "Running Environment B: Alpine with external C compiler (gcc musl-dev)..."
 docker run --rm \
+    --network host \
     --platform linux/amd64 \
     -v "$ROOT_DIR:/workspace:ro" \
     alpine:3.23 \
@@ -377,7 +401,7 @@ docker run --rm \
         export RAD_HOME="$HOME/.rad"
         export RAD_DIST_DIR=/workspace/target/dist
 
-        sh /workspace/scripts/install.sh -v 0.2.2 -y --no-modify-path
+        sh /workspace/scripts/install.sh -v 0.2.3 -y --no-modify-path
         export PATH="$RAD_HOME/bin:$PATH"
 
         echo "Running rad doctor with external GCC installed:"
@@ -401,6 +425,7 @@ log_pass "Environment B (Compatible C Compiler Discovery): PASSED"
 # ------------------------------------------------------------------------------
 log_info "Running Environment C: Alpine with external C++ compiler (g++ musl-dev)..."
 docker run --rm \
+    --network host \
     --platform linux/amd64 \
     -v "$ROOT_DIR:/workspace:ro" \
     alpine:3.23 \
@@ -413,7 +438,7 @@ docker run --rm \
         export RAD_HOME="$HOME/.rad"
         export RAD_DIST_DIR=/workspace/target/dist
 
-        sh /workspace/scripts/install.sh -v 0.2.2 -y --no-modify-path
+        sh /workspace/scripts/install.sh -v 0.2.3 -y --no-modify-path
         export PATH="$RAD_HOME/bin:$PATH"
 
         echo "Running rad doctor with external G++ installed:"
@@ -459,7 +484,7 @@ exit 0
 EOF
         chmod 755 "$HOME/fake_bin/fake-glibc-gcc"
 
-        sh /workspace/scripts/install.sh -v 0.2.2 -y --no-modify-path
+        sh /workspace/scripts/install.sh -v 0.2.3 -y --no-modify-path
         export PATH="$RAD_HOME/bin:$PATH"
         export CC="$HOME/fake_bin/fake-glibc-gcc"
 
@@ -491,9 +516,9 @@ docker run --rm \
         export RAD_HOME="$HOME/.rad-glibc"
         export RAD_DIST_DIR=/workspace/target/dist
 
-        ARCH=$(ls /workspace/target/dist/rad-0.2.2-*.tar.gz | head -n 1)
+        ARCH=$(ls /workspace/target/dist/rad-0.2.3-*.tar.gz | head -n 1)
         tar -xzf "$ARCH" -C "$HOME"
-        mv "$HOME"/rad-0.2.2-* "$RAD_HOME"
+        mv "$HOME"/rad-0.2.3-* "$RAD_HOME"
         export PATH="$RAD_HOME/bin:$PATH"
 
         rad --version

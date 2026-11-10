@@ -1,0 +1,122 @@
+{
+  "Function Declaration": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:params}) -> ${3:i64} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "Declare a Rad function"
+  },
+  "Main Function": {
+    "prefix": "main",
+    "body": [
+      "fn main() {",
+      "    ${0:print(\"Hello, Rad!\");}",
+      "}"
+    ],
+    "description": "Standard Rad main entry point"
+  },
+  "Struct Definition": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name} {",
+      "    ${2:field}: ${3:i64},${0}",
+      "}"
+    ],
+    "description": "Define a Rad struct"
+  },
+  "Implementation Block": {
+    "prefix": "impl",
+    "body": [
+      "impl ${1:StructName} {",
+      "    fn ${2:method_name}(${3:self}) -> ${4:void} {",
+      "        ${0}",
+      "    }",
+      "}"
+    ],
+    "description": "Implement methods for a Rad struct"
+  },
+  "If Condition": {
+    "prefix": "if",
+    "body": [
+      "if ${1:condition} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "If statement"
+  },
+  "If-Else Condition": {
+    "prefix": "ifelse",
+    "body": [
+      "if ${1:condition} {",
+      "    ${2}",
+      "} else {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "If-Else statement"
+  },
+  "While Loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "While loop"
+  },
+  "For Range Loop": {
+    "prefix": "for",
+    "body": [
+      "for ${1:i} in ${2:0}..${3:count} {",
+      "    ${0}",
+      "}"
+    ],
+    "description": "For loop over numeric range"
+  },
+  "Print Line": {
+    "prefix": "println",
+    "body": [
+      "println(\"${1:{}}\", ${2:val});${0}"
+    ],
+    "description": "Print line to standard output"
+  },
+  "Print": {
+    "prefix": "print",
+    "body": [
+      "print(\"${1:{}}\", ${2:val});${0}"
+    ],
+    "description": "Print formatted output without trailing newline"
+  },
+  "Input Line": {
+    "prefix": "input",
+    "body": [
+      "let ${1:line} = input(\"${2:Enter: }\");${0}"
+    ],
+    "description": "Read a line of input from standard input"
+  },
+  "Immutable Let Binding": {
+    "prefix": "let",
+    "body": [
+      "let ${1:name}: ${2:i64} = ${3:value};${0}"
+    ],
+    "description": "Declare an immutable variable"
+  },
+  "Mutable Var Binding": {
+    "prefix": "var",
+    "body": [
+      "var ${1:name}: ${2:i64} = ${3:value};${0}"
+    ],
+    "description": "Declare a mutable variable"
+  },
+  "Extern C Block": {
+    "prefix": "extern",
+    "body": [
+      "extern \"C\" {",
+      "    fn ${1:c_function}(${2:params}) -> ${3:i32};${0}",
+      "}"
+    ],
+    "description": "Declare external C symbols"
+  }
+}

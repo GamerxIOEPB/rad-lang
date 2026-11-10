@@ -1,8 +1,8 @@
 {
-  "name": "rad-lang",
-  "displayName": "Rad Programming Language",
-  "description": "Rich language support, syntax highlighting, and Language Server Protocol integration for Rad.",
-  "version": "0.2.0",
+  "name": "rad-utils",
+  "displayName": "Rad Utils",
+  "description": "Official Rad language support: real-time diagnostics, LSP code completion, go-to-definition, hover, outline, formatting, and syntax highlighting.",
+  "version": "0.2.3",
   "publisher": "rad-lang",
   "repository": {
     "type": "git",
@@ -12,17 +12,25 @@
     "vscode": "^1.75.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters",
+    "Formatters",
+    "Snippets"
   ],
   "keywords": [
     "rad",
     "systems",
     "compiler",
-    "lsp"
+    "lsp",
+    "formatter",
+    "rad-utils"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onLanguage:rad"
+    "onLanguage:rad",
+    "onCommand:rad.restartLsp",
+    "onCommand:rad.showVersion",
+    "onCommand:rad.formatFile"
   ],
   "contributes": {
     "languages": [
@@ -45,10 +53,24 @@
         "path": "./syntaxes/rad.tmLanguage.json"
       }
     ],
+    "snippets": [
+      {
+        "language": "rad",
+        "path": "./snippets/rad.json"
+      }
+    ],
     "commands": [
       {
         "command": "rad.restartLsp",
         "title": "Rad: Restart Language Server"
+      },
+      {
+        "command": "rad.showVersion",
+        "title": "Rad: Show Toolchain Version"
+      },
+      {
+        "command": "rad.formatFile",
+        "title": "Rad: Format Document"
       }
     ],
     "configuration": {
@@ -69,17 +91,34 @@
             "lsp"
           ],
           "description": "Arguments passed to the rad binary to start the language server."
+        },
+        "rad.lsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the Rad language server."
+        },
+        "rad.format.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable native Rad document formatting via `rad fmt`."
         }
       }
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "compile": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.75.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.4.0",
     "vscode-languageclient": "^9.0.1"
   }

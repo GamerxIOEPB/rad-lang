@@ -1,0 +1,973 @@
+// ==============================================================================
+// src/tools/rad_pm/src/lsp.rad — Rad Language Server Protocol (LSP) Engine
+// Stdio JSON-RPC 2.0 Server for diagnostics, completion, hover, definition, symbols, and formatting.
+// ==============================================================================
+
+extern "C" {
+    fn getchar() -> i32;
+    fn putchar(c: i32) -> i32;
+    fn fflush(stream: *raw u8) -> i32;
+}
+
+fn int_to_str(val: i32) -> String {
+    if val == 0 {
+        var s = String.new()
+        s.push_byte(48u8) // '0'
+        return s
+    }
+    var res = String.new()
+    var v = val
+    var is_neg = false
+    if v < 0 {
+        is_neg = true
+        v = 0 - v
+    }
+    var digits = Vec.new()
+    while v > 0 {
+        let rem = (v % 10) as u8
+        digits.push(rem + 48u8)
+        v = v / 10
+    }
+    if is_neg {
+        res.push_byte(45u8) // '-'
+    }
+    var i = digits.len
+    while i > 0usize {
+        i = i - 1usize
+        res.push_byte(digits.ptr[i])
+    }
+    return res
+}
+
+fn json_escape_str(s: str) -> String {
+    var res = String.new()
+    if (s as usize) == 0usize {
+        return res
+    }
+    let p: *raw u8 = s as *raw u8
+    var i = 0usize
+    let len = str_len(s)
+    while i < len {
+        let b = p[i]
+        if b == 34u8 { // '"'
+            res.push_byte(92u8)
+            res.push_byte(34u8)
+        } else if b == 92u8 { // '\\'
+            res.push_byte(92u8)
+            res.push_byte(92u8)
+        } else if b == 10u8 { // '\n'
+            res.push_byte(92u8)
+            res.push_byte(110u8)
+        } else if b == 13u8 { // '\r'
+            res.push_byte(92u8)
+            res.push_byte(114u8)
+        } else if b == 9u8 { // '\t'
+            res.push_byte(92u8)
+            res.push_byte(116u8)
+        } else {
+            res.push_byte(b)
+        }
+        i = i + 1usize
+    }
+    return res
+}
+
+struct LspDocument {
+    uri: String,
+    text: String,
+}
+
+struct LspServer {
+    documents: Vec<LspDocument>,
+    radc_path: String,
+    is_shutdown: bool,
+}
+
+// ------------------------------------------------------------------------------
+// JSON Parsing Helpers
+// ------------------------------------------------------------------------------
+
+fn json_find_field(json: str, field_name: str) -> str {
+    var search = String.new()
+    search.push_byte(34u8) // '"'
+    search.push_str(field_name)
+    search.push_byte(34u8) // '"'
+
+    let s_ptr = search.as_ptr() as str
+    let slen = str_len(s_ptr)
+    let jlen = str_len(json)
+    if jlen < slen {
+        return ""
+    }
+
+    let jp: *raw u8 = json as *raw u8
+    var i = 0usize
+    while i + slen <= jlen {
+        var is_matched = true
+        var k = 0usize
+        while k < slen {
+            if jp[i + k] != (s_ptr as *raw u8)[k] {
+                is_matched = false
+                break
+            }
+            k = k + 1usize
+        }
+        if is_matched {
+            // Found field name, scan for ':'
+            var pos = i + slen
+            while pos < jlen && (jp[pos] == 32u8 || jp[pos] == 9u8 || jp[pos] == 10u8 || jp[pos] == 13u8) {
+                pos = pos + 1usize
+            }
+            if pos < jlen && jp[pos] == 58u8 { // ':'
+                pos = pos + 1usize
+                while pos < jlen && (jp[pos] == 32u8 || jp[pos] == 9u8 || jp[pos] == 10u8 || jp[pos] == 13u8) {
+                    pos = pos + 1usize
+                }
+                return (json as usize + pos) as str
+            }
+        }
+        i = i + 1usize
+    }
+    return ""
+}
+
+fn json_get_string(json: str, field_name: str) -> String {
+    let val_start = json_find_field(json, field_name)
+    if str_len(val_start) == 0usize {
+        return String.new()
+    }
+    let p: *raw u8 = val_start as *raw u8
+    if p[0usize] != 34u8 { // '"'
+        return String.new()
+    }
+    var res = String.new()
+    var i = 1usize
+    let len = str_len(val_start)
+    while i < len && p[i] != 34u8 {
+        if p[i] == 92u8 && i + 1usize < len { // '\\'
+            i = i + 1usize
+            if p[i] == 110u8 {
+                res.push_byte(10u8) // '\n'
+            } else if p[i] == 116u8 {
+                res.push_byte(9u8)  // '\t'
+            } else if p[i] == 114u8 {
+                res.push_byte(13u8) // '\r'
+            } else if p[i] == 34u8 {
+                res.push_byte(34u8) // '\"'
+            } else if p[i] == 92u8 {
+                res.push_byte(92u8) // '\\'
+            } else {
+                res.push_byte(p[i])
+            }
+        } else {
+            res.push_byte(p[i])
+        }
+        i = i + 1usize
+    }
+    return res
+}
+
+fn json_get_int_field(json: str, field_name: str) -> i64 {
+    let val_start = json_find_field(json, field_name)
+    if str_len(val_start) == 0usize {
+        return 0i64
+    }
+    let p: *raw u8 = val_start as *raw u8
+    var i = 0usize
+    var is_neg = false
+    if p[0usize] == 45u8 { // '-'
+        is_neg = true
+        i = 1usize
+    }
+    var res = 0i64
+    let len = str_len(val_start)
+    while i < len && p[i] >= 48u8 && p[i] <= 57u8 {
+        res = res * 10i64 + ((p[i] - 48u8) as i64)
+        i = i + 1usize
+    }
+    if is_neg {
+        return 0i64 - res
+    }
+    return res
+}
+
+// ------------------------------------------------------------------------------
+// Document Store Operations
+// ------------------------------------------------------------------------------
+
+impl LspServer {
+    fn set_document(var self, uri: str, text: str) {
+        var i = 0usize
+        while i < self.documents.len {
+            if str_eq(self.documents.ptr[i].uri.as_ptr() as str, uri) {
+                self.documents.ptr[i].text = String.from_str(text)
+                return
+            }
+            i = i + 1usize
+        }
+        self.documents.push(LspDocument {
+            uri: String.from_str(uri),
+            text: String.from_str(text),
+        })
+    }
+
+    fn get_document(self, uri: str) -> String {
+        var i = 0usize
+        while i < self.documents.len {
+            if str_eq(self.documents.ptr[i].uri.as_ptr() as str, uri) {
+                return self.documents.ptr[i].text
+            }
+            i = i + 1usize
+        }
+        return String.new()
+    }
+
+    fn remove_document(var self, uri: str) {
+        var i = 0usize
+        while i < self.documents.len {
+            if str_eq(self.documents.ptr[i].uri.as_ptr() as str, uri) {
+                // Swap remove
+                let last = self.documents.len - 1usize
+                self.documents.ptr[i] = self.documents.ptr[last]
+                self.documents.len = self.documents.len - 1usize
+                return
+            }
+            i = i + 1usize
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// JSON-RPC Transport Functions (Stdio)
+// ------------------------------------------------------------------------------
+
+fn lsp_send_response(payload: String) {
+    let len = payload.len()
+    var header = String.new()
+    header.push_str("Content-Length: ")
+    header.push_str(int_to_str(len as i32).as_ptr() as str)
+    header.push_str("\r\n\r\n")
+
+    // Direct write to stdout
+    let h_str = header.as_ptr() as str
+    let p_str = payload.as_ptr() as str
+    let hp: *raw u8 = h_str as *raw u8
+    let pp: *raw u8 = p_str as *raw u8
+
+    var i = 0usize
+    let hlen = str_len(h_str)
+    while i < hlen {
+        putchar(hp[i] as i32)
+        i = i + 1usize
+    }
+
+    i = 0usize
+    while i < len {
+        putchar(pp[i] as i32)
+        i = i + 1usize
+    }
+    fflush(0usize as *raw u8) // Flush stdout
+}
+
+fn lsp_send_result(id: i64, result_json: str) {
+    var resp = String.new()
+    resp.push_str("{\"jsonrpc\":\"2.0\",\"id\":")
+    resp.push_str(int_to_str(id as i32).as_ptr() as str)
+    resp.push_str(",\"result\":")
+    resp.push_str(result_json)
+    resp.push_str("}")
+    lsp_send_response(resp)
+}
+
+fn lsp_send_null(id: i64) {
+    lsp_send_result(id, "null")
+}
+
+// ------------------------------------------------------------------------------
+// LSP Request Handlers
+// ------------------------------------------------------------------------------
+
+fn handle_initialize(id: i64) {
+    var res = String.new()
+    res.push_str("{\"capabilities\":{")
+    res.push_str("\"textDocumentSync\":1,")
+    res.push_str("\"hoverProvider\":true,")
+    res.push_str("\"completionProvider\":{\"resolveProvider\":false,\"triggerCharacters\":[\".\",\":\"]},")
+    res.push_str("\"definitionProvider\":true,")
+    res.push_str("\"documentSymbolProvider\":true,")
+    res.push_str("\"documentFormattingProvider\":true")
+    res.push_str("},\"serverInfo\":{\"name\":\"rad-lsp\",\"version\":\"0.2.3\"}}")
+    lsp_send_result(id, res.as_ptr() as str)
+}
+
+// Run compiler diagnostics on in-memory source and publish to client
+fn publish_diagnostics(radc_path: str, uri: str, text: String) {
+    let tmp_file = "/tmp/rad_lsp_check.rad"
+    let tmp_out = "/tmp/rad_lsp_out.json"
+
+    // Write text to temp file
+    write_file_str(tmp_file, text.as_ptr() as str)
+
+    // Run radc --check --error-format=json
+    var cmd = String.new()
+    cmd.push_str(radc_path)
+    cmd.push_str(" ")
+    cmd.push_str(tmp_file)
+    cmd.push_str(" --check --error-format=json > ")
+    cmd.push_str(tmp_out)
+    cmd.push_str(" 2>&1")
+
+    let _st = system(cmd.as_ptr() as str)
+
+    // Read output lines
+    let out_str = read_file_str(tmp_out)
+    let lines = split_source_lines(out_str)
+
+    var diag_array = String.new()
+    diag_array.push_str("[")
+
+    var first = true
+    var li = 0usize
+    while li < lines.len {
+        let l = lines.ptr[li].as_ptr() as str
+        if str_starts_with(l, "{\"code\":") {
+            let code = json_get_string(l, "code")
+            let msg = json_get_string(l, "message")
+            let sev_str = json_get_string(l, "severity")
+            var sev_num = 1
+            if str_eq(sev_str.as_ptr() as str, "warning") {
+                sev_num = 2
+            }
+            let line = json_get_int_field(l, "line")
+            let col = json_get_int_field(l, "col")
+            let end_line = json_get_int_field(l, "end_line")
+            let end_col = json_get_int_field(l, "end_col")
+
+            // LSP uses 0-based lines and characters
+            var l0 = line - 1i64
+            var c0 = col - 1i64
+            var el0 = end_line - 1i64
+            var ec0 = end_col - 1i64
+            if l0 < 0i64 { l0 = 0i64 }
+            if c0 < 0i64 { c0 = 0i64 }
+            if el0 < 0i64 { el0 = 0i64 }
+            if ec0 < 0i64 { ec0 = 0i64 }
+
+            if !first {
+                diag_array.push_str(",")
+            }
+            first = false
+
+            diag_array.push_str("{\"range\":{\"start\":{\"line\":")
+            diag_array.push_str(int_to_str(l0 as i32).as_ptr() as str)
+            diag_array.push_str(",\"character\":")
+            diag_array.push_str(int_to_str(c0 as i32).as_ptr() as str)
+            diag_array.push_str("},\"end\":{\"line\":")
+            diag_array.push_str(int_to_str(el0 as i32).as_ptr() as str)
+            diag_array.push_str(",\"character\":")
+            diag_array.push_str(int_to_str(ec0 as i32).as_ptr() as str)
+            diag_array.push_str("}},\"severity\":")
+            diag_array.push_str(int_to_str(sev_num as i32).as_ptr() as str)
+            diag_array.push_str(",\"code\":\"")
+            diag_array.push_str(code.as_ptr() as str)
+            diag_array.push_str("\",\"source\":\"radc\",\"message\":\"")
+            diag_array.push_str(json_escape_str(msg.as_ptr() as str).as_ptr() as str)
+            diag_array.push_str("\"}")
+        }
+        li = li + 1usize
+    }
+
+    diag_array.push_str("]")
+
+    // Publish notification
+    var notif = String.new()
+    notif.push_str("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"")
+    notif.push_str(uri)
+    notif.push_str("\",\"diagnostics\":")
+    notif.push_str(diag_array.as_ptr() as str)
+    notif.push_str("}}")
+
+    lsp_send_response(notif)
+}
+
+// Find word under cursor at (target_line, target_col) in source text
+fn get_symbol_at_position(text: String, target_line: i64, target_col: i64) -> String {
+    let lines = split_source_lines(text)
+    if (target_line as usize) >= lines.len {
+        return String.new()
+    }
+    let line_str = lines.ptr[target_line as usize].as_ptr() as str
+    let len = str_len(line_str)
+    let p: *raw u8 = line_str as *raw u8
+
+    var c = target_col as usize
+    if c >= len {
+        if len > 0usize {
+            c = len - 1usize
+        } else {
+            return String.new()
+        }
+    }
+
+    // Expand backwards
+    var start = c
+    while start > 0usize && is_alnum_or_underscore(p[start - 1usize]) {
+        start = start - 1usize
+    }
+
+    // Expand forwards
+    var end = c
+    while end < len && is_alnum_or_underscore(p[end]) {
+        end = end + 1usize
+    }
+
+    if start >= end {
+        return String.new()
+    }
+
+    var sym = String.new()
+    var i = start
+    while i < end {
+        sym.push_byte(p[i])
+        i = i + 1usize
+    }
+    return sym
+}
+
+// Hover handler
+fn handle_hover(id: i64, doc_text: String, line: i64, col: i64) {
+    let sym = get_symbol_at_position(doc_text, line, col)
+    let s = sym.as_ptr() as str
+    if str_len(s) == 0usize {
+        lsp_send_null(id)
+        return
+    }
+
+    var md = String.new()
+    if str_eq(s, "fn") {
+        md.push_str("### Keyword `fn`\nDeclares a function or method.\n```rad\nfn name(param: Type) -> RetType { ... }\n```")
+    } else if str_eq(s, "let") {
+        md.push_str("### Keyword `let`\nDeclares an immutable variable (cannot be reassigned).\n```rad\nlet x: i64 = 42\n```")
+    } else if str_eq(s, "var") {
+        md.push_str("### Keyword `var`\nDeclares a mutable variable.\n```rad\nvar count = 0\ncount = count + 1\n```")
+    } else if str_eq(s, "struct") {
+        md.push_str("### Keyword `struct`\nDefines a custom structured type.\n```rad\nstruct Point { x: i64, y: i64 }\n```")
+    } else if str_eq(s, "while") {
+        md.push_str("### Keyword `while`\nLoop statement that executes as long as its condition is true.")
+    } else if str_eq(s, "if") || str_eq(s, "else") {
+        md.push_str("### Conditional `if` / `else`\nBranching control-flow block.")
+    } else if str_eq(s, "println") {
+        md.push_str("### Built-in `println`\n```rad\nfn println(fmt: str, ...)\n```\nPrints formatted output to stdout with a trailing newline.")
+    } else if str_eq(s, "print") {
+        md.push_str("### Built-in `print`\n```rad\nfn print(fmt: str, ...)\n```\nPrints formatted output to stdout without a trailing newline.")
+    } else if str_eq(s, "input") {
+        md.push_str("### Built-in `input`\n```rad\nfn input(prompt: str = \"\") -> String\n```\nReads a line of input from stdin and returns it as a dynamic `String` without trailing newline.")
+    } else if str_eq(s, "i8") || str_eq(s, "i16") || str_eq(s, "i32") || str_eq(s, "i64") || str_eq(s, "isize") {
+        md.push_str("### Primitive Type `")
+        md.push_str(s)
+        md.push_str("`\nSigned integer type.")
+    } else if str_eq(s, "u8") || str_eq(s, "u16") || str_eq(s, "u32") || str_eq(s, "u64") || str_eq(s, "usize") {
+        md.push_str("### Primitive Type `")
+        md.push_str(s)
+        md.push_str("`\nUnsigned integer type.")
+    } else if str_eq(s, "f32") || str_eq(s, "f64") {
+        md.push_str("### Primitive Type `")
+        md.push_str(s)
+        md.push_str("`\nIEEE 754 floating-point number.")
+    } else if str_eq(s, "bool") {
+        md.push_str("### Primitive Type `bool`\nBoolean type (`true` or `false`).")
+    } else if str_eq(s, "str") {
+        md.push_str("### Primitive Type `str`\nImmutable string slice pointer (`*raw u8`).")
+    } else if str_eq(s, "String") {
+        md.push_str("### Standard Type `String`\nDynamically allocated, growable UTF-8 string buffer.")
+    } else if str_eq(s, "Vec") {
+        md.push_str("### Standard Type `Vec<T>`\nDynamically allocated, growable array.")
+    } else {
+        // Search document for declaration of function or struct
+        let lines = split_source_lines(doc_text)
+        var found_decl = false
+        var li = 0usize
+        while li < lines.len {
+            let l = lines.ptr[li].as_ptr() as str
+            let t = trim_line_start(l)
+            if str_starts_with(t, "fn ") {
+                var fn_chk = String.from_str("fn ")
+                fn_chk.push_str(s)
+                if str_starts_with(t, fn_chk.as_ptr() as str) {
+                    md.push_str("```rad\n")
+                    md.push_str(t)
+                    md.push_str("\n```")
+                    found_decl = true
+                    break
+                }
+            } else if str_starts_with(t, "struct ") {
+                var st_chk = String.from_str("struct ")
+                st_chk.push_str(s)
+                if str_starts_with(t, st_chk.as_ptr() as str) {
+                    md.push_str("```rad\n")
+                    md.push_str(t)
+                    md.push_str("\n```")
+                    found_decl = true
+                    break
+                }
+            }
+            li = li + 1usize
+        }
+        if !found_decl {
+            lsp_send_null(id)
+            return
+        }
+    }
+
+    var res = String.new()
+    res.push_str("{\"contents\":{\"kind\":\"markdown\",\"value\":\"")
+    res.push_str(json_escape_str(md.as_ptr() as str).as_ptr() as str)
+    res.push_str("\"}}")
+    lsp_send_result(id, res.as_ptr() as str)
+}
+
+// Autocomplete handler
+fn handle_completion(id: i64, doc_text: String) {
+    var items = String.new()
+    items.push_str("[")
+
+    // Keywords (kind = 14)
+    items.push_str("{\"label\":\"fn\",\"kind\":14,\"detail\":\"function definition\"},")
+    items.push_str("{\"label\":\"let\",\"kind\":14,\"detail\":\"immutable binding\"},")
+    items.push_str("{\"label\":\"var\",\"kind\":14,\"detail\":\"mutable variable\"},")
+    items.push_str("{\"label\":\"struct\",\"kind\":14,\"detail\":\"struct definition\"},")
+    items.push_str("{\"label\":\"if\",\"kind\":14,\"detail\":\"if conditional\"},")
+    items.push_str("{\"label\":\"else\",\"kind\":14,\"detail\":\"else branch\"},")
+    items.push_str("{\"label\":\"while\",\"kind\":14,\"detail\":\"while loop\"},")
+    items.push_str("{\"label\":\"return\",\"kind\":14,\"detail\":\"return from function\"},")
+    items.push_str("{\"label\":\"break\",\"kind\":14,\"detail\":\"break loop\"},")
+    items.push_str("{\"label\":\"continue\",\"kind\":14,\"detail\":\"continue loop\"},")
+    items.push_str("{\"label\":\"as\",\"kind\":14,\"detail\":\"explicit type cast\"},")
+    items.push_str("{\"label\":\"true\",\"kind\":14,\"detail\":\"boolean true\"},")
+    items.push_str("{\"label\":\"false\",\"kind\":14,\"detail\":\"boolean false\"},")
+
+    // Primitive & std types (kind = 7)
+    items.push_str("{\"label\":\"i8\",\"kind\":7,\"detail\":\"8-bit signed int\"},")
+    items.push_str("{\"label\":\"i16\",\"kind\":7,\"detail\":\"16-bit signed int\"},")
+    items.push_str("{\"label\":\"i32\",\"kind\":7,\"detail\":\"32-bit signed int\"},")
+    items.push_str("{\"label\":\"i64\",\"kind\":7,\"detail\":\"64-bit signed int\"},")
+    items.push_str("{\"label\":\"isize\",\"kind\":7,\"detail\":\"pointer-width signed int\"},")
+    items.push_str("{\"label\":\"u8\",\"kind\":7,\"detail\":\"8-bit unsigned int\"},")
+    items.push_str("{\"label\":\"u16\",\"kind\":7,\"detail\":\"16-bit unsigned int\"},")
+    items.push_str("{\"label\":\"u32\",\"kind\":7,\"detail\":\"32-bit unsigned int\"},")
+    items.push_str("{\"label\":\"u64\",\"kind\":7,\"detail\":\"64-bit unsigned int\"},")
+    items.push_str("{\"label\":\"usize\",\"kind\":7,\"detail\":\"pointer-width unsigned int\"},")
+    items.push_str("{\"label\":\"f32\",\"kind\":7,\"detail\":\"32-bit float\"},")
+    items.push_str("{\"label\":\"f64\",\"kind\":7,\"detail\":\"64-bit float\"},")
+    items.push_str("{\"label\":\"bool\",\"kind\":7,\"detail\":\"boolean\"},")
+    items.push_str("{\"label\":\"str\",\"kind\":7,\"detail\":\"string slice pointer\"},")
+    items.push_str("{\"label\":\"String\",\"kind\":7,\"detail\":\"dynamic string\"},")
+    items.push_str("{\"label\":\"Vec\",\"kind\":7,\"detail\":\"dynamic vector\"},")
+
+    // Standard functions (kind = 3)
+    items.push_str("{\"label\":\"println\",\"kind\":3,\"detail\":\"println(fmt, ...)\"},")
+    items.push_str("{\"label\":\"print\",\"kind\":3,\"detail\":\"print(fmt, ...)\"},")
+    items.push_str("{\"label\":\"eprintln\",\"kind\":3,\"detail\":\"eprintln(fmt, ...)\"},")
+    items.push_str("{\"label\":\"malloc\",\"kind\":3,\"detail\":\"malloc(size: usize) -> *raw var u8\"},")
+    items.push_str("{\"label\":\"free\",\"kind\":3,\"detail\":\"free(ptr: *raw u8)\"},")
+    items.push_str("{\"label\":\"swap\",\"kind\":3,\"detail\":\"swap(&mut a, &mut b)\"},")
+    items.push_str("{\"label\":\"input\",\"kind\":3,\"detail\":\"input([prompt]) -> String\"}")
+
+    // Extract user functions and structs defined in document
+    let lines = split_source_lines(doc_text)
+    var li = 0usize
+    while li < lines.len {
+        let l = lines.ptr[li].as_ptr() as str
+        let t = trim_line_start(l)
+        if str_starts_with(t, "fn ") {
+            let p: *raw u8 = t as *raw u8
+            var start = 3usize
+            while start < str_len(t) && is_whitespace_char(p[start]) {
+                start = start + 1usize
+            }
+            var end = start
+            while end < str_len(t) && is_alnum_or_underscore(p[end]) {
+                end = end + 1usize
+            }
+            if end > start {
+                var name = String.new()
+                var k = start
+                while k < end {
+                    name.push_byte(p[k])
+                    k = k + 1usize
+                }
+                items.push_str(",{\"label\":\"")
+                items.push_str(name.as_ptr() as str)
+                items.push_str("\",\"kind\":3,\"detail\":\"user function\"}")
+            }
+        } else if str_starts_with(t, "struct ") {
+            let p: *raw u8 = t as *raw u8
+            var start = 7usize
+            while start < str_len(t) && is_whitespace_char(p[start]) {
+                start = start + 1usize
+            }
+            var end = start
+            while end < str_len(t) && is_alnum_or_underscore(p[end]) {
+                end = end + 1usize
+            }
+            if end > start {
+                var name = String.new()
+                var k = start
+                while k < end {
+                    name.push_byte(p[k])
+                    k = k + 1usize
+                }
+                items.push_str(",{\"label\":\"")
+                items.push_str(name.as_ptr() as str)
+                items.push_str("\",\"kind\":22,\"detail\":\"user struct\"}")
+            }
+        }
+        li = li + 1usize
+    }
+
+    items.push_str("]")
+    lsp_send_result(id, items.as_ptr() as str)
+}
+
+// Go to definition handler
+fn handle_definition(id: i64, uri: str, doc_text: String, line: i64, col: i64) {
+    let sym = get_symbol_at_position(doc_text, line, col)
+    let s = sym.as_ptr() as str
+    if str_len(s) == 0usize {
+        lsp_send_null(id)
+        return
+    }
+
+    let lines = split_source_lines(doc_text)
+    var li = 0usize
+    var found_line = -1i64
+    var found_col = 0i64
+
+    while li < lines.len {
+        let l = lines.ptr[li].as_ptr() as str
+        let t = trim_line_start(l)
+        if str_starts_with(t, "fn ") || str_starts_with(t, "struct ") {
+            let p: *raw u8 = l as *raw u8
+            let llen = str_len(l)
+            var start_offset = 3usize
+            if str_starts_with(t, "struct ") {
+                start_offset = 7usize
+            }
+            // Search s in line
+            var match_idx = 0usize
+            while match_idx + str_len(s) <= llen {
+                var is_matched = true
+                var k = 0usize
+                while k < str_len(s) {
+                    if p[match_idx + k] != (s as *raw u8)[k] {
+                        is_matched = false
+                        break
+                    }
+                    k = k + 1usize
+                }
+                if is_matched {
+                    found_line = li as i64
+                    found_col = match_idx as i64
+                    break
+                }
+                match_idx = match_idx + 1usize
+            }
+            if found_line >= 0i64 {
+                break
+            }
+        }
+        li = li + 1usize
+    }
+
+    if found_line < 0i64 {
+        lsp_send_null(id)
+        return
+    }
+
+    var res = String.new()
+    res.push_str("{\"uri\":\"")
+    res.push_str(uri)
+    res.push_str("\",\"range\":{\"start\":{\"line\":")
+    res.push_str(int_to_str(found_line as i32).as_ptr() as str)
+    res.push_str(",\"character\":")
+    res.push_str(int_to_str(found_col as i32).as_ptr() as str)
+    res.push_str("},\"end\":{\"line\":")
+    res.push_str(int_to_str(found_line as i32).as_ptr() as str)
+    res.push_str(",\"character\":")
+    res.push_str(int_to_str((found_col + (str_len(s) as i64)) as i32).as_ptr() as str)
+    res.push_str("}}}")
+    lsp_send_result(id, res.as_ptr() as str)
+}
+
+// Document Symbols outline handler
+fn handle_document_symbol(id: i64, doc_text: String) {
+    let lines = split_source_lines(doc_text)
+    var syms = String.new()
+    syms.push_str("[")
+
+    var first = true
+    var li = 0usize
+    while li < lines.len {
+        let l = lines.ptr[li].as_ptr() as str
+        let t = trim_line_start(l)
+
+        var is_fn = str_starts_with(t, "fn ")
+        var is_st = str_starts_with(t, "struct ")
+        var is_co = str_starts_with(t, "const ")
+
+        if is_fn || is_st || is_co {
+            var prefix_len = 3usize // "fn "
+            var kind_num = 12 // Function
+            if is_st {
+                prefix_len = 7usize // "struct "
+                kind_num = 23 // Struct
+            } else if is_co {
+                prefix_len = 6usize // "const "
+                kind_num = 14 // Constant
+            }
+
+            let p: *raw u8 = t as *raw u8
+            var start = prefix_len
+            while start < str_len(t) && is_whitespace_char(p[start]) {
+                start = start + 1usize
+            }
+            var end = start
+            while end < str_len(t) && is_alnum_or_underscore(p[end]) {
+                end = end + 1usize
+            }
+
+            if end > start {
+                var sym_name = String.new()
+                var k = start
+                while k < end {
+                    sym_name.push_byte(p[k])
+                    k = k + 1usize
+                }
+
+                if !first {
+                    syms.push_str(",")
+                }
+                first = false
+
+                syms.push_str("{\"name\":\"")
+                syms.push_str(sym_name.as_ptr() as str)
+                syms.push_str("\",\"kind\":")
+                syms.push_str(int_to_str(kind_num).as_ptr() as str)
+                syms.push_str(",\"range\":{\"start\":{\"line\":")
+                syms.push_str(int_to_str(li as i32).as_ptr() as str)
+                syms.push_str(",\"character\":0},\"end\":{\"line\":")
+                syms.push_str(int_to_str(li as i32).as_ptr() as str)
+                syms.push_str(",\"character\":")
+                syms.push_str(int_to_str(str_len(l) as i32).as_ptr() as str)
+                syms.push_str("}},\"selectionRange\":{\"start\":{\"line\":")
+                syms.push_str(int_to_str(li as i32).as_ptr() as str)
+                syms.push_str(",\"character\":")
+                syms.push_str(int_to_str(start as i32).as_ptr() as str)
+                syms.push_str("},\"end\":{\"line\":")
+                syms.push_str(int_to_str(li as i32).as_ptr() as str)
+                syms.push_str(",\"character\":")
+                syms.push_str(int_to_str(end as i32).as_ptr() as str)
+                syms.push_str("}}}")
+            }
+        }
+        li = li + 1usize
+    }
+
+    syms.push_str("]")
+    lsp_send_result(id, syms.as_ptr() as str)
+}
+
+// Formatting handler
+fn handle_formatting(id: i64, doc_text: String) {
+    let formatted = format_rad_source(doc_text)
+    if str_eq(formatted.as_ptr() as str, doc_text.as_ptr() as str) {
+        // Already formatted: return empty edits
+        lsp_send_result(id, "[]")
+        return
+    }
+
+    let lines = split_source_lines(doc_text)
+    var last_line = lines.len
+    var last_char = 0usize
+    if last_line > 0usize {
+        last_line = last_line - 1usize
+        last_char = str_len(lines.ptr[last_line].as_ptr() as str)
+    }
+
+    var res = String.new()
+    res.push_str("[{\"range\":{\"start\":{\"line\":0,\"character\":0},\"end\":{\"line\":")
+    res.push_str(int_to_str(last_line as i32).as_ptr() as str)
+    res.push_str(",\"character\":")
+    res.push_str(int_to_str(last_char as i32).as_ptr() as str)
+    res.push_str("}},\"newText\":\"")
+    res.push_str(json_escape_str(formatted.as_ptr() as str).as_ptr() as str)
+    res.push_str("\"}]")
+
+    lsp_send_result(id, res.as_ptr() as str)
+}
+
+// ------------------------------------------------------------------------------
+// Stdio Message Reader
+// ------------------------------------------------------------------------------
+
+fn read_lsp_message_from_stdin() -> String {
+    // Read headers line by line until "\r\n\r\n"
+    var content_length = 0usize
+    var header_buf = String.new()
+
+    while true {
+        let ch = getchar()
+        if ch < 0 {
+            return String.new() // EOF reached
+        }
+        header_buf.push_byte(ch as u8)
+        let blen = header_buf.len()
+        if blen >= 4usize {
+            let bp = header_buf.as_ptr()
+            if bp[blen - 4usize] == 13u8 && bp[blen - 3usize] == 10u8 &&
+               bp[blen - 2usize] == 13u8 && bp[blen - 1usize] == 10u8 {
+                // End of headers (\r\n\r\n)
+                break
+            }
+        }
+    }
+
+    let h_str = header_buf.as_ptr() as str
+
+    // Parse Content-Length: <n>
+    let cl_tag = "Content-Length: "
+    let tag_idx = json_find_field(h_str, "Content-Length")
+    var cl_ptr = str_starts_with(h_str, cl_tag)
+    let p: *raw u8 = h_str as *raw u8
+    var i = 0usize
+    let hlen = str_len(h_str)
+    while i + 16usize <= hlen {
+        var is_matched = true
+        var k = 0usize
+        let tag_p: *raw u8 = cl_tag as *raw u8
+        while k < 16usize {
+            if p[i + k] != tag_p[k] {
+                is_matched = false
+                break
+            }
+            k = k + 1usize
+        }
+        if is_matched {
+            var num_p = i + 16usize
+            while num_p < hlen && p[num_p] >= 48u8 && p[num_p] <= 57u8 {
+                content_length = content_length * 10usize + ((p[num_p] - 48u8) as usize)
+                num_p = num_p + 1usize
+            }
+            break
+        }
+        i = i + 1usize
+    }
+
+    if content_length == 0usize {
+        return String.new()
+    }
+
+    // Read exactly content_length bytes from stdin
+    var body = String.new()
+    var read_count = 0usize
+    while read_count < content_length {
+        let b = getchar()
+        if b < 0 {
+            break
+        }
+        body.push_byte(b as u8)
+        read_count = read_count + 1usize
+    }
+    return body
+}
+
+// ------------------------------------------------------------------------------
+// Main LSP Server Entry Loop
+// ------------------------------------------------------------------------------
+
+fn run_lsp_server(argv0: str) -> i32 {
+    let radc_path = find_radc_compiler(argv0)
+    var server = LspServer {
+        documents: Vec.new(),
+        radc_path: radc_path,
+        is_shutdown: false,
+    }
+
+    while true {
+        let msg = read_lsp_message_from_stdin()
+        if msg.len() == 0usize {
+            break // EOF reached
+        }
+
+        let json = msg.as_ptr() as str
+        let method = json_get_string(json, "method")
+        let m = method.as_ptr() as str
+        let id = json_get_int_field(json, "id")
+
+        if str_eq(m, "initialize") {
+            handle_initialize(id)
+        } else if str_eq(m, "initialized") {
+            // No response required
+        } else if str_eq(m, "textDocument/didOpen") {
+            let uri = json_get_string(json, "uri")
+            let text = json_get_string(json, "text")
+            let u = uri.as_ptr() as str
+            server.set_document(u, text.as_ptr() as str)
+            publish_diagnostics(server.radc_path.as_ptr() as str, u, text)
+        } else if str_eq(m, "textDocument/didChange") {
+            let uri = json_get_string(json, "uri")
+            let text = json_get_string(json, "text")
+            let u = uri.as_ptr() as str
+            server.set_document(u, text.as_ptr() as str)
+            publish_diagnostics(server.radc_path.as_ptr() as str, u, text)
+        } else if str_eq(m, "textDocument/didClose") {
+            let uri = json_get_string(json, "uri")
+            let u = uri.as_ptr() as str
+            server.remove_document(u)
+            // Clear diagnostics
+            var empty_notif = String.new()
+            empty_notif.push_str("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"")
+            empty_notif.push_str(u)
+            empty_notif.push_str("\",\"diagnostics\":[]}}")
+            lsp_send_response(empty_notif)
+        } else if str_eq(m, "textDocument/hover") {
+            let uri = json_get_string(json, "uri")
+            let line = json_get_int_field(json, "line")
+            let col = json_get_int_field(json, "character")
+            let doc_text = server.get_document(uri.as_ptr() as str)
+            handle_hover(id, doc_text, line, col)
+        } else if str_eq(m, "textDocument/completion") {
+            let uri = json_get_string(json, "uri")
+            let doc_text = server.get_document(uri.as_ptr() as str)
+            handle_completion(id, doc_text)
+        } else if str_eq(m, "textDocument/definition") {
+            let uri = json_get_string(json, "uri")
+            let line = json_get_int_field(json, "line")
+            let col = json_get_int_field(json, "character")
+            let u = uri.as_ptr() as str
+            let doc_text = server.get_document(u)
+            handle_definition(id, u, doc_text, line, col)
+        } else if str_eq(m, "textDocument/documentSymbol") {
+            let uri = json_get_string(json, "uri")
+            let doc_text = server.get_document(uri.as_ptr() as str)
+            handle_document_symbol(id, doc_text)
+        } else if str_eq(m, "textDocument/formatting") {
+            let uri = json_get_string(json, "uri")
+            let doc_text = server.get_document(uri.as_ptr() as str)
+            handle_formatting(id, doc_text)
+        } else if str_eq(m, "shutdown") {
+            server.is_shutdown = true
+            lsp_send_null(id)
+        } else if str_eq(m, "exit") {
+            if server.is_shutdown {
+                return 0
+            }
+            return 1
+        } else if id > 0i64 {
+            // Unhandled request: respond with null
+            lsp_send_null(id)
+        }
+    }
+
+    return 0
+}

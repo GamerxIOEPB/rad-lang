@@ -148,3 +148,31 @@ Here:
 - `argc`: Number of arguments (including program name at index 0).
 - `argv`: Raw pointer to an array of null-terminated C string pointers (`*raw *raw u8`).
 - Returning an integer value sets the Linux process exit status (inspectable via `$?` in bash).
+
+---
+
+## 7.7 Built-In I/O Functions
+
+Rad provides essential I/O functions built directly into the language runtime without requiring imports:
+
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `println` | `fn println(fmt: str, ...)` | Prints formatted output to `stdout` with a trailing newline (`\n`). |
+| `print` | `fn print(fmt: str, ...)` | Prints formatted output to `stdout` **without** a trailing newline and flushes `stdout`. |
+| `input` | `fn input(prompt: str = "") -> String` | Reads a line from `stdin` (blocking) and returns a dynamic heap `String` without trailing newline. |
+| `eprintln` | `fn eprintln(msg: str)` | Prints error message directly to `stderr` (file descriptor 2) with a trailing newline. |
+
+### Example: Interactive Console Dialog
+```rad
+fn main() {
+    print("Username: ")
+    let user = input()
+    let pass = input("Password: ")
+
+    if str_eq(user.as_ptr(), "admin") {
+        println(f"Access granted. Welcome, {user}!")
+    } else {
+        eprintln("Access denied: invalid credentials")
+    }
+}
+```

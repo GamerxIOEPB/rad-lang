@@ -15,6 +15,9 @@ Commands:
   test         Run tests for the package
   check        Analyze package for errors without compiling
   clean        Remove target build directory
+  fmt          Format Rad source files adhering to standard style
+  lsp          Run embedded Language Server Protocol engine (JSON-RPC 2.0)
+  toolchain    Manage and update the Rad toolchain installation
   doctor       Inspect and verify compiler, embedded backend, and sysroot
 ```
 
@@ -104,6 +107,44 @@ Rad Toolchain Doctor
   [OK] Target sysroot (x86_64-unknown-linux-musl): verified at /home/username/.rad/lib/targets/x86_64-unknown-linux-musl
 
 Status: Toolchain is healthy and ready for self-contained native compilation.
+```
+
+### 9. `rad fmt [path] [--check] [--stdout]`
+Runs the native source formatter. Enforces 4-space indentation, Egyptian braces, operator spacing, and blank line rules:
+
+```bash
+# Format in place
+rad fmt src/main.rad
+
+# Check if formatted without modifying files (exits 1 if unformatted)
+rad fmt --check src/
+
+# Preview formatted output directly to stdout
+rad fmt --stdout src/main.rad
+```
+
+### 10. `rad lsp`
+Starts the stdio Language Server Protocol (JSON-RPC 2.0) server for IDE integration:
+
+```bash
+rad lsp
+```
+
+Provides live diagnostics, completions, hover docs, go-to-definition, document outline symbols, and document formatting.
+
+### 11. `rad toolchain <subcommand>`
+Manages and verifies toolchain installations:
+
+```bash
+# Inspect current toolchain details
+rad toolchain info
+
+# Check available toolchain channels
+rad toolchain list
+
+# Check for updates or update to the latest release
+rad toolchain update --check
+rad toolchain update
 ```
 
 ---

@@ -69,6 +69,14 @@ fn str_ends_with(s: str, suffix: str) -> bool {
     return true
 }
 
+extern "C" {
+    fn access(path: str, mode: i32) -> i32;
+}
+
+fn file_exists(path: str) -> bool {
+    return access(path, 0) == 0
+}
+
 fn path_basename(path: str) -> String {
     let len = str_len(path)
     if len == 0usize {
@@ -744,7 +752,7 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     if str_eq(subcmd, "info") {
         println("Rad Toolchain Information")
         println("=========================")
-        println("  Version:         0.2.2")
+        println("  Version:         0.2.3")
         println("  Channel:         stable")
         let rad_home_env = getenv("RAD_HOME")
         if (rad_home_env as usize) != 0usize {
@@ -773,7 +781,8 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
 
     if str_eq(subcmd, "list") {
         println("Available Rad Toolchain Releases:")
-        println("  * 0.2.2 (installed / latest)")
+        println("  * 0.2.3 (installed / latest)")
+        println("  * 0.2.2")
         println("  * 0.2.1")
         println("  * 0.2.0")
         println("  * 0.1.0")
@@ -785,7 +794,7 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
 
     if str_eq(subcmd, "update") {
         var is_check = false
-        var target_version = "0.2.2"
+        var target_version = "0.2.3"
         var i = 3
         while i < argc {
             let arg = argv[i] as str
@@ -800,7 +809,7 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
 
         if is_check {
             println("Checking for Rad toolchain updates...")
-            println("Rad toolchain is up to date (current: v0.2.2).")
+            println("Rad toolchain is up to date (current: v0.2.3).")
             return 0
         }
 
@@ -855,6 +864,111 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
 }
 
 // ------------------------------------------------------------------------------
+// Formatter Driver (`rad fmt`)
+// ------------------------------------------------------------------------------
+
+fn format_single_file(fpath: str, check_only: bool, stdout_mode: bool) -> i32 {
+    let content = read_file_str(fpath)
+    if content.len() == 0usize {
+        println("error: cannot read source file or file is empty")
+        return 1
+    }
+    let formatted = format_rad_source(content)
+    if stdout_mode {
+        let p = formatted.as_ptr() as str
+        let len = formatted.len()
+        let pb: *raw u8 = p as *raw u8
+        var i = 0usize
+        while i < len {
+            putchar(pb[i] as i32)
+            i = i + 1usize
+        }
+        return 0
+    }
+    let is_diff = !str_eq(content.as_ptr() as str, formatted.as_ptr() as str)
+    if check_only {
+        if is_diff {
+            var msg = String.new()
+            msg.push_str("Diff in ")
+            msg.push_str(fpath)
+            msg.push_str(": formatting needed")
+            println(msg.as_ptr() as str)
+            return 1
+        }
+        return 0
+    }
+    if is_diff {
+        write_file_str(fpath, formatted.as_ptr() as str)
+        var msg = String.new()
+        msg.push_str("Formatted ")
+        msg.push_str(fpath)
+        println(msg.as_ptr() as str)
+    }
+    return 0
+}
+
+fn cmd_fmt(argc: i32, argv: *raw *raw u8) -> i32 {
+    var check_only = false
+    var stdout_mode = false
+    var target_path = ""
+    var i = 2
+    while i < argc {
+        let arg = argv[i] as str
+        if str_eq(arg, "--check") {
+            check_only = true
+        } else if str_eq(arg, "--stdout") {
+            stdout_mode = true
+        } else if !str_starts_with(arg, "-") {
+            target_path = arg
+        }
+        i = i + 1
+    }
+
+    if str_len(target_path) > 0usize && str_ends_with(target_path, ".rad") {
+        return format_single_file(target_path, check_only, stdout_mode)
+    }
+
+    var search_dir = "."
+    if str_len(target_path) > 0usize {
+        search_dir = target_path
+    } else if file_exists("src") {
+        search_dir = "src"
+    }
+
+    var find_cmd = String.new()
+    find_cmd.push_str("find ")
+    find_cmd.push_str(search_dir)
+    find_cmd.push_str(" -type f -name '*.rad' > /tmp/rad_fmt_list.txt 2>/dev/null")
+    find_cmd.push_byte(0u8)
+    system(find_cmd.as_ptr() as str)
+
+    let flist = read_file_str("/tmp/rad_fmt_list.txt")
+    let lines = split_source_lines(flist)
+    let _ = remove("/tmp/rad_fmt_list.txt")
+
+    if lines.len == 0usize {
+        if !check_only && !stdout_mode {
+            println("No .rad files found to format.")
+        }
+        return 0
+    }
+
+    var any_diff = 0
+    var fi = 0usize
+    while fi < lines.len {
+        let f = lines.ptr[fi].as_ptr() as str
+        if str_len(f) > 0usize {
+            let st = format_single_file(f, check_only, stdout_mode)
+            if st != 0 {
+                any_diff = 1
+            }
+        }
+        fi = fi + 1usize
+    }
+    return any_diff
+}
+
+// ------------------------------------------------------------------------------
 // Main CLI Driver
 // ------------------------------------------------------------------------------
 
@@ -862,7 +976,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let argv0 = argv[0] as str
 
     if argc < 2 {
-        println("Rad Package Manager (rad) v0.2.2")
+        println("Rad Package Manager (rad) v0.2.3")
         println("Usage: rad <command> [options]")
         println("")
         println("Commands:")
@@ -872,6 +986,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  run          Build and execute the current package")
         println("  test         Run tests for the package")
         println("  check        Analyze package for errors without compiling")
+        println("  fmt          Format Rad source files in-place or check formatting")
+        println("  lsp          Run Language Server Protocol server over stdio")
         println("  clean        Remove target build directory")
         println("  doctor       Inspect and verify bundled toolchain and target sysroot")
         println("  toolchain    Manage Rad toolchain versions and updates")
@@ -881,14 +997,14 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let cmd = argv[1] as str
 
     if str_eq(cmd, "--help") || str_eq(cmd, "-h") || str_eq(cmd, "help") {
-        println("Rad Package Manager (rad) v0.2.2")
+        println("Rad Package Manager (rad) v0.2.3")
         println("Usage: rad <command> [options]")
-        println("Commands: new, init, build, run, test, check, clean, doctor, toolchain")
+        println("Commands: new, init, build, run, test, check, fmt, lsp, clean, doctor, toolchain")
         return 0
     }
 
     if str_eq(cmd, "--version") || str_eq(cmd, "-V") || str_eq(cmd, "version") {
-        println("rad 0.2.2 (x86_64-linux)")
+        println("rad 0.2.3 (x86_64-linux)")
         return 0
     }
 
@@ -972,6 +1088,14 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
 
     if str_eq(cmd, "doctor") {
         return cmd_doctor(argv0)
+    }
+
+    if str_eq(cmd, "fmt") {
+        return cmd_fmt(argc, argv)
+    }
+
+    if str_eq(cmd, "lsp") {
+        return run_lsp_server(argv0)
     }
 
     if str_eq(cmd, "toolchain") {

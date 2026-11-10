@@ -1,0 +1,586 @@
+// ==============================================================================
+// src/tools/rad_pm/src/fmt.rad — Native Rad Source Code Formatter Engine
+// ==============================================================================
+
+fn is_whitespace_char(b: u8) -> bool {
+    return b == 32u8 || b == 9u8 || b == 13u8 // ' ', '\t', '\r'
+}
+
+fn is_alnum_or_underscore(b: u8) -> bool {
+    return (b >= 97u8 && b <= 122u8) || (b >= 65u8 && b <= 90u8) || (b >= 48u8 && b <= 57u8) || b == 95u8
+}
+
+// Get the last character of a String
+fn string_last_byte(s: String) -> u8 {
+    let l = s.len()
+    if l == 0usize {
+        return 0u8
+    }
+    let p: *raw u8 = s.as_ptr() as *raw u8
+    return p[l - 1usize]
+}
+
+// Trim leading whitespace from a line
+fn trim_line_start(line: str) -> str {
+    var p: *raw u8 = line as *raw u8
+    var i = 0usize
+    let len = str_len(line)
+    while i < len && is_whitespace_char(p[i]) {
+        i = i + 1usize
+    }
+    return (p as usize + i) as str
+}
+
+// Trim trailing whitespace from a string, returning a new String
+fn trim_line_end(line: str) -> String {
+    let len = str_len(line)
+    if len == 0usize {
+        return String.new()
+    }
+    let p: *raw u8 = line as *raw u8
+    var end_idx = len
+    while end_idx > 0usize && is_whitespace_char(p[end_idx - 1usize]) {
+        end_idx = end_idx - 1usize
+    }
+    var res = String.new()
+    var i = 0usize
+    while i < end_idx {
+        res.push_byte(p[i])
+        i = i + 1usize
+    }
+    return res
+}
+
+// Trim trailing spaces from a String
+fn trim_trailing_space(s: String) -> String {
+    let l = s.len()
+    if l == 0usize {
+        return s
+    }
+    let p: *raw u8 = s.as_ptr() as *raw u8
+    var end_idx = l
+    while end_idx > 0usize && p[end_idx - 1usize] == 32u8 {
+        end_idx = end_idx - 1usize
+    }
+    if end_idx == l {
+        return s
+    }
+    var res = String.new()
+    var i = 0usize
+    while i < end_idx {
+        res.push_byte(p[i])
+        i = i + 1usize
+    }
+    return res
+}
+
+// Splits source string into lines (without trailing newlines)
+fn split_source_lines(src: String) -> Vec<String> {
+    var lines = Vec.new()
+    let p = src.as_ptr()
+    let len = src.len()
+    var i = 0usize
+    var line = String.new()
+    while i < len {
+        let b = p[i]
+        if b == 10u8 { // '\n'
+            lines.push(line)
+            line = String.new()
+        } else if b != 13u8 { // ignore '\r'
+            line.push_byte(b)
+        }
+        i = i + 1usize
+    }
+    if line.len() > 0usize {
+        lines.push(line)
+    }
+    return lines
+}
+
+fn res_ends_with_keyword(s: String) -> bool {
+    let str_val = s.as_ptr() as str
+    return str_ends_with(str_val, "if") || str_ends_with(str_val, "while") ||
+           str_ends_with(str_val, "for") || str_ends_with(str_val, "match") ||
+           str_ends_with(str_val, "return")
+}
+
+// Format an individual line's content (normalize spacing around operators, commas, colons)
+fn format_line_tokens(line: str) -> String {
+    let raw_trimmed = trim_line_start(line)
+    let trimmed = trim_line_end(raw_trimmed)
+    let s = trimmed.as_ptr() as str
+    let len = str_len(s)
+    if len == 0usize {
+        return String.new()
+    }
+
+    let p: *raw u8 = s as *raw u8
+
+    // If the line starts with a comment, preserve its internal formatting exactly
+    if str_starts_with(s, "//") || str_starts_with(s, "/*") {
+        return String.from_str(s)
+    }
+
+    var res = String.new()
+    var i = 0usize
+    var in_str = false
+    var in_char = false
+
+    while i < len {
+        let b = p[i]
+
+        // Inside string or char literal: preserve exact characters
+        if in_str {
+            res.push_byte(b)
+            if b == 92u8 && i + 1usize < len { // escape sequence '\\'
+                i = i + 1usize
+                res.push_byte(p[i])
+            } else if b == 34u8 { // closing '"'
+                in_str = false
+            }
+            i = i + 1usize
+            continue
+        }
+
+        if in_char {
+            res.push_byte(b)
+            if b == 92u8 && i + 1usize < len {
+                i = i + 1usize
+                res.push_byte(p[i])
+            } else if b == 39u8 { // closing '\''
+                in_char = false
+            }
+            i = i + 1usize
+            continue
+        }
+
+        // Check for entering string or char literal
+        if b == 34u8 || (b == 102u8 && i + 1usize < len && p[i + 1usize] == 34u8) { // '"' or 'f"'
+            if b == 102u8 {
+                res.push_byte(102u8)
+                i = i + 1usize
+            }
+            res.push_byte(34u8)
+            in_str = true
+            i = i + 1usize
+            continue
+        }
+        if b == 39u8 { // '\''
+            res.push_byte(39u8)
+            in_char = true
+            i = i + 1usize
+            continue
+        }
+
+        // Check for inline line comment //
+        if b == 47u8 && i + 1usize < len && p[i + 1usize] == 47u8 {
+            res = trim_trailing_space(res)
+            if res.len() > 0usize {
+                res.push_byte(32u8)
+            }
+            while i < len {
+                res.push_byte(p[i])
+                i = i + 1usize
+            }
+            break
+        }
+
+        // Multi-char operators: ==, !=, <=, >=, &&, ||, ->, =>, +=, -=, *=, /=
+        if i + 1usize < len {
+            let next_b = p[i + 1usize]
+            if (b == 61u8 && next_b == 61u8) || // ==
+               (b == 33u8 && next_b == 61u8) || // !=
+               (b == 60u8 && next_b == 61u8) || // <=
+               (b == 62u8 && next_b == 61u8) || // >=
+               (b == 38u8 && next_b == 38u8) || // &&
+               (b == 124u8 && next_b == 124u8) || // ||
+               (b == 45u8 && next_b == 62u8) || // ->
+               (b == 61u8 && next_b == 62u8) || // =>
+               (b == 43u8 && next_b == 61u8) || // +=
+               (b == 45u8 && next_b == 61u8) || // -=
+               (b == 42u8 && next_b == 61u8) || // *=
+               (b == 47u8 && next_b == 61u8) {  // /=
+                res = trim_trailing_space(res)
+                if res.len() > 0usize {
+                    res.push_byte(32u8)
+                }
+                res.push_byte(b)
+                res.push_byte(next_b)
+                res.push_byte(32u8)
+                i = i + 2usize
+                while i < len && is_whitespace_char(p[i]) {
+                    i = i + 1usize
+                }
+                continue
+            }
+            if b == 58u8 && next_b == 58u8 { // :: (scope resolution: no space)
+                res = trim_trailing_space(res)
+                res.push_byte(58u8)
+                res.push_byte(58u8)
+                i = i + 2usize
+                continue
+            }
+            if b == 46u8 && next_b == 46u8 { // .. (range: no space)
+                res = trim_trailing_space(res)
+                res.push_byte(46u8)
+                res.push_byte(46u8)
+                i = i + 2usize
+                continue
+            }
+        }
+
+        // Single character operators: =, +, %
+        if b == 61u8 || b == 43u8 || b == 37u8 { // '=', '+', '%'
+            res = trim_trailing_space(res)
+            if res.len() > 0usize {
+                res.push_byte(32u8)
+            }
+            res.push_byte(b)
+            res.push_byte(32u8)
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            continue
+        }
+
+        // Single '*' or '/'
+        if b == 42u8 || b == 47u8 {
+            // Check for raw pointer modifier '*raw'
+            if b == 42u8 && i + 4usize <= len && p[i + 1usize] == 114u8 && p[i + 2usize] == 97u8 && p[i + 3usize] == 119u8 { // "*raw"
+                res.push_byte(42u8)
+                i = i + 1usize
+                continue
+            }
+            res = trim_trailing_space(res)
+            let lb = string_last_byte(res)
+            if res.len() > 0usize && lb != 40u8 && lb != 91u8 {
+                res.push_byte(32u8)
+            }
+            res.push_byte(b)
+            res.push_byte(32u8)
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            continue
+        }
+
+        // Single '-'
+        if b == 45u8 {
+            var is_unary = false
+            let lb = string_last_byte(trim_trailing_space(res))
+            if lb == 0u8 || lb == 40u8 || lb == 91u8 || lb == 123u8 || lb == 61u8 || lb == 44u8 || lb == 58u8 {
+                is_unary = true
+            }
+            if !is_unary {
+                res = trim_trailing_space(res)
+                if res.len() > 0usize {
+                    res.push_byte(32u8)
+                }
+                res.push_byte(45u8)
+                res.push_byte(32u8)
+            } else {
+                res.push_byte(45u8)
+            }
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            continue
+        }
+
+        // Single '<' and '>'
+        if b == 60u8 || b == 62u8 {
+            res = trim_trailing_space(res)
+            let lb = string_last_byte(res)
+            if res.len() > 0usize && lb != 58u8 {
+                res.push_byte(32u8)
+            }
+            res.push_byte(b)
+            res.push_byte(32u8)
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            continue
+        }
+
+        // Commas: ', '
+        if b == 44u8 {
+            res = trim_trailing_space(res)
+            res.push_byte(44u8)
+            res.push_byte(32u8)
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            continue
+        }
+
+        // Colons: ': '
+        if b == 58u8 {
+            res = trim_trailing_space(res)
+            res.push_byte(58u8)
+            res.push_byte(32u8)
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            continue
+        }
+
+        // Parentheses: '('
+        if b == 40u8 {
+            let t = trim_trailing_space(res)
+            if res_ends_with_keyword(t) {
+                res = t
+                res.push_byte(32u8)
+            } else {
+                res = t
+            }
+            res.push_byte(40u8)
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            continue
+        }
+
+        // Parentheses: ')' and ']'
+        if b == 41u8 || b == 93u8 {
+            res = trim_trailing_space(res)
+            res.push_byte(b)
+            i = i + 1usize
+            continue
+        }
+
+        // Opening brace '{'
+        if b == 123u8 {
+            res = trim_trailing_space(res)
+            if res.len() > 0usize && string_last_byte(res) != 123u8 {
+                res.push_byte(32u8)
+            }
+            res.push_byte(123u8)
+            i = i + 1usize
+            continue
+        }
+
+        // Closing brace '}'
+        if b == 125u8 {
+            res = trim_trailing_space(res)
+            res.push_byte(125u8)
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            if i < len && is_alnum_or_underscore(p[i]) {
+                res.push_byte(32u8)
+            }
+            continue
+        }
+
+        // Semicolons: ';'
+        if b == 59u8 {
+            res = trim_trailing_space(res)
+            res.push_byte(59u8)
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            if i < len {
+                res.push_byte(32u8)
+            }
+            continue
+        }
+
+        // Whitespace handling
+        if is_whitespace_char(b) {
+            let lb = string_last_byte(res)
+            if lb != 0u8 && lb != 32u8 && lb != 40u8 && lb != 91u8 {
+                var ni = i + 1usize
+                while ni < len && is_whitespace_char(p[ni]) {
+                    ni = ni + 1usize
+                }
+                if ni < len {
+                    let nb = p[ni]
+                    if nb != 41u8 && nb != 93u8 && nb != 59u8 && nb != 44u8 {
+                        res.push_byte(32u8)
+                    }
+                }
+            }
+            i = i + 1usize
+            while i < len && is_whitespace_char(p[i]) {
+                i = i + 1usize
+            }
+            continue
+        }
+
+        // Normal character (identifier, number, etc.)
+        res.push_byte(b)
+        i = i + 1usize
+    }
+
+    return trim_trailing_space(res)
+}
+
+// Check if a line closes a block ('}' or '} else ...')
+fn line_starts_with_close_brace(line: str) -> bool {
+    let t = trim_line_start(line)
+    return str_starts_with(t, "}")
+}
+
+// Count brace depth changes on a line
+fn line_brace_delta(line: str) -> i64 {
+    let len = str_len(line)
+    let p: *raw u8 = line as *raw u8
+    var i = 0usize
+    var delta = 0i64
+    var in_str = false
+    var in_char = false
+
+    while i < len {
+        let b = p[i]
+        if in_str {
+            if b == 92u8 && i + 1usize < len {
+                i = i + 2usize
+                continue
+            }
+            if b == 34u8 {
+                in_str = false
+            }
+            i = i + 1usize
+            continue
+        }
+        if in_char {
+            if b == 92u8 && i + 1usize < len {
+                i = i + 2usize
+                continue
+            }
+            if b == 39u8 {
+                in_char = false
+            }
+            i = i + 1usize
+            continue
+        }
+        if b == 34u8 {
+            in_str = true
+            i = i + 1usize
+            continue
+        }
+        if b == 39u8 {
+            in_char = true
+            i = i + 1usize
+            continue
+        }
+        if b == 47u8 && i + 1usize < len && p[i + 1usize] == 47u8 {
+            break // line comment
+        }
+        if b == 123u8 { // '{'
+            delta = delta + 1i64
+        } else if b == 125u8 { // '}'
+            delta = delta - 1i64
+        }
+        i = i + 1usize
+    }
+    return delta
+}
+
+// Primary formatting function
+fn format_rad_source(source: String) -> String {
+    let raw_lines = split_source_lines(source)
+    var lines = Vec.new()
+
+    // Pass 1: Egyptian brace unification (join standalone '{' to previous line, join '} else' lines)
+    var li = 0usize
+    while li < raw_lines.len {
+        let cur = raw_lines.ptr[li].as_ptr() as str
+        let cur_trimmed = trim_line_start(cur)
+        let cur_end = trim_line_end(cur_trimmed)
+        let cur_clean = cur_end.as_ptr() as str
+
+        // If current line is standalone '{', join to previous line
+        if str_eq(cur_clean, "{") && lines.len > 0usize {
+            let prev_idx = lines.len - 1usize
+            var prev_str = lines.ptr[prev_idx]
+            var new_prev = trim_line_end(prev_str.as_ptr() as str)
+            new_prev.push_str(" {")
+            lines.ptr[prev_idx] = new_prev
+            li = li + 1usize
+            continue
+        }
+
+        // If current line starts with 'else' or 'else if' and previous line ends with '}', join: '} else ...'
+        if str_starts_with(cur_clean, "else") && lines.len > 0usize {
+            let prev_idx = lines.len - 1usize
+            let prev_str = lines.ptr[prev_idx]
+            let prev_trimmed = trim_line_end(trim_line_start(prev_str.as_ptr() as str))
+            if str_eq(prev_trimmed.as_ptr() as str, "}") {
+                var joined = String.from_str("} ")
+                joined.push_str(cur_clean)
+                lines.ptr[prev_idx] = joined
+                li = li + 1usize
+                continue
+            }
+        }
+
+        lines.push(raw_lines.ptr[li])
+        li = li + 1usize
+    }
+
+    // Pass 2: Apply 4-space indentation and line token formatting
+    var out = String.new()
+    var indent_level = 0i64
+    var consecutive_blanks = 0i64
+
+    li = 0usize
+    while li < lines.len {
+        let raw_line = lines.ptr[li].as_ptr() as str
+        let trimmed_start = trim_line_start(raw_line)
+        let trimmed = trim_line_end(trimmed_start)
+        let t_str = trimmed.as_ptr() as str
+
+        // Handle blank lines
+        if str_len(t_str) == 0usize {
+            consecutive_blanks = consecutive_blanks + 1i64
+            if consecutive_blanks <= 1i64 && out.len() > 0usize {
+                out.push_byte(10u8) // '\n'
+            }
+            li = li + 1usize
+            continue
+        }
+        consecutive_blanks = 0i64
+
+        // If line starts with '}', decrease indent before formatting the line
+        var line_indent = indent_level
+        if line_starts_with_close_brace(t_str) {
+            line_indent = line_indent - 1i64
+            if line_indent < 0i64 {
+                line_indent = 0i64
+            }
+        }
+
+        // Write indentation (4 spaces per level)
+        var sp_i = 0i64
+        while sp_i < line_indent * 4i64 {
+            out.push_byte(32u8) // ' '
+            sp_i = sp_i + 1i64
+        }
+
+        // Format line content
+        let formatted_line = format_line_tokens(t_str)
+        out.push_str(formatted_line.as_ptr() as str)
+        out.push_byte(10u8) // '\n'
+
+        // Update running indent level based on net braces
+        let delta = line_brace_delta(t_str)
+        indent_level = indent_level + delta
+        if indent_level < 0i64 {
+            indent_level = 0i64
+        }
+
+        li = li + 1usize
+    }
+
+    return out
+}

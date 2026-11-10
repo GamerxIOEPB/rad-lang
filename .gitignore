@@ -15,3 +15,5 @@ rad_tests/rad_arcade/*/raycaster
 rad_tests/rad_arcade/*/snake
 rad_tests/rad_arcade/*/pong
 rad_tests/rad_arcade/*/breakout
+editors/vscode-rad/node_modules
+editors/vscode-rad/dist/*.map

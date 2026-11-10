@@ -25,8 +25,8 @@ radc --version
 
 Expected output:
 ```text
-rad 0.2.0 (x86_64-unknown-linux-gnu)
-radc 0.2.0 (self-hosted x86_64-unknown-linux-gnu)
+rad 0.2.3 (x86_64-linux)
+radc 0.2.3 (self-hosted x86_64-linux)
 ```
 
 ---

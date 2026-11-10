@@ -103,31 +103,81 @@ Remaining count: 2
 
 ## 10.3 Standard Output Printing (`print`, `println`)
 
-Rad provides built-in `print()` and `println()` functions that accept strings, integers, and primitive values:
+Rad provides two core standard output printing built-ins:
+- **`println(...)`**: Prints formatted output followed by a trailing newline (`\n`).
+- **`print(...)`**: Prints formatted output **without** a trailing newline, and automatically flushes `stdout` immediately. This is ideal for terminal prompts and continuous output on a single line.
 
 ```rad
-fn main() -> i32 {
-    let title: str = "Player Status"
-    let score: i64 = 4500
-    let alive: bool = true
+fn main() {
+    print("Enter your name: ") // Flushes immediately without newline
+    let name = input()
+    println(f"Hello, {name}!") // Appends newline
+}
+```
 
-    println(title)
-    print("Score: ")
-    println(score)
+Both `print` and `println` support single values, dynamic `String` instances, formatted strings with positional `{}` placeholders, and Python-style f-strings `f"..."`.
 
-    if alive {
-        println("Status: ALIVE")
-    }
-    return 0
+### 1. Printing Dynamic `String` Instances
+You can pass heap-allocated `String` instances directly into `print()` and `println()` without needing to manually call `.as_ptr()`:
+
+```rad
+fn main() {
+    let s = String::from_str("Hello, World!")
+    println(s)
+}
+```
+
+### 2. F-String Interpolation (`f"..."`)
+Rad provides Python-style f-strings for concise variable and struct field interpolation directly inside string literals:
+
+```rad
+struct Player {
+    name: str,
+    score: i64,
+}
+
+fn main() {
+    let p = Player { name: "Abhinav", score: 9500 }
+    
+    // In-string variable and field interpolation
+    println(f"Player {p.name} reached score {p.score}!")
 }
 ```
 
 Output:
 ```text
-Player Status
-Score: 4500
-Status: ALIVE
+Player Abhinav reached score 9500!
 ```
+
+> [!NOTE]
+> Only string literals prefixed with `f` (such as `f"Hello {name}"`) trigger expression interpolation. Plain string literals without `f` preserve `{...}` as literal brace characters.
+
+### 3. Positional Placeholders (`"{}"`)
+You can pass positional placeholder arguments matching `{}` tokens in the format string:
+
+```rad
+fn main() {
+    let x = 10
+    let y = 20
+    println("Coordinates: ({}, {})", x, y)
+}
+```
+
+Output:
+```text
+Coordinates: (10, 20)
+```
+
+### 4. Escape Sequences
+Rad string literals support standard escape sequences:
+- `\n` (newline, ASCII 10)
+- `\t` (horizontal tab, ASCII 9)
+- `\r` (carriage return, ASCII 13)
+- `\0` (null terminator, ASCII 0)
+- `\e` (escape character, ASCII 27 / `0x1B` for ANSI terminal styling)
+- `\"` (escaped quotation mark)
+- `\\` (escaped backslash)
+- `\xNN` (hexadecimal byte value, e.g. `\x1B[1;32m` for colored terminal output)
 
 ---
 
@@ -146,3 +196,37 @@ fn main() -> i32 {
     return 0
 }
 ```
+
+---
+
+## 10.5 Standard Input (`input`)
+
+Rad features a built-in native `input()` function that reads a line of input from `stdin` until a newline (`\n`) or EOF is encountered. It returns the input as a dynamic heap-allocated `String` with trailing `\n` and `\r` characters stripped.
+
+### Signatures:
+- **`input() -> String`**: Reads from `stdin`.
+- **`input(prompt: str) -> String`**: Displays the specified prompt without trailing newline, flushes `stdout`, and waits for user input.
+
+```rad
+fn main() {
+    // 1. input() without prompt
+    print("What is your name? ")
+    let name = input()
+
+    // 2. input(prompt) with integrated prompt
+    let age_str = input("How old are you? ")
+
+    println(f"Welcome, {name}! You are {age_str} years old.")
+    println(f"Name length: {name.len()} characters")
+}
+```
+
+Example terminal session:
+```text
+What is your name? Alice
+How old are you? 25
+Welcome, Alice! You are 25 years old.
+Name length: 5 characters
+```
+
+The compiler automatically infers the variable type as `String` when initialized with `input()`, and the returned `String` can be passed directly to `print()`, `println()`, or manipulated with `.len()`, `.push_str()`, etc.

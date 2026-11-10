@@ -68,6 +68,7 @@ const TOK_AMP: i32 = 67       // &
 const TOK_PIPE: i32 = 68      // |
 const TOK_CARET: i32 = 69     // ^
 const TOK_TILDE: i32 = 70     // ~
+const TOK_ERROR: i32 = 99     // Lexer error
 
 struct Token {
     kind: i32,
@@ -75,6 +76,24 @@ struct Token {
     int_val: i64,
     line: i64,
     col: i64,
+    len: i64,
+}
+
+fn is_hex_digit(b: u8) -> bool {
+    return (b >= 48u8 && b <= 57u8) || (b >= 97u8 && b <= 102u8) || (b >= 65u8 && b <= 70u8)
+}
+
+fn hex_val(b: u8) -> u8 {
+    if b >= 48u8 && b <= 57u8 {
+        return b - 48u8
+    }
+    if b >= 97u8 && b <= 102u8 {
+        return (b - 97u8) + 10u8
+    }
+    if b >= 65u8 && b <= 70u8 {
+        return (b - 65u8) + 10u8
+    }
+    return 0u8
 }
 
 fn lex_source(src: String) -> Vec<Token> {
@@ -87,6 +106,9 @@ fn lex_source(src: String) -> Vec<Token> {
 
     while i < len {
         let ch = p[i]
+        if ch == 0u8 {
+            break
+        }
         if ch == 10u8 { // '\n'
             cur_line = cur_line + 1i64
             cur_col = 1i64
@@ -102,6 +124,8 @@ fn lex_source(src: String) -> Vec<Token> {
             }
         } else if ch == 47u8 && i + 1usize < len && p[i + 1usize] == 42u8 {
             // Block comment /* ... */
+            let start_line = cur_line
+            let start_col = cur_col
             i = i + 2usize
             cur_col = cur_col + 2i64
             while i + 1usize < len && !(p[i] == 42u8 && p[i + 1usize] == 47u8) {
@@ -116,12 +140,101 @@ fn lex_source(src: String) -> Vec<Token> {
             if i + 1usize < len {
                 i = i + 2usize
                 cur_col = cur_col + 2i64
+            } else {
+                tokens.push(Token {
+                    kind: TOK_ERROR,
+                    text: String.from_str("E0004: unterminated block comment"),
+                    int_val: 0i64,
+                    line: start_line,
+                    col: start_col,
+                    len: 2i64,
+                })
             }
         } else {
             let tok_line = cur_line + 0i64
             let tok_col = cur_col + 0i64
 
-            if is_alpha(ch) {
+            if (ch == 102u8 && i + 1usize < len && p[i + 1usize] == 34u8) || ch == 34u8 { // f"..." or "..."
+                var is_fstring = false
+                if ch == 102u8 {
+                    is_fstring = true
+                    i = i + 1usize // skip 'f'
+                    cur_col = cur_col + 1i64
+                }
+                i = i + 1usize // skip opening quote
+                cur_col = cur_col + 1i64
+                var str_lit = String.new()
+                var hex_err = false
+                while i < len && p[i] != 34u8 && p[i] != 10u8 {
+                    if p[i] == 92u8 && i + 1usize < len { // '\\'
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                        if p[i] == 110u8 {
+                            str_lit.push_byte(10u8) // '\n'
+                        } else if p[i] == 116u8 {
+                            str_lit.push_byte(9u8)  // '\t'
+                        } else if p[i] == 114u8 {
+                            str_lit.push_byte(13u8) // '\r'
+                        } else if p[i] == 48u8 {
+                            str_lit.push_byte(0u8)  // '\0'
+                        } else if p[i] == 101u8 {   // '\e'
+                            str_lit.push_byte(27u8) // ESC (0x1B)
+                        } else if p[i] == 120u8 {   // '\xNN'
+                            if i + 2usize < len && is_hex_digit(p[i + 1usize]) && is_hex_digit(p[i + 2usize]) {
+                                let h1 = p[i + 1usize]
+                                let h2 = p[i + 2usize]
+                                let val = hex_val(h1) * 16u8 + hex_val(h2)
+                                str_lit.push_byte(val)
+                                i = i + 2usize
+                                cur_col = cur_col + 2i64
+                            } else {
+                                hex_err = true
+                                break
+                            }
+                        } else {
+                            str_lit.push_byte(p[i])
+                        }
+                    } else {
+                        str_lit.push_byte(p[i])
+                    }
+                    i = i + 1usize
+                    cur_col = cur_col + 1i64
+                }
+                if hex_err {
+                    tokens.push(Token {
+                        kind: TOK_ERROR,
+                        text: String.from_str("E0005: invalid hex escape sequence"),
+                        int_val: 0i64,
+                        line: tok_line,
+                        col: tok_col,
+                        len: (cur_col - tok_col) as i64,
+                    })
+                } else if i < len && p[i] == 34u8 {
+                    i = i + 1usize // skip closing quote
+                    cur_col = cur_col + 1i64
+                    str_lit.push_byte(0u8)
+                    let tok_len = (cur_col - tok_col) as i64
+                    var f_flag: i64 = 0
+                    if is_fstring { f_flag = 1 }
+                    tokens.push(Token {
+                        kind: TOK_STR,
+                        text: str_lit,
+                        int_val: f_flag,
+                        line: tok_line,
+                        col: tok_col,
+                        len: tok_len,
+                    })
+                } else {
+                    tokens.push(Token {
+                        kind: TOK_ERROR,
+                        text: String.from_str("E0002: unterminated string literal"),
+                        int_val: 0i64,
+                        line: tok_line,
+                        col: tok_col,
+                        len: (cur_col - tok_col) as i64,
+                    })
+                }
+            } else if is_alpha(ch) {
                 var id = String.new()
                 while i < len && is_alnum(p[i]) {
                     id.push_byte(p[i])
@@ -175,12 +288,14 @@ fn lex_source(src: String) -> Vec<Token> {
                     k = TOK_IN
                 }
 
+                let tok_len = (cur_col - tok_col) as i64
                 tokens.push(Token {
                     kind: k,
                     text: id,
                     int_val: 0i64,
                     line: tok_line,
                     col: tok_col,
+                    len: tok_len,
                 })
             } else if is_digit(ch) {
                 var num_str = String.new()
@@ -238,18 +353,21 @@ fn lex_source(src: String) -> Vec<Token> {
                     tk = TOK_FLOAT
                 }
 
+                let tok_len = (cur_col - tok_col) as i64
                 tokens.push(Token {
                     kind: tk,
                     text: num_str,
                     int_val: tok_val,
                     line: tok_line,
                     col: tok_col,
+                    len: tok_len,
                 })
             } else if ch == 39u8 { // '\'' char literal
                 i = i + 1usize
                 cur_col = cur_col + 1i64
                 var char_val = 0i64
-                if i < len {
+                var closed = false
+                if i < len && p[i] != 39u8 && p[i] != 10u8 {
                     if p[i] == 92u8 && i + 1usize < len { // '\\'
                         i = i + 1usize
                         cur_col = cur_col + 1i64
@@ -273,86 +391,33 @@ fn lex_source(src: String) -> Vec<Token> {
                 if i < len && p[i] == 39u8 {
                     i = i + 1usize
                     cur_col = cur_col + 1i64
+                    closed = true
                 }
-                var c_str = String.new()
-                c_str.push_byte(0u8)
-                tokens.push(Token {
-                    kind: TOK_INT,
-                    text: c_str,
-                    int_val: char_val,
-                    line: tok_line,
-                    col: tok_col,
-                })
-            } else if ch == 34u8 || (ch == 102u8 && i + 1usize < len && p[i + 1usize] == 34u8) { // '"' or 'f"'
-                if ch == 102u8 {
-                    i = i + 1usize // skip 'f'
-                    cur_col = cur_col + 1i64
+                if !closed {
+                    tokens.push(Token {
+                        kind: TOK_ERROR,
+                        text: String.from_str("E0003: unterminated character literal"),
+                        int_val: 0i64,
+                        line: tok_line,
+                        col: tok_col,
+                        len: (cur_col - tok_col) as i64,
+                    })
+                } else {
+                    var c_str = String.new()
+                    c_str.push_byte(0u8)
+                    let tok_len = (cur_col - tok_col) as i64
+                    tokens.push(Token {
+                        kind: TOK_INT,
+                        text: c_str,
+                        int_val: char_val,
+                        line: tok_line,
+                        col: tok_col,
+                        len: tok_len,
+                    })
                 }
-                i = i + 1usize // skip quote
-                cur_col = cur_col + 1i64
-                var str_lit = String.new()
-                while i < len && p[i] != 34u8 {
-                    if p[i] == 92u8 && i + 1usize < len { // '\\'
-                        i = i + 1usize
-                        cur_col = cur_col + 1i64
-                        if p[i] == 110u8 {
-                            str_lit.push_byte(10u8) // '\n'
-                        } else if p[i] == 116u8 {
-                            str_lit.push_byte(9u8)  // '\t'
-                        } else if p[i] == 114u8 {
-                            str_lit.push_byte(13u8) // '\r'
-                        } else if p[i] == 48u8 {
-                            str_lit.push_byte(0u8)  // '\0'
-                        } else if p[i] == 101u8 {   // '\e'
-                            str_lit.push_byte(27u8) // ESC (0x1B)
-                        } else if p[i] == 120u8 && i + 2usize < len { // '\xNN'
-                            let h1 = p[i + 1usize]
-                            let h2 = p[i + 2usize]
-                            var val = 0u8
-                            if h1 >= 48u8 && h1 <= 57u8 {
-                                val = (h1 - 48u8) * 16u8
-                            } else if h1 >= 97u8 && h1 <= 102u8 {
-                                val = ((h1 - 97u8) + 10u8) * 16u8
-                            } else if h1 >= 65u8 && h1 <= 70u8 {
-                                val = ((h1 - 65u8) + 10u8) * 16u8
-                            }
-                            if h2 >= 48u8 && h2 <= 57u8 {
-                                val = val + (h2 - 48u8)
-                            } else if h2 >= 97u8 && h2 <= 102u8 {
-                                val = val + ((h2 - 97u8) + 10u8)
-                            } else if h2 >= 65u8 && h2 <= 70u8 {
-                                val = val + ((h2 - 65u8) + 10u8)
-                            }
-                            str_lit.push_byte(val)
-                            i = i + 2usize
-                            cur_col = cur_col + 2i64
-                        } else {
-                            str_lit.push_byte(p[i])
-                        }
-                    } else {
-                        if p[i] == 10u8 {
-                            cur_line = cur_line + 1i64
-                            cur_col = 0i64
-                        }
-                        str_lit.push_byte(p[i])
-                    }
-                    i = i + 1usize
-                    cur_col = cur_col + 1i64
-                }
-                if i < len {
-                    i = i + 1usize // skip closing quote
-                    cur_col = cur_col + 1i64
-                }
-                str_lit.push_byte(0u8)
-                tokens.push(Token {
-                    kind: TOK_STR,
-                    text: str_lit,
-                    int_val: 0i64,
-                    line: tok_line,
-                    col: tok_col,
-                })
             } else {
                 var k = 0
+                var tok_op_len = 1i64
                 if ch == 40u8 {
                     k = TOK_LPAREN
                 } else if ch == 41u8 {
@@ -370,6 +435,7 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 58u8 {
                     if i + 1usize < len && p[i + 1usize] == 58u8 { // ::
                         k = TOK_COLONCOLON
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -380,6 +446,7 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 46u8 {
                     if i + 1usize < len && p[i + 1usize] == 46u8 { // ..
                         k = TOK_DOTDOT
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -396,6 +463,7 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 45u8 {
                     if i + 1usize < len && p[i + 1usize] == 62u8 { // ->
                         k = TOK_ARROW
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -406,10 +474,12 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 61u8 {
                     if i + 1usize < len && p[i + 1usize] == 61u8 { // ==
                         k = TOK_EQEQ
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else if i + 1usize < len && p[i + 1usize] == 62u8 { // =>
                         k = TOK_FAT_ARROW
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -418,6 +488,7 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 33u8 {
                     if i + 1usize < len && p[i + 1usize] == 61u8 { // !=
                         k = TOK_NEQ
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -426,10 +497,12 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 60u8 {
                     if i + 1usize < len && p[i + 1usize] == 60u8 { // <<
                         k = TOK_SHL
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else if i + 1usize < len && p[i + 1usize] == 61u8 { // <=
                         k = TOK_LEQ
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -438,10 +511,12 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 62u8 {
                     if i + 1usize < len && p[i + 1usize] == 62u8 { // >>
                         k = TOK_SHR
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else if i + 1usize < len && p[i + 1usize] == 61u8 { // >=
                         k = TOK_GEQ
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -450,6 +525,7 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 38u8 {
                     if i + 1usize < len && p[i + 1usize] == 38u8 { // &&
                         k = TOK_ANDAND
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -458,6 +534,7 @@ fn lex_source(src: String) -> Vec<Token> {
                 } else if ch == 124u8 {
                     if i + 1usize < len && p[i + 1usize] == 124u8 { // ||
                         k = TOK_OROR
+                        tok_op_len = 2i64
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     } else {
@@ -477,6 +554,20 @@ fn lex_source(src: String) -> Vec<Token> {
                         int_val: 0i64,
                         line: tok_line,
                         col: tok_col,
+                        len: tok_op_len,
+                    })
+                } else {
+                    var unk_msg = String.new()
+                    unk_msg.push_str("E0001: unexpected character '")
+                    unk_msg.push_byte(ch)
+                    unk_msg.push_str("'")
+                    tokens.push(Token {
+                        kind: TOK_ERROR,
+                        text: unk_msg,
+                        int_val: 0i64,
+                        line: tok_line,
+                        col: tok_col,
+                        len: 1i64,
                     })
                 }
                 i = i + 1usize
@@ -493,6 +584,7 @@ fn lex_source(src: String) -> Vec<Token> {
         int_val: 0i64,
         line: cur_line,
         col: cur_col,
+        len: 1i64,
     })
     return tokens
 }

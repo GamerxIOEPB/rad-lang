@@ -26,10 +26,15 @@ fn main() -> i32 {
     count = count + 1
     count = count * 2
     print("count is: ")
-    println(count)
+    print(count)
     return 0
 }
 ```
+
+> [!NOTE]
+> **Compiler Diagnostics on Mutability:**
+> - **Undeclared Assignment (`E0020`)**: Assigning to a variable that has not been declared with `let` or `var` (e.g., `a = 10`) triggers compiler error `E0020: cannot assign to undeclared variable 'a' (declare with 'let' or 'var' first)`.
+> - **Unused Mutability Warning (`W0001`)**: If a variable is declared with `var` but is never reassigned or mutated in its scope, the compiler emits warning `W0001: variable does not need to be mutable: 'var a' (consider using 'let a')`. In IDEs such as VS Code with *Rad Utils*, this displays as a yellow squiggly underline.
 
 ### Type Inference
 Rad infers the type of a variable from its initializer expression when the type annotation is omitted:

@@ -20,7 +20,7 @@
             <a href="index.html" class="brand">
                 <span class="brand-logo">⚡</span>
                 <span class="brand-name">Rad</span>
-                <span class="brand-badge">v0.2.2</span>
+                <span class="brand-badge">v0.2.3</span>
             </a>
             <nav class="nav-links">
                 <a href="index.html#features">Features</a>
@@ -45,12 +45,71 @@
                 <p>All official versions of the self-contained Rad toolchain, direct standalone archive downloads, SHA256 checksums, and version-specific install commands.</p>
             </div>
 
-            <!-- Version 0.2.2 (Latest) -->
-            <article class="release-card latest-card" id="v0.2.2">
+            <!-- Version 0.2.3 (Latest) -->
+            <article class="release-card latest-card" id="v0.2.3">
+                <div class="release-card-header">
+                    <div class="release-title-group">
+                        <span class="release-version">Rad v0.2.3</span>
+                        <span class="release-badge-pill release-badge-latest">Latest Stable</span>
+                        <span class="release-date">Released November 10, 2026</span>
+                    </div>
+                    <a href="https://github.com/GamerxIOEPB/rad-lang/releases/tag/0.2.3" target="_blank" rel="noopener" class="github-release-btn">
+                        <span>View on GitHub ↗</span>
+                    </a>
+                </div>
+
+                <div class="release-section-title">Quick Install (v0.2.3)</div>
+                <div class="release-install-box">
+                    <code id="cmd-0-2-3">curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/install.sh | sh -s -- --version 0.2.3</code>
+                    <button class="copy-btn" onclick="copySnippet('cmd-0-2-3', this)">Copy</button>
+                </div>
+
+                <div class="release-highlights">
+                    <div class="release-section-title">Key Improvements & Features</div>
+                    <ul>
+                        <li><strong>Native Standard Input (<code>input</code>):</strong> Built-in blocking standard input reader returning dynamic heap-allocated <code>String</code> without trailing newline. Supports both <code>input()</code> and <code>input(prompt)</code> with automatic <code>stdout</code> flushing.</li>
+                        <li><strong>Refined <code>print()</code> vs <code>println()</code> Semantics:</strong> <code>println()</code> outputs with trailing newline, while <code>print()</code> outputs without trailing newline and immediately flushes <code>stdout</code>. Both functions natively accept dynamic <code>String</code> instances and Python-style f-strings (<code>f"..."</code>).</li>
+                        <li><strong>Standardized Diagnostics & Analysis:</strong> Standardized diagnostic error codes (<code>E0001</code>–<code>E0030</code>), unused mutability analysis (<code>W0001</code>), undeclared assignment detection (<code>E0020</code>), pinpoint coordinate tracking for expressions inside f-strings, multi-line carets (<code>^^^^</code>), and structured JSON diagnostics (<code>--error-format=json</code>).</li>
+                        <li><strong>Native Rad Source Formatter (<code>rad fmt</code>):</strong> Fast, in-process formatter enforcing 4-space indentation, Egyptian braces, operator spacing, blank line compression, and comment preservation. Supports <code>--check</code> for CI and <code>--stdout</code> for preview.</li>
+                        <li><strong>Rad Language Server (<code>rad lsp</code>):</strong> Full JSON-RPC 2.0 stdio Language Server Protocol implementation supporting live diagnostics (<code>textDocument/publishDiagnostics</code> with severity levels), autocompletion, hover docs, go-to-definition, document symbol outline, and formatting.</li>
+                        <li><strong>Official "Rad Utils" VS Code Extension:</strong> Complete IDE extension (<code>rad-utils-0.2.3.vsix</code>) integrating real-time error and warning squigglies, code navigation, format-on-save, and rich snippets for <code>print</code>, <code>println</code>, and <code>input</code>.</li>
+                        <li><strong>Ultra-Compact Minimal Core:</strong> Preserves 33 MB static-PIE Linux x86_64 distribution with zero external host C/C++ or system LLVM dependencies.</li>
+                    </ul>
+                </div>
+
+                <div class="release-assets-box">
+                    <div class="release-section-title">Standalone Package & Checksums</div>
+                    <div class="release-asset-item">
+                        <div class="asset-info">
+                            <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.3/rad-0.2.3-linux-x86_64.tar.gz" class="asset-name">
+                                rad-0.2.3-linux-x86_64.tar.gz (33.0 MB)
+                            </a>
+                            <span class="asset-hash">SHA256: <code>42de622ae0d6f5fbfd75e4d2117cbd28e953dbf14dc2ee788fbeb2acf6402ea9</code></span>
+                        </div>
+                        <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.3/rad-0.2.3-linux-x86_64.tar.gz" class="btn-download">
+                            Download ↓
+                        </a>
+                    </div>
+                    <div class="release-asset-item">
+                        <div class="asset-info">
+                            <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.3/rad-utils-0.2.3.vsix" class="asset-name">
+                                rad-utils-0.2.3.vsix (123 KB) — Official VS Code Extension
+                            </a>
+                            <span class="asset-hash">SHA256: <code>f27d2d3e0d7b23479e44b0a8f4f82d8fe84d2a35fa67020a3ae36feb5628d74d</code></span>
+                        </div>
+                        <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.3/rad-utils-0.2.3.vsix" class="btn-download">
+                            Download ↓
+                        </a>
+                    </div>
+                </div>
+            </article>
+
+            <!-- Version 0.2.2 -->
+            <article class="release-card" id="v0.2.2">
                 <div class="release-card-header">
                     <div class="release-title-group">
                         <span class="release-version">Rad v0.2.2</span>
-                        <span class="release-badge-pill release-badge-latest">Latest Stable</span>
+                        <span class="release-badge-pill release-badge-stable">Stable</span>
                         <span class="release-date">Released November 9, 2026</span>
                     </div>
                     <a href="https://github.com/GamerxIOEPB/rad-lang/releases/tag/0.2.2" target="_blank" rel="noopener" class="github-release-btn">

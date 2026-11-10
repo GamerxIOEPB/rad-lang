@@ -53,6 +53,8 @@ RADC_SRCS := \
     $(RADC_DIR)/linker.rad
 
 RAD_SRCS := \
+    $(RADPM_DIR)/fmt.rad \
+    $(RADPM_DIR)/lsp.rad \
     $(RADPM_DIR)/main.rad
 
 LAUNCHER_SRC := scripts/launcher.c

@@ -6,17 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release Git Tag (default: 0.2.2)'
+        description: 'Release Git Tag (default: 0.2.3)'
         required: false
-        default: '0.2.2'
+        default: '0.2.3'
       title:
         description: 'Release Title'
         required: false
-        default: 'Rad v0.2.2 - Minimal Core Distribution, Selective LLVM & Toolchain Automation'
+        default: 'Rad v0.2.3 - Compiler Diagnostics, Native Input, Println/Print & Language Server'
       notes:
         description: 'Release Notes / Description'
         required: false
-        default: 'Rad v0.2.2 Release: Minimal self-contained core distribution (32 MB), 54% reduction in compiler binary size via selective LLVM component linking, elimination of bundled C/C++ compilers and 393 MB of host development headers, external C/C++ toolchain auto-discovery with ABI compatibility checks, first-class rad toolchain CLI (info, list, update), and robust diagnostics.'
+        default: 'Rad v0.2.3 Release: Major developer experience and compiler reliability release. Features native standard input (input() / input(prompt) -> String), distinct print() (no newline, immediate stdout flush) and println() (trailing newline), direct String object printing, modern Rustc-style diagnostics with standardized error codes (E0001–E0030) and unused mutability warnings (W0001), f-string coordinate tracking, native source formatter (rad fmt), stdio JSON-RPC 2.0 Language Server (rad lsp), official Rad Utils VS Code extension (rad-utils-0.2.3.vsix), and 100% pure static-PIE Linux portability across Alpine, Debian, Ubuntu, Arch, and Rocky Linux.'
 
 jobs:
   release:
@@ -34,7 +34,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.rad /tmp/bootstrap
-          (gh release download 0.2.2 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+          (gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+           gh release download 0.2.2 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
            gh release download 0.2.1 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
            gh release download 0.2.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
            gh release download 0.1.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
@@ -62,16 +63,16 @@ jobs:
         run: |
           ARGS=(--upload --yes)
           TAG="${{ github.event.inputs.tag }}"
-          [ -z "$TAG" ] && TAG="0.2.2"
+          [ -z "$TAG" ] && TAG="0.2.3"
           ARGS+=(--tag "$TAG")
 
           TITLE="${{ github.event.inputs.title }}"
-          [ -z "$TITLE" ] && TITLE="Rad v0.2.2 - Minimal Core Distribution, Selective LLVM & Toolchain Automation"
+          [ -z "$TITLE" ] && TITLE="Rad v0.2.3 - Compiler Diagnostics, Native Input, Println/Print & Language Server"
           ARGS+=(--title "$TITLE")
 
           NOTES="${{ github.event.inputs.notes }}"
           if [ -z "$NOTES" ]; then
-            NOTES="Rad v0.2.2 Release: Minimal self-contained core distribution (32 MB), 54% reduction in compiler binary size via selective LLVM component linking, elimination of bundled C/C++ compilers and 393 MB of host development headers, external C/C++ toolchain auto-discovery with ABI compatibility checks, first-class rad toolchain CLI (info, list, update), and robust diagnostics."
+            NOTES="Rad v0.2.3 Release: Major developer experience and compiler reliability release. Features native standard input (input() / input(prompt) -> String), distinct print() (no newline, immediate stdout flush) and println() (trailing newline), direct String object printing, modern Rustc-style diagnostics with standardized error codes (E0001–E0030) and unused mutability warnings (W0001), f-string coordinate tracking, native source formatter (rad fmt), stdio JSON-RPC 2.0 Language Server (rad lsp), official Rad Utils VS Code extension (rad-utils-0.2.3.vsix), and 100% pure static-PIE Linux portability across Alpine, Debian, Ubuntu, Arch, and Rocky Linux."
           fi
           ARGS+=(--notes "$NOTES")
           bash scripts/build_distribution.sh "${ARGS[@]}"

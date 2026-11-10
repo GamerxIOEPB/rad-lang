@@ -78,3 +78,16 @@ struct MatchArm {
     bound_var: String,
     stmts: Vec<usize>,
 }
+
+struct Diagnostic {
+    code: String,
+    severity: String,
+    message: String,
+    file: String,
+    line: i64,
+    col: i64,
+    end_line: i64,
+    end_col: i64,
+    source_line: String,
+    help: String,
+}

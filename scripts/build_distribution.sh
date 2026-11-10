@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VERSION="0.2.2"
+VERSION="0.2.3"
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
 HOST_TRIPLE="x86_64-unknown-linux-musl"
 REPO="GamerxIOEPB/rad-lang"
@@ -33,7 +33,7 @@ DO_UPLOAD=0
 AUTO_CONFIRM=0
 RELEASE_TITLE=""
 RELEASE_DESC=""
-RELEASE_TAG="0.2.2"
+RELEASE_TAG="0.2.3"
 
 # Parse command line options
 while [ $# -gt 0 ]; do
@@ -114,7 +114,7 @@ echo "==> [1/4] Building hermetic musl toolchain binaries..."
 bash "$SCRIPT_DIR/build_musl_compiler.sh"
 
 # 1.2 Compile static-pie rad package manager using the new radc
-"$ROOT_DIR/bin/radc" "$ROOT_DIR/src/tools/rad_pm/src/main.rad" -o "$ROOT_DIR/bin/rad" -O2
+"$ROOT_DIR/bin/radc" "$ROOT_DIR/src/tools/rad_pm/src/fmt.rad" "$ROOT_DIR/src/tools/rad_pm/src/lsp.rad" "$ROOT_DIR/src/tools/rad_pm/src/main.rad" -o "$ROOT_DIR/bin/rad" -O2
 strip "$ROOT_DIR/bin/rad"
 
 # 1.3 Rigorous ELF verification of core binaries
@@ -235,10 +235,21 @@ tar -czf "$DIST_OUT/${DIST_NAME}.tar.gz" -C "$BUILD_TMP" "$DIST_NAME"
 sha256sum "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}' > "$DIST_OUT/${DIST_NAME}.tar.gz.sha256"
 echo "  [✓] Created ${DIST_NAME}.tar.gz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}'))"
 
+# Copy VS Code extension if available
+if [ -f "$ROOT_DIR/editors/vscode-rad/rad-utils-${VERSION}.vsix" ]; then
+    cp "$ROOT_DIR/editors/vscode-rad/rad-utils-${VERSION}.vsix" "$DIST_OUT/"
+    echo "  [✓] Bundled rad-utils-${VERSION}.vsix ($(du -h "$DIST_OUT/rad-utils-${VERSION}.vsix" | awk '{print $1}'))"
+fi
+
 # Generate SHA256SUMS manifest
 (
     cd "$DIST_OUT"
-    sha256sum "${DIST_NAME}.tar.gz" > SHA256SUMS
+    rm -f SHA256SUMS
+    if [ -f "rad-utils-${VERSION}.vsix" ]; then
+        sha256sum "${DIST_NAME}.tar.gz" "rad-utils-${VERSION}.vsix" > SHA256SUMS
+    else
+        sha256sum "${DIST_NAME}.tar.gz" > SHA256SUMS
+    fi
 )
 echo "  [✓] Generated SHA256SUMS manifest"
 
@@ -301,12 +312,16 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
 
     echo ""
     echo "==> Uploading release to GitHub (${REPO})..."
+    UPLOAD_FILES=("$DIST_OUT/${DIST_NAME}.tar.gz" "$DIST_OUT/SHA256SUMS")
+    if [ -f "$DIST_OUT/rad-utils-${VERSION}.vsix" ]; then
+        UPLOAD_FILES+=("$DIST_OUT/rad-utils-${VERSION}.vsix")
+    fi
+
     if command -v gh >/dev/null 2>&1; then
         if gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "  -> Updating existing release $RELEASE_TAG..."
             gh release upload "$RELEASE_TAG" \
-                "$DIST_OUT/${DIST_NAME}.tar.gz" \
-                "$DIST_OUT/SHA256SUMS" \
+                "${UPLOAD_FILES[@]}" \
                 --clobber --repo "$REPO"
             gh release edit "$RELEASE_TAG" \
                 --title "$RELEASE_TITLE" \
@@ -315,8 +330,7 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
         else
             echo "  -> Creating release $RELEASE_TAG..."
             gh release create "$RELEASE_TAG" \
-                "$DIST_OUT/${DIST_NAME}.tar.gz" \
-                "$DIST_OUT/SHA256SUMS" \
+                "${UPLOAD_FILES[@]}" \
                 --repo "$REPO" \
                 --title "$RELEASE_TITLE" \
                 --notes "$RELEASE_DESC" \

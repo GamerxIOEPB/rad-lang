@@ -6,6 +6,7 @@ extern "C" {
     fn rad_llvm_init() -> void;
     fn rad_llvm_emit_obj(ir_str: str, ir_len: usize, out_obj_path: str, opt_level: i32, target_triple: str, err_buf: *raw u8, err_buf_len: usize) -> i32;
     fn rad_lld_link_str(cmd_str: str, err_buf: *raw u8, err_buf_len: usize) -> i32;
+    fn isatty(fd: i32) -> i32;
 }
 
 fn parse_exit_status(raw_status: i32) -> i32 {
