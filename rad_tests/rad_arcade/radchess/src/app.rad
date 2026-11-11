@@ -578,7 +578,7 @@ impl App {
     // Main render call
     pub fn render(self) {
         // Clear terminal screen and position cursor at home (1,1)
-        print("\x1b[2J\x1b[H");
+        print("\x1b[H\x1b[2J");
 
         if self.app_state == APP_STATE_MAIN_MENU {
             render_main_menu(self.main_idx);
@@ -614,24 +614,23 @@ impl App {
 
             // Opponent bar
             print("  [Opponent] ");
-            print(BOLD);
-            print(FG_BRIGHT_WHITE);
+            print(BOLD());
+            print(FG_BRIGHT_WHITE());
             if flipped {
                 print(self.white_player_title.as_ptr() as str);
             } else {
                 print(self.black_player_title.as_ptr() as str);
             }
-            print(RESET);
+            print(RESET());
             print("  Clock: ");
-            print(FG_YELLOW);
+            print(FG_YELLOW());
             var opp_clock = self.black_clock_ms;
             if flipped { opp_clock = self.white_clock_ms; }
             print(format_clock_time(opp_clock).as_ptr() as str);
-            print(RESET);
+            print(RESET());
             print("  Captured: ");
             print(render_captured_tray(self.b, self.cfg.piece_theme, !flipped).as_ptr() as str);
-            println("");
-            println("");
+            print("\r\n\r\n");
 
             // Chessboard
             let cur_sq = self.inp.get_cursor_sq();
@@ -649,39 +648,39 @@ impl App {
             );
 
             // Player bar
-            println("");
+            print("\r\n");
             print("  [You]      ");
-            print(BOLD);
-            print(FG_BRIGHT_CYAN);
+            print(BOLD());
+            print(FG_BRIGHT_CYAN());
             if flipped {
                 print(self.black_player_title.as_ptr() as str);
             } else {
                 print(self.white_player_title.as_ptr() as str);
             }
-            print(RESET);
+            print(RESET());
             print("  Clock: ");
-            print(FG_YELLOW);
+            print(FG_YELLOW());
             var my_clock = self.white_clock_ms;
             if flipped { my_clock = self.black_clock_ms; }
             print(format_clock_time(my_clock).as_ptr() as str);
-            print(RESET);
+            print(RESET());
             print("  Captured: ");
             print(render_captured_tray(self.b, self.cfg.piece_theme, flipped).as_ptr() as str);
-            println("");
+            print("\r\n");
 
             // Move History & Status Banner
-            println("");
+            print("\r\n");
             print("  ");
-            print(BG_SELECTED);
-            print(FG_BLACK);
+            print(BG_SELECTED());
+            print(FG_BLACK());
             print(" STATUS ");
-            print(RESET);
+            print(RESET());
             print(" ");
-            print(BOLD);
-            print(FG_BRIGHT_WHITE);
+            print(BOLD());
+            print(FG_BRIGHT_WHITE());
             print(self.match_banner.as_ptr() as str);
-            print(RESET);
-            println("");
+            print(RESET());
+            print("\r\n");
 
             // Move list snippet (last 4 moves)
             if self.match_history_sans.len > 0usize {
@@ -696,15 +695,15 @@ impl App {
                     print(" ");
                     hi = hi + 1usize;
                 }
-                println("");
+                print("\r\n");
             }
 
             // Keyboard navigation hint
             print("  ");
-            print(DIM);
+            print(DIM());
             print("[Arrows/WASD/HJKL] Move · [Enter/Space] Select · [U] Undo · [R] Resign · [Esc] Menu");
-            print(RESET);
-            println("");
+            print(RESET());
+            print("\r\n");
         }
     }
 

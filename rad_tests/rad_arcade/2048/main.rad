@@ -330,61 +330,44 @@ impl Game2048 {
     }
 
     fn get_tile_colors(val: i64) -> Color {
-        if val == 2i64 {
-            return Color.bright_white()
-        } else if val == 4i64 {
-            return Color.bright_yellow()
-        } else if val == 8i64 {
-            return Color.bright_red()
-        } else if val == 16i64 {
-            return Color.red()
-        } else if val == 32i64 {
-            return Color.bright_magenta()
-        } else if val == 64i64 {
-            return Color.magenta()
-        } else if val == 128i64 {
-            return Color.bright_cyan()
-        } else if val == 256i64 {
-            return Color.cyan()
-        } else if val == 512i64 {
-            return Color.bright_green()
-        } else if val == 1024i64 {
-            return Color.green()
-        } else if val == 2048i64 {
-            return Color.bright_yellow()
-        } else if val > 2048i64 {
-            return Color.bright_blue()
+        if val == 2i64 || val == 4i64 {
+            return Color.indexed(236u8) // Dark charcoal text on light tile
+        } else if val == 128i64 || val == 256i64 || val == 2048i64 {
+            return Color.black() // Deep black on bright gold tiles
         }
-        return Color.bright_black()
+        // High-contrast bright white for 8, 16, 32, 64, 512, 1024, >2048
+        return Color.bright_white()
     }
 
     fn get_tile_bg(val: i64) -> Color {
-        if val == 2i64 {
-            return Color.ansi(0u8)
+        if val == 0i64 {
+            return Color.indexed(237u8) // Light gray shade for empty blocks
+        } else if val == 2i64 {
+            return Color.indexed(253u8) // Light warm ivory
         } else if val == 4i64 {
-            return Color.ansi(0u8)
+            return Color.indexed(229u8) // Pale warm bisque
         } else if val == 8i64 {
-            return Color.ansi(1u8)
+            return Color.indexed(208u8) // Rich vibrant orange
         } else if val == 16i64 {
-            return Color.ansi(1u8)
+            return Color.indexed(202u8) // Deep warm coral orange
         } else if val == 32i64 {
-            return Color.ansi(5u8)
+            return Color.indexed(196u8) // Bright tomato red
         } else if val == 64i64 {
-            return Color.ansi(5u8)
+            return Color.indexed(160u8) // Deep rich crimson
         } else if val == 128i64 {
-            return Color.ansi(6u8)
+            return Color.indexed(220u8) // Glowing golden yellow
         } else if val == 256i64 {
-            return Color.ansi(6u8)
+            return Color.indexed(214u8) // Bright amber gold
         } else if val == 512i64 {
-            return Color.ansi(2u8)
+            return Color.indexed(40u8)  // Vibrant emerald green
         } else if val == 1024i64 {
-            return Color.ansi(2u8)
+            return Color.indexed(33u8)  // Electric azure blue
         } else if val == 2048i64 {
-            return Color.ansi(3u8)
+            return Color.indexed(226u8) // Radiant electric gold
         } else if val > 2048i64 {
-            return Color.ansi(4u8)
+            return Color.indexed(129u8) // Royal purple
         }
-        return Color.default()
+        return Color.indexed(237u8)
     }
 
     fn render(self, var con: Console) {
@@ -427,9 +410,9 @@ impl Game2048 {
                 let bg = Game2048.get_tile_bg(val)
 
                 if val == 0i64 {
-                    // Empty cell: dotted outline
-                    con.draw_rect(tx, ty, TILE_W, TILE_H, 32u8, Color.default(), Color.default())
-                    con.print_str(tx + 4usize, ty + 1usize, "·", Color.bright_black(), Color.default())
+                    // Empty cell: visible light gray shade block with subtle center marker
+                    con.draw_rect(tx, ty, TILE_W, TILE_H, 32u8, Color.indexed(243u8), bg)
+                    con.print_str(tx + 4usize, ty + 1usize, "·", Color.indexed(243u8), bg)
                 } else {
                     // Solid tile
                     con.draw_rect(tx, ty, TILE_W, TILE_H, 32u8, fg, bg)

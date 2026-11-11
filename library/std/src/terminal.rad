@@ -95,8 +95,8 @@ impl TerminalSession {
         // iflag &= ~(BRKINT(2) | ICRNL(256) | INPCK(16) | ISTRIP(32) | IXON(1024)) = ~1330
         let raw_iflag = iflag & (~1330u32)
 
-        // oflag &= ~(OPOST(1))
-        let raw_oflag = oflag & (~1u32)
+        // oflag: keep OPOST(1) enabled so that '\n' automatically does carriage return '\r\n'
+        let raw_oflag = oflag | 1u32
 
         // cflag |= CS8(48)
         let raw_cflag = cflag | 48u32

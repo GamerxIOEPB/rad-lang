@@ -2,70 +2,54 @@
 // RadChess: ANSI Colors, Visual Styles & Palette Themes
 // ==============================================================================
 
-pub const RESET: str = "\x1b[0m";
-pub const BOLD: str  = "\x1b[1m";
-pub const DIM: str   = "\x1b[2m";
-pub const REVERSE: str = "\x1b[7m";
+pub fn RESET() -> str { "\x1b[0m" }
+pub fn BOLD() -> str  { "\x1b[1m" }
+pub fn DIM() -> str   { "\x1b[2m" }
+pub fn REVERSE() -> str { "\x1b[7m" }
 
 // Standard Foreground colors
-pub const FG_BLACK: str   = "\x1b[30m";
-pub const FG_RED: str     = "\x1b[31m";
-pub const FG_GREEN: str   = "\x1b[32m";
-pub const FG_YELLOW: str  = "\x1b[33m";
-pub const FG_BLUE: str    = "\x1b[34m";
-pub const FG_MAGENTA: str = "\x1b[35m";
-pub const FG_CYAN: str    = "\x1b[36m";
-pub const FG_WHITE: str   = "\x1b[37m";
+pub fn FG_BLACK() -> str   { "\x1b[30m" }
+pub fn FG_RED() -> str     { "\x1b[31m" }
+pub fn FG_GREEN() -> str   { "\x1b[32m" }
+pub fn FG_YELLOW() -> str  { "\x1b[33m" }
+pub fn FG_BLUE() -> str    { "\x1b[34m" }
+pub fn FG_MAGENTA() -> str { "\x1b[35m" }
+pub fn FG_CYAN() -> str    { "\x1b[36m" }
+pub fn FG_WHITE() -> str   { "\x1b[37m" }
 
 // High-intensity foreground
-pub const FG_BRIGHT_WHITE: str  = "\x1b[97m";
-pub const FG_BRIGHT_YELLOW: str = "\x1b[93m";
-pub const FG_BRIGHT_CYAN: str   = "\x1b[96m";
-pub const FG_BRIGHT_GREEN: str  = "\x1b[92m";
-pub const FG_BRIGHT_RED: str    = "\x1b[91m";
-
-// Theme palettes for Board Squares (256-color escape sequences)
-// Theme 0: Modern Slate / Steel Blue
-pub const THEME0_LIGHT_SQ: str = "\x1b[48;5;253m"; // Light grey
-pub const THEME0_DARK_SQ: str  = "\x1b[48;5;67m";  // Steel blue
-
-// Theme 1: Classic Wood / Warm Amber
-pub const THEME1_LIGHT_SQ: str = "\x1b[48;5;223m"; // Warm birch
-pub const THEME1_DARK_SQ: str  = "\x1b[48;5;137m"; // Oak wood
-
-// Theme 2: Emerald Forest
-pub const THEME2_LIGHT_SQ: str = "\x1b[48;5;254m"; // Soft cream
-pub const THEME2_DARK_SQ: str  = "\x1b[48;5;29m";  // Emerald green
-
-// Theme 3: Midnight Dark
-pub const THEME3_LIGHT_SQ: str = "\x1b[48;5;242m"; // Medium grey
-pub const THEME3_DARK_SQ: str  = "\x1b[48;5;236m"; // Dark charcoal
-
-// Theme 4: Cyberpunk / Matrix
-pub const THEME4_LIGHT_SQ: str = "\x1b[48;5;234m"; // Deep black
-pub const THEME4_DARK_SQ: str  = "\x1b[48;5;22m";  // Matrix dark green
+pub fn FG_BRIGHT_WHITE() -> str  { "\x1b[97m" }
+pub fn FG_BRIGHT_YELLOW() -> str { "\x1b[93m" }
+pub fn FG_BRIGHT_CYAN() -> str   { "\x1b[96m" }
+pub fn FG_BRIGHT_GREEN() -> str  { "\x1b[92m" }
+pub fn FG_BRIGHT_RED() -> str    { "\x1b[91m" }
 
 // Highlights
-pub const BG_SELECTED: str   = "\x1b[48;5;214m"; // Amber orange
-pub const BG_LEGAL_MOVE: str = "\x1b[48;5;150m"; // Soft mint target
-pub const BG_LAST_MOVE: str  = "\x1b[48;5;178m"; // Gold highlight
-pub const BG_CHECK: str      = "\x1b[48;5;196m"; // Bright crimson
+pub fn BG_SELECTED() -> str   { "\x1b[48;5;214m" } // Amber orange
+pub fn BG_LEGAL_MOVE() -> str { "\x1b[48;5;150m" } // Soft mint target
+pub fn BG_LAST_MOVE() -> str  { "\x1b[48;5;178m" } // Gold highlight
+pub fn BG_CHECK() -> str      { "\x1b[48;5;196m" } // Bright crimson
 
 // Piece colors
-pub const FG_WHITE_PIECE: str = "\x1b[38;5;231;1m"; // Pure crisp white
-pub const FG_BLACK_PIECE: str = "\x1b[38;5;234;1m"; // Deep obsidian black
+pub fn FG_WHITE_PIECE() -> str { "\x1b[38;5;231;1m" } // Pure crisp white
+pub fn FG_BLACK_PIECE() -> str { "\x1b[38;5;234;1m" } // Deep obsidian black
 
 // Get square background escape sequence based on theme and square coordinate
 pub fn get_sq_bg(theme: i32, is_light: bool) -> str {
     if theme == 1 { // Classic Wood
-        if is_light { return THEME1_LIGHT_SQ; } else { return THEME1_DARK_SQ; }
+        if is_light { return "\x1b[48;5;223m"; }
+        return "\x1b[48;5;137m";
     } else if theme == 2 { // Emerald Forest
-        if is_light { return THEME2_LIGHT_SQ; } else { return THEME2_DARK_SQ; }
+        if is_light { return "\x1b[48;5;254m"; }
+        return "\x1b[48;5;29m";
     } else if theme == 3 { // Midnight
-        if is_light { return THEME3_LIGHT_SQ; } else { return THEME3_DARK_SQ; }
+        if is_light { return "\x1b[48;5;242m"; }
+        return "\x1b[48;5;236m";
     } else if theme == 4 { // Cyberpunk
-        if is_light { return THEME4_LIGHT_SQ; } else { return THEME4_DARK_SQ; }
+        if is_light { return "\x1b[48;5;234m"; }
+        return "\x1b[48;5;22m";
     }
-    // Default Modern Slate
-    if is_light { return THEME0_LIGHT_SQ; } else { return THEME0_DARK_SQ; }
+    // Default Modern Slate (Theme 0)
+    if is_light { return "\x1b[48;5;253m"; }
+    return "\x1b[48;5;67m";
 }

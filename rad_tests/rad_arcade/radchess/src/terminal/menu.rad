@@ -6,243 +6,248 @@
 import "./colors";
 import "../chess/constants";
 
+fn put_line(s: str) {
+    print(s);
+    print("\r\n");
+}
+
 pub fn draw_header() {
-    print(FG_BRIGHT_CYAN);
-    print(BOLD);
-    println("        ♜ RAD CHESS — Native Linux Chess ♜");
-    print(RESET);
-    println("");
+    print(FG_BRIGHT_CYAN());
+    print(BOLD());
+    put_line("        ♜ RAD CHESS — Native Linux Chess ♜");
+    print(RESET());
+    print("\r\n");
 }
 
 // Draw the required main menu box
 pub fn render_main_menu(selected_idx: i32) {
-    println("");
-    print(FG_BRIGHT_CYAN);
-    println("╔══════════════════════════════════════════╗");
-    println("║                                          ║");
+    print("\r\n");
+    print(FG_BRIGHT_CYAN());
+    put_line("╔══════════════════════════════════════════╗");
+    put_line("║                                          ║");
     print("║              ");
-    print(FG_BRIGHT_YELLOW);
-    print(BOLD);
+    print(FG_BRIGHT_YELLOW());
+    print(BOLD());
     print("♜ RAD CHESS ♜");
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("               ║");
-    println("║                                          ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("               ║");
+    put_line("║                                          ║");
     print("║          ");
-    print(FG_WHITE);
+    print(FG_WHITE());
     print("Native Linux Chess");
-    print(FG_BRIGHT_CYAN);
-    println("              ║");
-    println("║                                          ║");
-    println("╠══════════════════════════════════════════╣");
-    println("║                                          ║");
+    print(FG_BRIGHT_CYAN());
+    put_line("              ║");
+    put_line("║                                          ║");
+    put_line("╠══════════════════════════════════════════╣");
+    put_line("║                                          ║");
 
     // Option 1
     print("║       ");
     if selected_idx == 0 {
-        print(BG_SELECTED);
-        print(FG_BLACK);
-        print(BOLD);
+        print(BG_SELECTED());
+        print(FG_BLACK());
+        print(BOLD());
         print(" > 1. Play with Computer < ");
     } else {
-        print(FG_WHITE);
+        print(FG_WHITE());
         print("   1. Play with Computer   ");
     }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("   ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("   ║");
 
     // Option 2
     print("║       ");
     if selected_idx == 1 {
-        print(BG_SELECTED);
-        print(FG_BLACK);
-        print(BOLD);
+        print(BG_SELECTED());
+        print(FG_BLACK());
+        print(BOLD());
         print(" > 2. Play Online        < ");
     } else {
-        print(FG_WHITE);
+        print(FG_WHITE());
         print("   2. Play Online          ");
     }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("   ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("   ║");
 
     // Option 3
     print("║       ");
     if selected_idx == 2 {
-        print(BG_SELECTED);
-        print(FG_BLACK);
-        print(BOLD);
+        print(BG_SELECTED());
+        print(FG_BLACK());
+        print(BOLD());
         print(" > 3. Settings           < ");
     } else {
-        print(FG_WHITE);
+        print(FG_WHITE());
         print("   3. Settings             ");
     }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("   ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("   ║");
 
     // Option 4
     print("║       ");
     if selected_idx == 3 {
-        print(BG_SELECTED);
-        print(FG_BLACK);
-        print(BOLD);
+        print(BG_SELECTED());
+        print(FG_BLACK());
+        print(BOLD());
         print(" > 4. Exit               < ");
     } else {
-        print(FG_WHITE);
+        print(FG_WHITE());
         print("   4. Exit                 ");
     }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("   ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("   ║");
 
-    println("║                                          ║");
-    println("╠══════════════════════════════════════════╣");
+    put_line("║                                          ║");
+    put_line("╠══════════════════════════════════════════╣");
     print("║       ");
-    print(FG_BRIGHT_WHITE);
+    print(FG_BRIGHT_WHITE());
     print("↑ / ↓ Navigate · Enter Select");
-    print(FG_BRIGHT_CYAN);
-    println("      ║");
-    println("╚══════════════════════════════════════════╝");
-    print(RESET);
+    print(FG_BRIGHT_CYAN());
+    put_line("      ║");
+    put_line("╚══════════════════════════════════════════╝");
+    print(RESET());
 }
 
 // Render AI Setup Menu
 pub fn render_ai_menu(selected_idx: i32, side: i32, diff: i32, tc: i32) {
-    println("");
-    print(FG_BRIGHT_CYAN);
-    println("╔══════════════════════════════════════════╗");
+    print("\r\n");
+    print(FG_BRIGHT_CYAN());
+    put_line("╔══════════════════════════════════════════╗");
     print("║        ");
-    print(BOLD);
-    print(FG_BRIGHT_YELLOW);
+    print(BOLD());
+    print(FG_BRIGHT_YELLOW());
     print("Play with Built-in AI Opponent");
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("    ║");
-    println("╠══════════════════════════════════════════╣");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("    ║");
+    put_line("╠══════════════════════════════════════════╣");
 
     // Option 0: Side
     print("║  ");
-    if selected_idx == 0 { print(BG_SELECTED); print(FG_BLACK); print(" > "); }
+    if selected_idx == 0 { print(BG_SELECTED()); print(FG_BLACK()); print(" > "); }
     else { print("   "); }
     print("Your Side: ");
     if side == 0 { print("White (First Move)"); }
     else if side == 1 { print("Black (Second Move)"); }
     else { print("Random           "); }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("           ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("           ║");
 
     // Option 1: Difficulty
     print("║  ");
-    if selected_idx == 1 { print(BG_SELECTED); print(FG_BLACK); print(" > "); }
+    if selected_idx == 1 { print(BG_SELECTED()); print(FG_BLACK()); print(" > "); }
     else { print("   "); }
     print("Difficulty: ");
     if diff == 1 { print("1. Beginner (Depth 1)"); }
     else if diff == 2 { print("2. Easy     (Depth 2)"); }
-    else if diff == 3 { print("3. Medium   (Depth 4)"); }
-    else { print("4. Hard     (Depth 5)"); }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("        ║");
+    else if diff == 3 { print("3. Medium   (Depth 3)"); }
+    else { print("4. Hard     (Depth 4)"); }
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("        ║");
 
     // Option 2: Time Control
     print("║  ");
-    if selected_idx == 2 { print(BG_SELECTED); print(FG_BLACK); print(" > "); }
+    if selected_idx == 2 { print(BG_SELECTED()); print(FG_BLACK()); print(" > "); }
     else { print("   "); }
     print("Clock: ");
     if tc == 0 { print("No Clock (Unlimited) "); }
     else if tc == 1 { print("3 + 2 Blitz          "); }
     else if tc == 2 { print("5 + 3 Rapid          "); }
     else { print("10 + 0 Classical     "); }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("           ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("           ║");
 
     // Option 3: Start
-    println("╠══════════════════════════════════════════╣");
+    put_line("╠══════════════════════════════════════════╣");
     print("║  ");
     if selected_idx == 3 {
-        print(BG_SELECTED); print(FG_BLACK); print(BOLD);
+        print(BG_SELECTED()); print(FG_BLACK()); print(BOLD());
         print(" > START CHESS MATCH <                  ");
     } else {
-        print(FG_BRIGHT_GREEN);
+        print(FG_BRIGHT_GREEN());
         print("   START CHESS MATCH                    ");
     }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("  ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("  ║");
 
     // Option 4: Back
     print("║  ");
     if selected_idx == 4 {
-        print(BG_SELECTED); print(FG_BLACK); print(BOLD);
+        print(BG_SELECTED()); print(FG_BLACK()); print(BOLD());
         print(" > Back to Main Menu <                  ");
     } else {
-        print(FG_WHITE);
+        print(FG_WHITE());
         print("   Back to Main Menu                    ");
     }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("  ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("  ║");
 
-    println("╠══════════════════════════════════════════╣");
+    put_line("╠══════════════════════════════════════════╣");
     print("║  ");
-    print(FG_BRIGHT_WHITE);
+    print(FG_BRIGHT_WHITE());
     print("↑ / ↓ Navigate · Enter / Space Select   ");
-    print(FG_BRIGHT_CYAN);
-    println(" ║");
-    println("╚══════════════════════════════════════════╝");
-    print(RESET);
+    print(FG_BRIGHT_CYAN());
+    put_line(" ║");
+    put_line("╚══════════════════════════════════════════╝");
+    print(RESET());
 }
 
 // Render Online Menu (Host, LAN Rooms, Direct IP)
 pub fn render_online_menu(selected_idx: i32, host_color: i32, tc: i32) {
-    println("");
-    print(FG_BRIGHT_CYAN);
-    println("╔══════════════════════════════════════════╗");
+    print("\r\n");
+    print(FG_BRIGHT_CYAN());
+    put_line("╔══════════════════════════════════════════╗");
     print("║         ");
-    print(BOLD);
-    print(FG_BRIGHT_YELLOW);
+    print(BOLD());
+    print(FG_BRIGHT_YELLOW());
     print("RadChess LAN Multiplayer");
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("        ║");
-    println("╠══════════════════════════════════════════╣");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("        ║");
+    put_line("╠══════════════════════════════════════════╣");
 
     // Option 0: Host
     print("║  ");
-    if selected_idx == 0 { print(BG_SELECTED); print(FG_BLACK); print(" > 1. Host LAN Game                     < "); }
+    if selected_idx == 0 { print(BG_SELECTED()); print(FG_BLACK()); print(" > 1. Host LAN Game                     < "); }
     else { print("   1. Host LAN Game                       "); }
-    print(RESET); print(FG_BRIGHT_CYAN); println("║");
+    print(RESET()); print(FG_BRIGHT_CYAN()); put_line("║");
 
     // Option 1: Discover
     print("║  ");
-    if selected_idx == 1 { print(BG_SELECTED); print(FG_BLACK); print(" > 2. Discover LAN Rooms (Auto-Scan)   < "); }
+    if selected_idx == 1 { print(BG_SELECTED()); print(FG_BLACK()); print(" > 2. Discover LAN Rooms (Auto-Scan)   < "); }
     else { print("   2. Discover LAN Rooms (Auto-Scan)     "); }
-    print(RESET); print(FG_BRIGHT_CYAN); println("║");
+    print(RESET()); print(FG_BRIGHT_CYAN()); put_line("║");
 
     // Option 2: Direct Connect
     print("║  ");
-    if selected_idx == 2 { print(BG_SELECTED); print(FG_BLACK); print(" > 3. Direct IP Connect                 < "); }
+    if selected_idx == 2 { print(BG_SELECTED()); print(FG_BLACK()); print(" > 3. Direct IP Connect                 < "); }
     else { print("   3. Direct IP Connect                   "); }
-    print(RESET); print(FG_BRIGHT_CYAN); println("║");
+    print(RESET()); print(FG_BRIGHT_CYAN()); put_line("║");
 
     // Option 3: Back
     print("║  ");
-    if selected_idx == 3 { print(BG_SELECTED); print(FG_BLACK); print(" > 4. Back to Main Menu                 < "); }
+    if selected_idx == 3 { print(BG_SELECTED()); print(FG_BLACK()); print(" > 4. Back to Main Menu                 < "); }
     else { print("   4. Back to Main Menu                   "); }
-    print(RESET); print(FG_BRIGHT_CYAN); println("║");
+    print(RESET()); print(FG_BRIGHT_CYAN()); put_line("║");
 
-    println("╠══════════════════════════════════════════╣");
+    put_line("╠══════════════════════════════════════════╣");
     print("║  ");
-    print(FG_BRIGHT_WHITE);
+    print(FG_BRIGHT_WHITE());
     print("Auto-Discovery on UDP 239.255.42.99     ");
-    print(FG_BRIGHT_CYAN);
-    println(" ║");
-    println("╚══════════════════════════════════════════╝");
-    print(RESET);
+    print(FG_BRIGHT_CYAN());
+    put_line(" ║");
+    put_line("╚══════════════════════════════════════════╝");
+    print(RESET());
 }
 
 // Render Settings Menu
@@ -253,42 +258,42 @@ pub fn render_settings_menu(
     color_theme: i32,
     show_coords: bool
 ) {
-    println("");
-    print(FG_BRIGHT_CYAN);
-    println("╔══════════════════════════════════════════╗");
+    print("\r\n");
+    print(FG_BRIGHT_CYAN());
+    put_line("╔══════════════════════════════════════════╗");
     print("║           ");
-    print(BOLD);
-    print(FG_BRIGHT_YELLOW);
+    print(BOLD());
+    print(FG_BRIGHT_YELLOW());
     print("RadChess Settings");
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("              ║");
-    println("╠══════════════════════════════════════════╣");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("              ║");
+    put_line("╠══════════════════════════════════════════╣");
 
     // Option 0: Name
     print("║  ");
-    if selected_idx == 0 { print(BG_SELECTED); print(FG_BLACK); print(" > "); }
+    if selected_idx == 0 { print(BG_SELECTED()); print(FG_BLACK()); print(" > "); }
     else { print("   "); }
     print("Player Name: ");
     print(player_name);
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("                      ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("                      ║");
 
     // Option 1: Piece Graphics
     print("║  ");
-    if selected_idx == 1 { print(BG_SELECTED); print(FG_BLACK); print(" > "); }
+    if selected_idx == 1 { print(BG_SELECTED()); print(FG_BLACK()); print(" > "); }
     else { print("   "); }
     print("Pieces: ");
     if piece_theme == 0 { print("Unicode ♔ ♕ ♖ ♗ ♘ ♙"); }
     else { print("ASCII   K Q R B N P"); }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("         ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("         ║");
 
     // Option 2: Theme
     print("║  ");
-    if selected_idx == 2 { print(BG_SELECTED); print(FG_BLACK); print(" > "); }
+    if selected_idx == 2 { print(BG_SELECTED()); print(FG_BLACK()); print(" > "); }
     else { print("   "); }
     print("Palette: ");
     if color_theme == 0 { print("1. Modern Slate (Default)   "); }
@@ -296,41 +301,41 @@ pub fn render_settings_menu(
     else if color_theme == 2 { print("3. Emerald Forest (Green)   "); }
     else if color_theme == 3 { print("4. Midnight Charcoal        "); }
     else { print("5. Cyberpunk / Matrix       "); }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println(" ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line(" ║");
 
     // Option 3: Coordinates
     print("║  ");
-    if selected_idx == 3 { print(BG_SELECTED); print(FG_BLACK); print(" > "); }
+    if selected_idx == 3 { print(BG_SELECTED()); print(FG_BLACK()); print(" > "); }
     else { print("   "); }
     print("Coordinates: ");
     if show_coords { print("Shown (1..8, a..h)"); }
     else { print("Hidden            "); }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println("         ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("         ║");
 
     // Option 4: Save & Back
-    println("╠══════════════════════════════════════════╣");
+    put_line("╠══════════════════════════════════════════╣");
     print("║  ");
     if selected_idx == 4 {
-        print(BG_SELECTED); print(FG_BLACK); print(BOLD);
+        print(BG_SELECTED()); print(FG_BLACK()); print(BOLD());
         print(" > Save & Return to Main Menu <         ");
     } else {
-        print(FG_WHITE);
+        print(FG_WHITE());
         print("   Save & Return to Main Menu           ");
     }
-    print(RESET);
-    print(FG_BRIGHT_CYAN);
-    println(" ║");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line(" ║");
 
-    println("╠══════════════════════════════════════════╣");
+    put_line("╠══════════════════════════════════════════╣");
     print("║  ");
-    print(FG_BRIGHT_WHITE);
+    print(FG_BRIGHT_WHITE());
     print("Settings saved to ~/.config/radchess    ");
-    print(FG_BRIGHT_CYAN);
-    println(" ║");
-    println("╚══════════════════════════════════════════╝");
-    print(RESET);
+    print(FG_BRIGHT_CYAN());
+    put_line(" ║");
+    put_line("╚══════════════════════════════════════════╝");
+    print(RESET());
 }

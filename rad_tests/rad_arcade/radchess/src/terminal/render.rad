@@ -91,9 +91,9 @@ pub fn render_board(
         // Left coordinate
         if show_coords {
             print("  ");
-            print(FG_CYAN);
+            print(FG_CYAN());
             print(chess_int_to_str((rank + 1) as i64).as_ptr() as str);
-            print(RESET);
+            print(RESET());
             print(" ");
         } else {
             print("    ");
@@ -115,9 +115,9 @@ pub fn render_board(
             var bg_esc = get_sq_bg(color_theme, is_light);
 
             if sq == selected_sq {
-                bg_esc = BG_SELECTED;
+                bg_esc = BG_SELECTED();
             } else if sq == last_from || sq == last_to {
-                bg_esc = BG_LAST_MOVE;
+                bg_esc = BG_LAST_MOVE();
             } else {
                 // Check if sq in legal targets
                 var is_target = false;
@@ -130,15 +130,15 @@ pub fn render_board(
                     ti = ti + 1usize;
                 }
                 if is_target {
-                    bg_esc = BG_LEGAL_MOVE;
+                    bg_esc = BG_LEGAL_MOVE();
                 }
             }
 
             // Piece color
-            var fg_esc = FG_WHITE_PIECE;
+            var fg_esc = FG_WHITE_PIECE();
             let p_color = get_piece_color(piece);
             if p_color == COLOR_BLACK {
-                fg_esc = FG_BLACK_PIECE;
+                fg_esc = FG_BLACK_PIECE();
             }
 
             let glyph = get_piece_glyph(piece, piece_theme);
@@ -156,7 +156,7 @@ pub fn render_board(
 
             print(bg_esc);
             if sq == cursor_sq {
-                print(FG_BRIGHT_YELLOW);
+                print(FG_BRIGHT_YELLOW());
                 print(l_bracket);
             } else {
                 print(l_bracket);
@@ -174,7 +174,7 @@ pub fn render_board(
                     ti = ti + 1usize;
                 }
                 if is_target {
-                    print(FG_BRIGHT_GREEN);
+                    print(FG_BRIGHT_GREEN());
                     print("•");
                 } else {
                     print(" ");
@@ -185,13 +185,13 @@ pub fn render_board(
             }
 
             if sq == cursor_sq {
-                print(FG_BRIGHT_YELLOW);
+                print(FG_BRIGHT_YELLOW());
                 print(r_bracket);
             } else {
                 print(r_bracket);
             }
 
-            print(RESET);
+            print(RESET());
 
             f_idx = f_idx + 1;
         }
@@ -199,11 +199,11 @@ pub fn render_board(
         // Right coordinate
         if show_coords {
             print(" ");
-            print(FG_CYAN);
+            print(FG_CYAN());
             print(chess_int_to_str((rank + 1) as i64).as_ptr() as str);
-            print(RESET);
+            print(RESET());
         }
-        println("");
+        print("\r\n");
 
         r_idx = r_idx + 1;
     }
@@ -220,14 +220,14 @@ pub fn render_board(
             let ch_byte = 97u8 + (file as u8); // 'a'..'h'
             var s = String.new();
             s.push_byte(ch_byte);
-            print(FG_CYAN);
+            print(FG_CYAN());
             print(" ");
             print(s.as_ptr() as str);
             print(" ");
-            print(RESET);
+            print(RESET());
             f_idx = f_idx + 1;
         }
-        println("");
+        print("\r\n");
     }
 }
 
