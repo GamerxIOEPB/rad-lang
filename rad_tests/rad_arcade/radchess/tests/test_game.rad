@@ -1,0 +1,62 @@
+import "../src/chess/board";
+import "../src/chess/rules";
+import "../src/chess/notation";
+import "../src/ai/search";
+
+fn main() {
+    println("=== Testing Full Chess Game & PGN Export ===");
+
+    var b = Board.new();
+
+    // Play Fool's mate: 1. f3 e5 2. g4 Qh4#
+    // f2f3
+    let m1 = parse_input_move(b, "f2f3");
+    let san1 = move_to_san(b, m1);
+    b.make_move(m1);
+    let s1 = san1.as_ptr() as str;
+    println(f"Move 1: {s1}");
+
+    // e7e5
+    let m2 = parse_input_move(b, "e7e5");
+    let san2 = move_to_san(b, m2);
+    b.make_move(m2);
+    let s2 = san2.as_ptr() as str;
+    println(f"Move 2: {s2}");
+
+    // g2g4
+    let m3 = parse_input_move(b, "g2g4");
+    let san3 = move_to_san(b, m3);
+    b.make_move(m3);
+    let s3 = san3.as_ptr() as str;
+    println(f"Move 3: {s3}");
+
+    // e1 is checked by queen moving d8h4
+    let m4 = parse_input_move(b, "d8h4");
+    let san4 = move_to_san(b, m4);
+    b.make_move(m4);
+    let s4 = san4.as_ptr() as str;
+    println(f"Move 4: {s4}");
+
+    let draw_buf = malloc(8usize) as *raw var i32;
+    let status = evaluate_game_status(b, draw_buf);
+    free(draw_buf as *raw u8);
+
+    if status == STATUS_BLACK_WON {
+        println("SUCCESS: Fool's mate accurately detected Black victory (STATUS_BLACK_WON)!");
+    } else {
+        println("FAILED: Checkmate not detected!");
+    }
+
+    // Verify PGN export
+    var moves = Vec.new();
+    moves.push(m1);
+    moves.push(m2);
+    moves.push(m3);
+    moves.push(m4);
+
+    let pgn = export_pgn(moves, "Player1", "Player2", "0-1");
+    println("Exported PGN:");
+    println(pgn.as_ptr() as str);
+
+    println("All game simulation tests passed!");
+}

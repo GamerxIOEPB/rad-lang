@@ -1,0 +1,568 @@
+// ==============================================================================
+// RadChess: Board Representation, Zobrist Hashing, Move Application & FEN
+// ==============================================================================
+
+import "./constants";
+import "./moves";
+
+pub struct UndoState {
+    pub u_from_sq: u8,
+    pub u_to_sq: u8,
+    pub u_moved_piece: u8,
+    pub u_captured_piece: u8,
+    pub u_promo_type: u8,
+    pub u_flags: u8,
+    pub u_prev_castling: u8,
+    pub u_prev_ep_sq: i32,
+    pub u_prev_halfmove: i32,
+    pub u_prev_zobrist: u64,
+}
+
+pub struct Board {
+    // 64 squares (0=a1 .. 63=h8)
+    pub squares: *raw var u8,
+    pub side_to_move: i32,
+    pub castling: u8,
+    pub ep_sq: i32, // -1 if none
+    pub halfmove_clock: i32,
+    pub fullmove_number: i32,
+    pub zobrist_hash: u64,
+
+    // Undo stack for make/unmake
+    pub undo_stack: *raw var UndoState,
+    pub undo_count: usize,
+
+    // History of Zobrist hashes for 3-fold repetition detection
+    pub history_hashes: *raw var u64,
+    pub history_count: usize,
+
+    // Zobrist random keys
+    pub z_pieces: *raw var u64,    // 64 * 16
+    pub z_castling: *raw var u64,  // 16
+    pub z_ep: *raw var u64,        // 8
+    pub z_side: u64,
+}
+
+fn rand64(var seed: u64) -> u64 {
+    seed = (seed * 6364136223846793005u64) + 1442695040888963407u64
+    seed = seed ^ (seed >> 12u64)
+    seed = seed ^ (seed << 25u64)
+    seed = seed ^ (seed >> 27u64)
+    return seed * 2685821657736338717u64
+}
+
+impl Board {
+    pub fn new() -> Board {
+        let sqs = malloc(64usize * 8usize) as *raw var u8
+        let u_stack = malloc(1024usize * 8usize) as *raw var UndoState
+        let h_hashes = malloc(1024usize * 8usize) as *raw var u64
+
+        let zp = malloc(64usize * 16usize * 8usize) as *raw var u64
+        let zc = malloc(16usize * 8usize) as *raw var u64
+        let ze = malloc(8usize * 8usize) as *raw var u64
+
+        var seed: u64 = 1070372u64
+        var i = 0usize
+        while i < (64usize * 16usize) {
+            seed = rand64(seed)
+            zp[i] = seed
+            i = i + 1usize
+        }
+        i = 0usize
+        while i < 16usize {
+            seed = rand64(seed)
+            zc[i] = seed
+            i = i + 1usize
+        }
+        i = 0usize
+        while i < 8usize {
+            seed = rand64(seed)
+            ze[i] = seed
+            i = i + 1usize
+        }
+        seed = rand64(seed)
+        let z_s = seed
+
+        var b = Board {
+            squares: sqs,
+            side_to_move: COLOR_WHITE,
+            castling: CASTLE_ALL,
+            ep_sq: -1,
+            halfmove_clock: 0,
+            fullmove_number: 1,
+            zobrist_hash: 0u64,
+            undo_stack: u_stack,
+            undo_count: 0usize,
+            history_hashes: h_hashes,
+            history_count: 0usize,
+            z_pieces: zp,
+            z_castling: zc,
+            z_ep: ze,
+            z_side: z_s,
+        }
+        b.reset_start_pos()
+        return b
+    }
+
+    pub fn compute_zobrist(self) -> u64 {
+        var h: u64 = 0u64
+        var sq = 0usize
+        while sq < 64usize {
+            let p = self.squares[sq]
+            if p != 0u8 {
+                let idx = sq * 16usize + (p as usize)
+                h = h ^ self.z_pieces[idx]
+            }
+            sq = sq + 1usize
+        }
+
+        let c_idx = (self.castling & 15u8) as usize
+        h = h ^ self.z_castling[c_idx]
+
+        if self.ep_sq >= 0 {
+            let ep_file = sq_file(self.ep_sq as u8)
+            h = h ^ self.z_ep[ep_file]
+        }
+
+        if self.side_to_move == COLOR_BLACK {
+            h = h ^ self.z_side
+        }
+
+        return h
+    }
+
+    pub fn reset_start_pos(var self) {
+        self.load_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    }
+
+    pub fn get_piece(self, sq: u8) -> u8 {
+        if sq >= 64u8 {
+            return 0u8
+        }
+        return self.squares[sq as usize]
+    }
+
+    pub fn load_fen(var self, fen: str) -> bool {
+        let p = fen as *raw u8
+        let len = chess_str_len(fen)
+        var i = 0usize
+
+        // 1. Clear board
+        var s = 0usize
+        while s < 64usize {
+            self.squares[s] = 0u8
+            s = s + 1usize
+        }
+        self.undo_count = 0usize
+        self.history_count = 0usize
+
+        // 2. Parse Piece Placement
+        var rank = 7i32 // Rank 8 is top in FEN
+        var file = 0i32
+        while i < len && rank >= 0 {
+            let ch = p[i]
+            if ch == 32u8 { // ' '
+                i = i + 1usize
+                break
+            }
+            if ch == 47u8 { // '/'
+                rank = rank - 1
+                file = 0
+            } else if ch >= 49u8 && ch <= 56u8 { // '1'..'8'
+                file = file + ((ch - 48u8) as i32)
+            } else {
+                var piece_type = PIECE_NONE
+                var color = COLOR_WHITE
+                if ch >= 97u8 && ch <= 122u8 {
+                    color = COLOR_BLACK
+                }
+
+                if ch == 80u8 || ch == 112u8 { piece_type = PIECE_PAWN }
+                else if ch == 78u8 || ch == 110u8 { piece_type = PIECE_KNIGHT }
+                else if ch == 66u8 || ch == 98u8 { piece_type = PIECE_BISHOP }
+                else if ch == 82u8 || ch == 114u8 { piece_type = PIECE_ROOK }
+                else if ch == 81u8 || ch == 113u8 { piece_type = PIECE_QUEEN }
+                else if ch == 75u8 || ch == 107u8 { piece_type = PIECE_KING }
+
+                if file >= 0 && file < 8 && rank >= 0 && rank < 8 {
+                    let sq = ((rank * 8) + file) as usize
+                    self.squares[sq] = make_piece(color, piece_type)
+                }
+                file = file + 1
+            }
+            i = i + 1usize
+        }
+
+        // 3. Side to move
+        while i < len && p[i] == 32u8 { i = i + 1usize }
+        if i < len {
+            if p[i] == 98u8 { // 'b'
+                self.side_to_move = COLOR_BLACK
+            } else {
+                self.side_to_move = COLOR_WHITE
+            }
+            i = i + 1usize
+        }
+
+        // 4. Castling rights
+        while i < len && p[i] == 32u8 { i = i + 1usize }
+        self.castling = 0u8
+        while i < len && p[i] != 32u8 {
+            let c = p[i]
+            if c == 75u8 { self.castling = self.castling | CASTLE_WK }      // 'K'
+            else if c == 81u8 { self.castling = self.castling | CASTLE_WQ } // 'Q'
+            else if c == 107u8 { self.castling = self.castling | CASTLE_BK }// 'k'
+            else if c == 113u8 { self.castling = self.castling | CASTLE_BQ }// 'q'
+            i = i + 1usize
+        }
+
+        // 5. En passant square
+        while i < len && p[i] == 32u8 { i = i + 1usize }
+        self.ep_sq = -1
+        if i < len && p[i] != 45u8 { // not '-'
+            if i + 1usize < len {
+                let ep_f = p[i]
+                let ep_r = p[i + 1usize]
+                if ep_f >= 97u8 && ep_f <= 104u8 && ep_r >= 49u8 && ep_r <= 56u8 {
+                    let f = (ep_f - 97u8) as usize
+                    let r = (ep_r - 49u8) as usize
+                    self.ep_sq = ((r * 8usize) + f) as i32
+                }
+                i = i + 2usize
+            }
+        } else if i < len && p[i] == 45u8 {
+            i = i + 1usize
+        }
+
+        // 6. Halfmove clock
+        while i < len && p[i] == 32u8 { i = i + 1usize }
+        self.halfmove_clock = 0
+        while i < len && p[i] >= 48u8 && p[i] <= 57u8 {
+            self.halfmove_clock = (self.halfmove_clock * 10) + ((p[i] - 48u8) as i32)
+            i = i + 1usize
+        }
+
+        // 7. Fullmove number
+        while i < len && p[i] == 32u8 { i = i + 1usize }
+        self.fullmove_number = 1
+        var fnm = 0
+        while i < len && p[i] >= 48u8 && p[i] <= 57u8 {
+            fnm = (fnm * 10) + ((p[i] - 48u8) as i32)
+            i = i + 1usize
+        }
+        if fnm > 0 {
+            self.fullmove_number = fnm
+        }
+
+        self.zobrist_hash = self.compute_zobrist()
+        self.history_hashes[0usize] = self.zobrist_hash
+        self.history_count = 1usize
+        return true
+    }
+
+    pub fn to_fen(self) -> String {
+        var fen = String.new()
+
+        // 1. Piece placement
+        var rank: i32 = 7
+        while rank >= 0 {
+            var empty_count = 0
+            var file: i32 = 0
+            while file < 8 {
+                let sq = ((rank * 8) + file) as usize
+                let piece = self.squares[sq]
+                if piece == 0u8 {
+                    empty_count = empty_count + 1
+                } else {
+                    if empty_count > 0 {
+                        fen.push_byte((48 + empty_count) as u8)
+                        empty_count = 0
+                    }
+                    let p_type = get_piece_type(piece)
+                    let is_white = (get_piece_color(piece) == COLOR_WHITE)
+                    var ch: u8 = 0u8
+                    if p_type == PIECE_PAWN   { if is_white { ch = 80u8 } else { ch = 112u8 } } // P/p
+                    if p_type == PIECE_KNIGHT { if is_white { ch = 78u8 } else { ch = 110u8 } } // N/n
+                    if p_type == PIECE_BISHOP { if is_white { ch = 66u8 } else { ch = 98u8 } }  // B/b
+                    if p_type == PIECE_ROOK   { if is_white { ch = 82u8 } else { ch = 114u8 } } // R/r
+                    if p_type == PIECE_QUEEN  { if is_white { ch = 81u8 } else { ch = 113u8 } } // Q/q
+                    if p_type == PIECE_KING   { if is_white { ch = 75u8 } else { ch = 107u8 } } // K/k
+                    fen.push_byte(ch)
+                }
+                file = file + 1
+            }
+            if empty_count > 0 {
+                fen.push_byte((48 + empty_count) as u8)
+            }
+            if rank > 0 {
+                fen.push_byte(47u8) // '/'
+            }
+            rank = rank - 1
+        }
+
+        // 2. Side to move
+        fen.push_byte(32u8) // ' '
+        if self.side_to_move == COLOR_WHITE {
+            fen.push_byte(119u8) // 'w'
+        } else {
+            fen.push_byte(98u8)  // 'b'
+        }
+
+        // 3. Castling rights
+        fen.push_byte(32u8) // ' '
+        if self.castling == 0u8 {
+            fen.push_byte(45u8) // '-'
+        } else {
+            if (self.castling & CASTLE_WK) != 0u8 { fen.push_byte(75u8) }  // 'K'
+            if (self.castling & CASTLE_WQ) != 0u8 { fen.push_byte(81u8) }  // 'Q'
+            if (self.castling & CASTLE_BK) != 0u8 { fen.push_byte(107u8) } // 'k'
+            if (self.castling & CASTLE_BQ) != 0u8 { fen.push_byte(113u8) } // 'q'
+        }
+
+        // 4. En passant square
+        fen.push_byte(32u8) // ' '
+        if self.ep_sq < 0 {
+            fen.push_byte(45u8) // '-'
+        } else {
+            let ep_f = sq_file(self.ep_sq as u8)
+            let ep_r = sq_rank(self.ep_sq as u8)
+            fen.push_byte((97usize + ep_f) as u8)
+            fen.push_byte((49usize + ep_r) as u8)
+        }
+
+        // 5. Halfmove clock
+        fen.push_byte(32u8) // ' '
+        let h_str = chess_int_to_str(self.halfmove_clock as i64)
+        fen.push_str(h_str.as_ptr() as str)
+
+        // 6. Fullmove number
+        fen.push_byte(32u8) // ' '
+        let f_str = chess_int_to_str(self.fullmove_number as i64)
+        fen.push_str(f_str.as_ptr() as str)
+
+        fen.push_byte(0u8)
+        return fen
+    }
+
+    pub fn make_move(var self, m: Move) -> bool {
+        let from_sq = m.from_sq as usize
+        let to_sq = m.to_sq as usize
+        let piece = self.squares[from_sq]
+        if piece == 0u8 {
+            return false
+        }
+
+        let p_type = get_piece_type(piece)
+        let color = get_piece_color(piece)
+        var captured = self.squares[to_sq]
+        if m.is_ep() {
+            var ep_cap_sq = 0usize
+            if color == COLOR_WHITE {
+                ep_cap_sq = to_sq - 8usize
+            } else {
+                ep_cap_sq = to_sq + 8usize
+            }
+            captured = self.squares[ep_cap_sq]
+        }
+
+        // Record undo state
+        if self.undo_count < 1024usize {
+            self.undo_stack[self.undo_count] = UndoState {
+                u_from_sq: m.from_sq,
+                u_to_sq: m.to_sq,
+                u_moved_piece: piece,
+                u_captured_piece: captured,
+                u_promo_type: m.promo_type,
+                u_flags: m.flags,
+                u_prev_castling: self.castling,
+                u_prev_ep_sq: self.ep_sq,
+                u_prev_halfmove: self.halfmove_clock,
+                u_prev_zobrist: self.zobrist_hash,
+            }
+            self.undo_count = self.undo_count + 1usize
+        }
+
+        // Move piece on board
+        self.squares[from_sq] = 0u8
+        var placed_piece = piece
+
+        if m.is_promo() && m.promo_type != PIECE_NONE {
+            placed_piece = make_piece(color, m.promo_type)
+        }
+        self.squares[to_sq] = placed_piece
+
+        // En passant capture: remove pawn on ep square
+        if m.is_ep() {
+            var captured_sq = 0usize
+            if color == COLOR_WHITE {
+                captured_sq = to_sq - 8usize
+            } else {
+                captured_sq = to_sq + 8usize
+            }
+            captured = self.squares[captured_sq]
+            self.squares[captured_sq] = 0u8
+        }
+
+        // Castling move: move relevant rook
+        if (m.flags & FLAG_CASTLE_K) != 0u8 {
+            if color == COLOR_WHITE {
+                self.squares[7usize] = 0u8
+                self.squares[5usize] = make_piece(COLOR_WHITE, PIECE_ROOK) // f1
+            } else {
+                self.squares[63usize] = 0u8
+                self.squares[61usize] = make_piece(COLOR_BLACK, PIECE_ROOK) // f8
+            }
+        } else if (m.flags & FLAG_CASTLE_Q) != 0u8 {
+            if color == COLOR_WHITE {
+                self.squares[0usize] = 0u8
+                self.squares[3usize] = make_piece(COLOR_WHITE, PIECE_ROOK) // d1
+            } else {
+                self.squares[56usize] = 0u8
+                self.squares[59usize] = make_piece(COLOR_BLACK, PIECE_ROOK) // d8
+            }
+        }
+
+        // Update castling rights if King or Rook moved
+        if p_type == PIECE_KING {
+            if color == COLOR_WHITE {
+                self.castling = self.castling & (~(CASTLE_WK | CASTLE_WQ))
+            } else {
+                self.castling = self.castling & (~(CASTLE_BK | CASTLE_BQ))
+            }
+        } else if p_type == PIECE_ROOK {
+            if from_sq == 0usize { self.castling = self.castling & (~CASTLE_WQ) }
+            else if from_sq == 7usize { self.castling = self.castling & (~CASTLE_WK) }
+            else if from_sq == 56usize { self.castling = self.castling & (~CASTLE_BQ) }
+            else if from_sq == 63usize { self.castling = self.castling & (~CASTLE_BK) }
+        }
+
+        // If a rook is captured on its starting square, opponent loses castling right
+        if to_sq == 0usize { self.castling = self.castling & (~CASTLE_WQ) }
+        else if to_sq == 7usize { self.castling = self.castling & (~CASTLE_WK) }
+        else if to_sq == 56usize { self.castling = self.castling & (~CASTLE_BQ) }
+        else if to_sq == 63usize { self.castling = self.castling & (~CASTLE_BK) }
+
+        // Update En Passant square
+        self.ep_sq = -1
+        if p_type == PIECE_PAWN {
+            if color == COLOR_WHITE && to_sq == from_sq + 16usize {
+                self.ep_sq = (from_sq + 8usize) as i32
+            } else if color == COLOR_BLACK && from_sq == to_sq + 16usize {
+                self.ep_sq = (from_sq - 8usize) as i32
+            }
+        }
+
+        // Update halfmove clock (resets on pawn move or capture)
+        if p_type == PIECE_PAWN || captured != 0u8 {
+            self.halfmove_clock = 0
+        } else {
+            self.halfmove_clock = self.halfmove_clock + 1
+        }
+
+        // Update fullmove number
+        if self.side_to_move == COLOR_BLACK {
+            self.fullmove_number = self.fullmove_number + 1
+            self.side_to_move = COLOR_WHITE
+        } else {
+            self.side_to_move = COLOR_BLACK
+        }
+
+        // Recompute Zobrist and update history
+        self.zobrist_hash = self.compute_zobrist()
+        if self.history_count < 1024usize {
+            self.history_hashes[self.history_count] = self.zobrist_hash
+            self.history_count = self.history_count + 1usize
+        }
+
+        return true
+    }
+
+    pub fn unmake_move(var self) {
+        if self.undo_count == 0usize {
+            return
+        }
+
+        self.undo_count = self.undo_count - 1usize
+        let st = self.undo_stack[self.undo_count]
+        let from_sq = st.u_from_sq as usize
+        let to_sq = st.u_to_sq as usize
+        let color = get_piece_color(st.u_moved_piece)
+
+        // Restore moved piece to from_sq
+        self.squares[from_sq] = st.u_moved_piece
+
+        // Restore captured piece or clear to_sq
+        if (st.u_flags & FLAG_EP) != 0u8 {
+            self.squares[to_sq] = 0u8
+            var cap_sq = 0usize
+            if color == COLOR_WHITE {
+                cap_sq = to_sq - 8usize
+            } else {
+                cap_sq = to_sq + 8usize
+            }
+            self.squares[cap_sq] = st.u_captured_piece
+        } else {
+            self.squares[to_sq] = st.u_captured_piece
+        }
+
+        // Undo castling rook moves
+        if (st.u_flags & FLAG_CASTLE_K) != 0u8 {
+            if color == COLOR_WHITE {
+                self.squares[5usize] = 0u8
+                self.squares[7usize] = make_piece(COLOR_WHITE, PIECE_ROOK)
+            } else {
+                self.squares[61usize] = 0u8
+                self.squares[63usize] = make_piece(COLOR_BLACK, PIECE_ROOK)
+            }
+        } else if (st.u_flags & FLAG_CASTLE_Q) != 0u8 {
+            if color == COLOR_WHITE {
+                self.squares[3usize] = 0u8
+                self.squares[0usize] = make_piece(COLOR_WHITE, PIECE_ROOK)
+            } else {
+                self.squares[59usize] = 0u8
+                self.squares[56usize] = make_piece(COLOR_BLACK, PIECE_ROOK)
+            }
+        }
+
+        // Restore metadata
+        self.castling = st.u_prev_castling
+        self.ep_sq = st.u_prev_ep_sq
+        self.halfmove_clock = st.u_prev_halfmove
+        self.zobrist_hash = st.u_prev_zobrist
+
+        if self.side_to_move == COLOR_WHITE {
+            self.side_to_move = COLOR_BLACK
+            self.fullmove_number = self.fullmove_number - 1
+        } else {
+            self.side_to_move = COLOR_WHITE
+        }
+
+        if self.history_count > 1usize {
+            self.history_count = self.history_count - 1usize
+        }
+    }
+
+    pub fn repetition_count(self) -> i32 {
+        var count = 0
+        var i = 0usize
+        while i < self.history_count {
+            if self.history_hashes[i] == self.zobrist_hash {
+                count = count + 1
+            }
+            i = i + 1usize
+        }
+        return count
+    }
+
+    pub fn destroy(var self) {
+        if (self.squares as usize) != 0usize {
+            free(self.squares as *raw u8)
+            free(self.undo_stack as *raw u8)
+            free(self.history_hashes as *raw u8)
+            free(self.z_pieces as *raw u8)
+            free(self.z_castling as *raw u8)
+            free(self.z_ep as *raw u8)
+            self.squares = 0usize as *raw var u8
+        }
+    }
+}

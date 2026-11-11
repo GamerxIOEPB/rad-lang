@@ -1,0 +1,205 @@
+// ==============================================================================
+// RadChess: Configuration & Player Profile Persistence
+// Stores settings in ~/.config/radchess/config.ini.
+// ==============================================================================
+
+import "./chess/constants";
+
+pub struct ChessConfig {
+    pub player_name: String,
+    pub piece_theme: i32,     // 0=Unicode, 1=ASCII
+    pub color_theme: i32,     // 0=Modern Slate, 1=Classic Wood, 2=Forest Emerald, 3=Midnight, 4=Cyberpunk
+    pub show_coords: bool,
+    pub ai_difficulty: i32,   // 1=Beginner, 2=Easy, 3=Medium, 4=Hard
+    pub time_control_idx: i32,// 0=No clock, 1=3+2, 2=5+3, 3=10+0
+}
+
+impl ChessConfig {
+    pub fn default() -> ChessConfig {
+        var name = String.from_str("Player");
+        let u = getenv("USER");
+        if (u as usize) != 0usize {
+            let u_str = u as str;
+            if chess_str_len(u_str) > 0usize {
+                name = String.from_str(u_str);
+            }
+        }
+
+        ChessConfig {
+            player_name: name,
+            piece_theme: 0, // Unicode default
+            color_theme: 0, // Modern Slate
+            show_coords: true,
+            ai_difficulty: 2, // Easy default
+            time_control_idx: 2, // 5+3 Rapid default
+        }
+    }
+
+    pub fn get_config_dir() -> String {
+        var dir = String.new();
+        let home = getenv("HOME");
+        if (home as usize) != 0usize {
+            dir.push_str(home as str);
+        } else {
+            dir.push_str("/tmp");
+        }
+        dir.push_str("/.config/radchess");
+        dir
+    }
+
+    pub fn get_config_path() -> String {
+        var path = ChessConfig.get_config_dir();
+        path.push_str("/config.ini");
+        path
+    }
+
+    pub fn ensure_dir_exists() {
+        let home = getenv("HOME");
+        if (home as usize) != 0usize {
+            var cdir = String.new();
+            cdir.push_str(home as str);
+            cdir.push_str("/.config");
+            // SYS_mkdir = 83, mode 0755 = 493
+            let _ = syscall2(83i64, cdir.as_ptr() as *raw u8, 493i64);
+        }
+
+        let dir = ChessConfig.get_config_dir();
+        let _ = syscall2(83i64, dir.as_ptr() as *raw u8, 493i64);
+    }
+
+    pub fn load() -> ChessConfig {
+        ChessConfig.ensure_dir_exists();
+        let path = ChessConfig.get_config_path();
+        let fp = fopen(path.as_ptr() as str, "rb");
+        if (fp as usize) == 0usize {
+            let def = ChessConfig.default();
+            def.save();
+            return def;
+        }
+
+        // Read up to 4096 bytes
+        let buf = malloc(4096usize) as *raw var u8;
+        let n = fread(buf, 1i64, 4095i64, fp);
+        fclose(fp);
+
+        if n <= 0i64 {
+            free(buf as *raw u8);
+            let def = ChessConfig.default();
+            return def;
+        }
+        buf[n as usize] = 0u8;
+
+        var cfg = ChessConfig.default();
+
+        // Simple key=value parser
+        var line_start = 0usize;
+        var i = 0usize;
+        let total = n as usize;
+
+        while i <= total {
+            if i == total || buf[i] == 10u8 || buf[i] == 13u8 {
+                if i > line_start {
+                    // Find '='
+                    var eq_idx = 0usize;
+                    var has_eq = false;
+                    var k = line_start;
+                    while k < i {
+                        if buf[k] == 61u8 { // '='
+                            eq_idx = k;
+                            has_eq = true;
+                            break;
+                        }
+                        k = k + 1usize;
+                    }
+
+                    if has_eq {
+                        var key = String.new();
+                        var kj = line_start;
+                        while kj < eq_idx {
+                            if buf[kj] != 32u8 && buf[kj] != 9u8 {
+                                key.push_byte(buf[kj]);
+                            }
+                            kj = kj + 1usize;
+                        }
+
+                        var val = String.new();
+                        var vj = eq_idx + 1usize;
+                        while vj < i {
+                            let ch = buf[vj];
+                            if ch != 32u8 && ch != 9u8 && ch != 10u8 && ch != 13u8 {
+                                val.push_byte(ch);
+                            }
+                            vj = vj + 1usize;
+                        }
+
+                        let ks = key.as_ptr() as str;
+                        let vs = val.as_ptr() as str;
+
+                        if chess_str_eq(ks, "player_name") {
+                            if val.len() > 0usize {
+                                cfg.player_name = val;
+                            }
+                        } else if chess_str_eq(ks, "piece_theme") {
+                            cfg.piece_theme = chess_parse_int(vs);
+                        } else if chess_str_eq(ks, "color_theme") {
+                            cfg.color_theme = chess_parse_int(vs);
+                        } else if chess_str_eq(ks, "show_coords") {
+                            cfg.show_coords = chess_str_eq(vs, "1") || chess_str_eq(vs, "true");
+                        } else if chess_str_eq(ks, "ai_difficulty") {
+                            cfg.ai_difficulty = chess_parse_int(vs);
+                        } else if chess_str_eq(ks, "time_control") {
+                            cfg.time_control_idx = chess_parse_int(vs);
+                        }
+                    }
+                }
+                line_start = i + 1usize;
+            }
+            i = i + 1usize;
+        }
+
+        free(buf as *raw u8);
+        cfg
+    }
+
+    pub fn save(self) {
+        ChessConfig.ensure_dir_exists();
+        let path = ChessConfig.get_config_path();
+        let fp = fopen(path.as_ptr() as str, "wb");
+        if (fp as usize) == 0usize {
+            return;
+        }
+
+        var content = String.new();
+        content.push_str("[radchess]\n");
+        content.push_str("player_name=");
+        content.push_str(self.player_name.as_ptr() as str);
+        content.push_str("\n");
+
+        content.push_str("piece_theme=");
+        content.push_str(chess_int_to_str(self.piece_theme as i64).as_ptr() as str);
+        content.push_str("\n");
+
+        content.push_str("color_theme=");
+        content.push_str(chess_int_to_str(self.color_theme as i64).as_ptr() as str);
+        content.push_str("\n");
+
+        content.push_str("show_coords=");
+        if self.show_coords {
+            content.push_str("1\n");
+        } else {
+            content.push_str("0\n");
+        }
+
+        content.push_str("ai_difficulty=");
+        content.push_str(chess_int_to_str(self.ai_difficulty as i64).as_ptr() as str);
+        content.push_str("\n");
+
+        content.push_str("time_control=");
+        content.push_str(chess_int_to_str(self.time_control_idx as i64).as_ptr() as str);
+        content.push_str("\n");
+
+        let p = content.as_ptr() as *raw u8;
+        let _w = fwrite(p, 1i64, content.len() as i64, fp);
+        fclose(fp);
+    }
+}

@@ -1,0 +1,166 @@
+// ==============================================================================
+// RadChess: LAN Auto-Discovery via UDP Multicast / Broadcast
+// Zero-config discovery on UDP 45871 (broadcast 255.255.255.255 & 239.255.42.99).
+// ==============================================================================
+
+import "./constants";
+import "./transport";
+import "./protocol";
+import "../chess/constants";
+
+pub struct LanRoom {
+    pub room_name: String,
+    pub room_ip: String,
+    pub room_port: i32,
+    pub room_color: i32,
+    pub room_time_control: i32,
+    pub room_last_seen: i64,
+}
+
+pub struct LanBeaconManager {
+    pub udp_fd: i32,
+    pub recv_buf: *raw var u8,
+    pub rooms: Vec<LanRoom>,
+    pub last_beacon_sent_ms: i64,
+}
+
+impl LanBeaconManager {
+    pub fn new() -> LanBeaconManager {
+        let fd = create_udp_socket();
+        set_reuseaddr(fd);
+        set_broadcast(fd);
+        set_nonblocking(fd);
+
+        // Bind to UDP beacon port 45871
+        let _ = bind_socket(fd, NET_UDP_BEACON_PORT, 0u32);
+
+        let buf = malloc(1024usize) as *raw var u8;
+        LanBeaconManager {
+            udp_fd: fd,
+            recv_buf: buf,
+            rooms: Vec.new(),
+            last_beacon_sent_ms: 0i64,
+        }
+    }
+
+    pub fn broadcast_beacon(
+        var self,
+        host_name: str,
+        tcp_port: i32,
+        host_color: i32,
+        time_control: i32
+    ) {
+        if self.udp_fd < 0 { return; }
+
+        var beacon = String.new();
+        beacon.push_str("RADCHESS_BEACON:");
+        beacon.push_str(host_name);
+        beacon.push_str(":");
+        beacon.push_str(chess_int_to_str(tcp_port as i64).as_ptr() as str);
+        beacon.push_str(":");
+        beacon.push_str(chess_int_to_str(host_color as i64).as_ptr() as str);
+        beacon.push_str(":");
+        beacon.push_str(chess_int_to_str(time_control as i64).as_ptr() as str);
+        beacon.push_str("\n");
+
+        let b_str = beacon.as_ptr() as str;
+        let b_len = chess_str_len(b_str);
+
+        // Broadcast to 255.255.255.255 (0xffffffff)
+        let _ = send_udp(self.udp_fd, b_str as *raw u8, b_len, 4294967295u32, NET_UDP_BEACON_PORT);
+
+        // Multicast to 239.255.42.99
+        let mcast_ip = parse_ipv4_addr("239.255.42.99");
+        let _ = send_udp(self.udp_fd, b_str as *raw u8, b_len, mcast_ip, NET_UDP_BEACON_PORT);
+    }
+
+    pub fn poll_rooms(var self, now_ms: i64) -> Vec<LanRoom> {
+        if self.udp_fd < 0 {
+            return self.rooms;
+        }
+
+        while true {
+            let mut_out_ip = malloc(8usize) as *raw var u32;
+            let mut_out_port = malloc(8usize) as *raw var i32;
+            let n = recv_udp(self.udp_fd, self.recv_buf, 1023usize, mut_out_ip, mut_out_port);
+            if n <= 0i64 {
+                free(mut_out_ip as *raw u8);
+                free(mut_out_port as *raw u8);
+                break;
+            }
+
+            self.recv_buf[n as usize] = 0u8;
+            let raw_msg = self.recv_buf as *raw u8 as str;
+
+            let tag = parse_protocol_field(raw_msg, 0usize);
+            if chess_str_eq(tag.as_ptr() as str, "RADCHESS_BEACON") {
+                let name = parse_protocol_field(raw_msg, 1usize);
+                let port_str = parse_protocol_field(raw_msg, 2usize);
+                let color_str = parse_protocol_field(raw_msg, 3usize);
+                let tc_str = parse_protocol_field(raw_msg, 4usize);
+
+                let port_val = chess_parse_int(port_str.as_ptr() as str);
+                let color_val = chess_parse_int(color_str.as_ptr() as str);
+                let tc_val = chess_parse_int(tc_str.as_ptr() as str);
+                let ip_str = format_ipv4_addr(mut_out_ip[0usize]);
+
+                // Check if room already in list
+                var found_idx = -1;
+                var ri = 0usize;
+                while ri < self.rooms.len {
+                    let r = self.rooms.ptr[ri];
+                    if chess_str_eq(r.room_ip.as_ptr() as str, ip_str.as_ptr() as str) && r.room_port == port_val {
+                        found_idx = ri as i32;
+                        break;
+                    }
+                    ri = ri + 1usize;
+                }
+
+                if found_idx >= 0 {
+                    let u_idx = found_idx as usize;
+                    self.rooms.ptr[u_idx].room_last_seen = now_ms;
+                    self.rooms.ptr[u_idx].room_name = name;
+                    self.rooms.ptr[u_idx].room_color = color_val;
+                    self.rooms.ptr[u_idx].room_time_control = tc_val;
+                } else {
+                    self.rooms.push(LanRoom {
+                        room_name: name,
+                        room_ip: ip_str,
+                        room_port: port_val,
+                        room_color: color_val,
+                        room_time_control: tc_val,
+                        room_last_seen: now_ms,
+                    });
+                }
+            }
+
+            free(mut_out_ip as *raw u8);
+            free(mut_out_port as *raw u8);
+        }
+
+        // Prune stale rooms older than 6000ms
+        var active_rooms = Vec.new();
+        var i = 0usize;
+        while i < self.rooms.len {
+            let r = self.rooms.ptr[i];
+            if (now_ms - r.room_last_seen) < 6000i64 {
+                active_rooms.push(r);
+            }
+            i = i + 1usize;
+        }
+        self.rooms = active_rooms;
+
+        self.rooms
+    }
+
+    pub fn close_discovery(var self) {
+        if self.udp_fd >= 0 {
+            close_socket(self.udp_fd);
+            self.udp_fd = -1;
+        }
+        if (self.recv_buf as usize) != 0usize {
+            free(self.recv_buf as *raw u8);
+            self.recv_buf = 0usize as *raw var u8;
+        }
+    }
+}

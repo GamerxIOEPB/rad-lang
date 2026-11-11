@@ -1,0 +1,12 @@
+import "../src/config";
+
+fn main() -> i32 {
+    let cfg = ChessConfig.load();
+    print("Loaded player_name: ");
+    println(cfg.player_name.as_ptr() as str);
+    print("Piece theme: ");
+    println(chess_int_to_str(cfg.piece_theme as i64).as_ptr() as str);
+    cfg.save();
+    println("Config save/load test passed!");
+    0
+}

@@ -282,3 +282,74 @@ fn get_dirname(path: str) -> String {
     res.push_byte(0u8)
     return res
 }
+
+fn normalize_path(path: str) -> String {
+    let slen = str_len(path)
+    if slen == 0usize {
+        var empty = String.new()
+        empty.push_byte(46u8) // '.'
+        empty.push_byte(0u8)
+        return empty
+    }
+    let p = path as *raw u8
+    let is_abs = p[0] == 47u8 // '/'
+
+    // Split path into segments by '/'
+    var segments = Vec.new()
+    var i = 0usize
+    while i < slen {
+        while i < slen && p[i] == 47u8 {
+            i = i + 1usize
+        }
+        if i >= slen {
+            break
+        }
+        var seg = String.new()
+        while i < slen && p[i] != 47u8 {
+            seg.push_byte(p[i])
+            i = i + 1usize
+        }
+        seg.push_byte(0u8)
+        let s = seg.as_ptr() as str
+        if str_eq(s, ".") {
+            // ignore current dir
+        } else if str_eq(s, "..") {
+            if segments.len > 0usize {
+                let top = segments.ptr[segments.len - 1usize].as_ptr() as str
+                if str_eq(top, "..") {
+                    segments.push(seg)
+                } else {
+                    segments.len = segments.len - 1usize
+                }
+            } else if !is_abs {
+                segments.push(seg)
+            }
+        } else {
+            segments.push(seg)
+        }
+    }
+
+    var res = String.new()
+    if is_abs {
+        res.push_byte(47u8) // '/'
+    }
+    if segments.len == 0usize {
+        if !is_abs {
+            res.push_byte(46u8) // '.'
+        }
+        res.push_byte(0u8)
+        return res
+    }
+
+    var si = 0usize
+    while si < segments.len {
+        if si > 0usize {
+            res.push_byte(47u8) // '/'
+        }
+        let seg_str = segments.ptr[si].as_ptr() as str
+        res.push_str(seg_str)
+        si = si + 1usize
+    }
+    res.push_byte(0u8)
+    return res
+}

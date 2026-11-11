@@ -161,6 +161,8 @@ arcade: $(BIN_RADC)
 	$(BIN_RADC) rad_tests/rad_arcade/snake/main.rad -o bin/arcade/snake
 	$(BIN_RADC) rad_tests/rad_arcade/pong/main.rad -o bin/arcade/pong
 	$(BIN_RADC) rad_tests/rad_arcade/breakout/main.rad -o bin/arcade/breakout
+	$(BIN_RADC) rad_tests/rad_arcade/2048/main.rad -o bin/arcade/2048
+	$(BIN_RADC) rad_tests/rad_arcade/radchess/src/main.rad -o bin/arcade/radchess
 	@echo "[✓] Rad Arcade games built in bin/arcade/"
 
 dist:

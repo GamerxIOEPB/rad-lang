@@ -4,6 +4,8 @@
 // Zero C, zero libc, zero external library dependencies.
 // ==============================================================================
 
+import terminal;
+
 pub const KEY_EOF: i32        = 99
 pub const KEY_NONE: i32       = 0
 pub const KEY_CHAR: i32       = 1
@@ -88,6 +90,7 @@ pub struct KeyboardReader {
 
 impl KeyboardReader {
     pub fn new() -> KeyboardReader {
+        terminal_install_signal_guard()
         let pfd = malloc(16usize) as *raw var u8
         // fd = 0 (stdin)
         pfd[0usize] = 0u8

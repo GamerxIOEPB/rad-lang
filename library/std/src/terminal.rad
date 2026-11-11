@@ -78,6 +78,14 @@ impl TerminalSession {
 
         term_copy_bytes(self.orig_termios as *raw u8, self.raw_termios, 60usize)
 
+        terminal_install_signal_guard()
+        let guard = __rad_get_terminal_guard()
+        if (guard as usize) != 0usize {
+            term_copy_bytes(self.orig_termios as *raw u8, (guard as usize + 8usize) as *raw var u8, 60usize)
+            guard[1usize] = 1u8
+            guard[4usize] = 0u8
+        }
+
         // Read flags
         let iflag = term_get_u32(self.orig_termios as *raw u8, 0usize)
         let oflag = term_get_u32(self.orig_termios as *raw u8, 4usize)
@@ -122,6 +130,11 @@ impl TerminalSession {
             return true
         }
 
+        let guard = __rad_get_terminal_guard()
+        if (guard as usize) != 0usize {
+            guard[1usize] = 0u8
+        }
+
         // TCSETSF = 21508
         let r = syscall3(16i64, 0i64, 21508i64, self.orig_termios)
         if r == 0i64 {
@@ -133,6 +146,12 @@ impl TerminalSession {
 
     pub fn enter_alternate_screen(var self) {
         if !self.in_alt_screen {
+            terminal_install_signal_guard()
+            let guard = __rad_get_terminal_guard()
+            if (guard as usize) != 0usize {
+                guard[2usize] = 1u8
+                guard[4usize] = 0u8
+            }
             // \x1b[?1049h\x1b[>3u : enter alt screen and request Kitty progressive enhancement (flags 1|2)
             let cmd = "\x1b[?1049h\x1b[>3u"
             let _w = syscall3(1i64, 1i64, cmd as *raw u8, 14i64)
@@ -142,6 +161,10 @@ impl TerminalSession {
 
     pub fn leave_alternate_screen(var self) {
         if self.in_alt_screen {
+            let guard = __rad_get_terminal_guard()
+            if (guard as usize) != 0usize {
+                guard[2usize] = 0u8
+            }
             // \x1b[<u\x1b[?1049l : pop Kitty flags and leave alt screen
             let cmd = "\x1b[<u\x1b[?1049l"
             let _w = syscall3(1i64, 1i64, cmd as *raw u8, 12i64)
@@ -151,6 +174,11 @@ impl TerminalSession {
 
     pub fn hide_cursor(var self) {
         if !self.cursor_hidden {
+            terminal_install_signal_guard()
+            let guard = __rad_get_terminal_guard()
+            if (guard as usize) != 0usize {
+                guard[3usize] = 1u8
+            }
             // \x1b[?25l
             let cmd = "\x1b[?25l"
             let _w = syscall3(1i64, 1i64, cmd as *raw u8, 6i64)
@@ -160,6 +188,10 @@ impl TerminalSession {
 
     pub fn show_cursor(var self) {
         if self.cursor_hidden {
+            let guard = __rad_get_terminal_guard()
+            if (guard as usize) != 0usize {
+                guard[3usize] = 0u8
+            }
             // \x1b[?25h
             let cmd = "\x1b[?25h"
             let _w = syscall3(1i64, 1i64, cmd as *raw u8, 6i64)
@@ -201,6 +233,13 @@ impl TerminalSession {
         self.show_cursor()
         self.leave_alternate_screen()
         self.restore_mode()
+        let guard = __rad_get_terminal_guard()
+        if (guard as usize) != 0usize {
+            guard[4usize] = 1u8
+            guard[1usize] = 0u8
+            guard[2usize] = 0u8
+            guard[3usize] = 0u8
+        }
         if (self.orig_termios as usize) != 0usize {
             free(self.orig_termios as *raw u8)
             self.orig_termios = 0usize as *raw var u8
@@ -214,4 +253,115 @@ impl TerminalSession {
             self.winsize_buf = 0usize as *raw var u8
         }
     }
+}
+
+// ------------------------------------------------------------------------------
+// Global Terminal Restoration Guard and Linux Signal Handler
+// Pure Rad Linux SYS_rt_sigaction (13), atexit, and compiler panic cleanup hook.
+// ------------------------------------------------------------------------------
+
+pub fn terminal_global_restore() {
+    let guard = __rad_get_terminal_guard()
+    if (guard as usize) == 0usize {
+        return
+    }
+    if guard[0usize] == 0u8 {
+        return
+    }
+    if guard[4usize] != 0u8 {
+        return
+    }
+    guard[4usize] = 1u8
+
+    // Reset Kitty progressive enhancement and show cursor
+    let seq1 = "\x1b[<u\x1b[?25h"
+    let _ = syscall3(1i64, 1i64, seq1 as *raw u8, 10i64)
+
+    // Leave alternate screen if active
+    if guard[2usize] != 0u8 {
+        let seq2 = "\x1b[?1049l"
+        let _ = syscall3(1i64, 1i64, seq2 as *raw u8, 8i64)
+        guard[2usize] = 0u8
+    }
+
+    // Restore cooked termios mode if raw mode active
+    if guard[1usize] != 0u8 {
+        let orig = (guard as usize + 8usize) as *raw var u8
+        // TCSETSF = 21508
+        let _ = syscall3(16i64, 0i64, 21508i64, orig)
+        guard[1usize] = 0u8
+    }
+}
+
+pub fn terminal_signal_handler(sig: i32) {
+    terminal_global_restore()
+
+    if sig == 2 {
+        let msg = "\n[rad] Terminated by SIGINT (Ctrl+C)\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 36i64)
+    } else if sig == 15 {
+        let msg = "\n[rad] Terminated by SIGTERM\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 28i64)
+    } else if sig == 1 {
+        let msg = "\n[rad] Terminated by SIGHUP\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 27i64)
+    } else if sig == 3 {
+        let msg = "\n[rad] Terminated by SIGQUIT\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 28i64)
+    } else if sig == 11 {
+        let msg = "\n[rad] Fatal error: Segmentation fault (SIGSEGV)\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 48i64)
+    } else if sig == 6 {
+        let msg = "\n[rad] Fatal error: Aborted (SIGABRT)\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 37i64)
+    } else if sig == 4 {
+        let msg = "\n[rad] Fatal error: Illegal instruction (SIGILL)\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 48i64)
+    } else if sig == 7 {
+        let msg = "\n[rad] Fatal error: Bus error (SIGBUS)\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 38i64)
+    } else {
+        let msg = "\n[rad] Terminated by signal\n"
+        let _ = syscall3(1i64, 2i64, msg as *raw u8, 27i64)
+    }
+
+    // SYS_exit = 60, exit with standard 128 + sig code
+    let _ = syscall1(60i64, (128 + sig) as i64)
+}
+
+pub fn terminal_install_signal_guard() {
+    let guard = __rad_get_terminal_guard()
+    if (guard as usize) == 0usize {
+        return
+    }
+    if guard[0usize] != 0u8 {
+        return
+    }
+    guard[0usize] = 1u8
+
+    // Register atexit normal exit cleanup
+    atexit(terminal_global_restore as *raw u8)
+
+    // Register compiler panic cleanup hook
+    __rad_register_panic_hook(terminal_global_restore as *raw u8)
+
+    // Allocate Linux kernel struct kernel_sigaction (32 bytes)
+    let act = malloc(32usize) as *raw var u8
+    let act_u64 = act as *raw var i64
+    act_u64[0usize] = (terminal_signal_handler as *raw u8) as i64
+    act_u64[1usize] = 67108864i64 // SA_RESTORER (0x04000000)
+    act_u64[2usize] = (__rad_sigreturn_trampoline as *raw u8) as i64
+    act_u64[3usize] = 0i64
+
+    // SYS_rt_sigaction = 13, sigsetsize = 8
+    let _ = syscall4(13i64, 2i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGINT
+    let _ = syscall4(13i64, 15i64, act as *raw u8, 0usize as *raw u8, 8i64) // SIGTERM
+    let _ = syscall4(13i64, 1i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGHUP
+    let _ = syscall4(13i64, 3i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGQUIT
+    let _ = syscall4(13i64, 11i64, act as *raw u8, 0usize as *raw u8, 8i64) // SIGSEGV
+    let _ = syscall4(13i64, 6i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGABRT
+    let _ = syscall4(13i64, 4i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGILL
+    let _ = syscall4(13i64, 7i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGBUS
+
+    free(act)
 }

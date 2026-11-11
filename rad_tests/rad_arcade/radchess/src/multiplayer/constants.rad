@@ -1,0 +1,58 @@
+// ==============================================================================
+// RadChess: Multiplayer Networking Constants & Message Types
+// ==============================================================================
+
+pub const NET_TCP_DEFAULT_PORT: i32 = 45870;
+pub const NET_UDP_BEACON_PORT: i32   = 45871;
+
+pub const NET_ROLE_NONE: i32   = 0;
+pub const NET_ROLE_HOST: i32   = 1;
+pub const NET_ROLE_CLIENT: i32 = 2;
+
+pub const NET_STATE_IDLE: i32         = 0;
+pub const NET_STATE_LISTENING: i32    = 1;
+pub const NET_STATE_CONNECTING: i32   = 2;
+pub const NET_STATE_CONNECTED: i32    = 3;
+pub const NET_STATE_PLAYING: i32      = 4;
+pub const NET_STATE_DRAW_OFFERED: i32 = 5;
+pub const NET_STATE_GAME_OVER: i32    = 6;
+pub const NET_STATE_CLOSED: i32       = 7;
+
+// Network message opcodes
+pub const MSG_UNKNOWN: i32        = 0;
+pub const MSG_HELLO: i32          = 1;
+pub const MSG_WELCOME: i32        = 2;
+pub const MSG_START: i32          = 3;
+pub const MSG_MOVE: i32           = 4;
+pub const MSG_DRAW_OFFER: i32     = 5;
+pub const MSG_DRAW_ACCEPT: i32    = 6;
+pub const MSG_DRAW_DECLINE: i32   = 7;
+pub const MSG_RESIGN: i32         = 8;
+pub const MSG_REMATCH_REQ: i32    = 9;
+pub const MSG_REMATCH_ACCEPT: i32 = 10;
+pub const MSG_PING: i32           = 11;
+pub const MSG_PONG: i32           = 12;
+
+// String helpers for networking
+pub fn net_str_len(s: str) -> usize {
+    let p = s as *raw u8;
+    var i = 0usize;
+    while p[i] != 0u8 {
+        i = i + 1usize;
+    }
+    i
+}
+
+pub fn net_str_eq(a: str, b: str) -> bool {
+    let pa = a as *raw u8;
+    let pb = b as *raw u8;
+    var i = 0usize;
+    while true {
+        let ba = pa[i];
+        let bb = pb[i];
+        if ba != bb { return false; }
+        if ba == 0u8 { return true; }
+        i = i + 1usize;
+    }
+    true
+}

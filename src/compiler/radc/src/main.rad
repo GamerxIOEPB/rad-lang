@@ -108,7 +108,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
             if str_ends_with(arg, ".o") || str_ends_with(arg, ".a") || str_ends_with(arg, ".so") {
                 extra_objects.push(String.from_str(arg))
             } else {
-                var path_str = String.from_str(arg)
+                var path_str = normalize_path(arg)
                 input_paths.push(path_str)
             }
         }
@@ -170,7 +170,7 @@ fn try_path_with_rad(cand: String) -> String {
     return String.new()
 }
 
-fn resolve_import(spec: str, current_file: str) -> String {
+fn resolve_import_raw(spec: str, current_file: str) -> String {
     let cur_dir = get_dirname(current_file)
 
     // 1. Explicit relative or absolute path (starts with "./", "../", "/")
@@ -293,6 +293,14 @@ fn resolve_import(spec: str, current_file: str) -> String {
         ri = ri + 1usize
     }
 
+    return String.new()
+}
+
+fn resolve_import(spec: str, current_file: str) -> String {
+    let p = resolve_import_raw(spec, current_file)
+    if p.len() > 0usize {
+        return normalize_path(p.as_ptr() as str)
+    }
     return String.new()
 }
 

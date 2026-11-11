@@ -1,0 +1,230 @@
+// ==============================================================================
+// RadChess: Terminal Keyboard Input & Cursor Dispatcher
+// Arrow keys, WASD, Vim navigation, Enter selection, Hotkeys.
+// ==============================================================================
+
+import keyboard;
+import terminal;
+import "../chess/constants";
+import "../chess/moves";
+import "../chess/board";
+import "../chess/rules";
+
+pub struct ChessInputState {
+    pub cursor_file: i32, // 0..7
+    pub cursor_rank: i32, // 0..7
+    pub selected_sq: i32, // -1 if none
+    pub legal_target_sqs: Vec<i32>,
+    pub pending_chosen_move: Move,
+    pub draw_requested: bool,
+    pub resign_requested: bool,
+    pub undo_requested: bool,
+    pub pgn_export_requested: bool,
+    pub esc_pressed: bool,
+    pub reader: KeyboardReader,
+}
+
+impl ChessInputState {
+    pub fn new() -> ChessInputState {
+        let r = KeyboardReader.new();
+        ChessInputState {
+            cursor_file: 4, // e-file default
+            cursor_rank: 1, // rank 2 (White pawn) default
+            selected_sq: -1,
+            legal_target_sqs: Vec.new(),
+            pending_chosen_move: Move.none(),
+            draw_requested: false,
+            resign_requested: false,
+            undo_requested: false,
+            pgn_export_requested: false,
+            esc_pressed: false,
+            reader: r,
+        }
+    }
+
+    pub fn get_cursor_sq(self) -> i32 {
+        (self.cursor_rank * 8) + self.cursor_file
+    }
+
+    pub fn clear_selection(var self) {
+        self.selected_sq = -1;
+        self.legal_target_sqs = Vec.new();
+    }
+
+    // Process a single frame of keyboard input (non-blocking)
+    pub fn process_input(var self, b: Board, local_color: i32, flipped: bool) {
+        self.pending_chosen_move = Move.none();
+        self.draw_requested = false;
+        self.resign_requested = false;
+        self.undo_requested = false;
+        self.pgn_export_requested = false;
+        self.esc_pressed = false;
+
+        let ev = self.reader.read_key(0);
+        if ev.code == KEY_EOF {
+            self.esc_pressed = true;
+            return;
+        }
+        if !ev.is_press() {
+            return;
+        }
+
+        // Escape
+        if ev.code == KEY_ESC {
+            if self.selected_sq >= 0 {
+                self.clear_selection();
+            } else {
+                self.esc_pressed = true;
+            }
+            return;
+        }
+
+        // Navigation: Up
+        if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) { // Up, 'w', 'k'
+            if flipped {
+                if self.cursor_rank > 0 { self.cursor_rank = self.cursor_rank - 1; }
+            } else {
+                if self.cursor_rank < 7 { self.cursor_rank = self.cursor_rank + 1; }
+            }
+            return;
+        }
+
+        // Navigation: Down
+        if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) { // Down, 's', 'j'
+            if flipped {
+                if self.cursor_rank < 7 { self.cursor_rank = self.cursor_rank + 1; }
+            } else {
+                if self.cursor_rank > 0 { self.cursor_rank = self.cursor_rank - 1; }
+            }
+            return;
+        }
+
+        // Navigation: Left
+        if ev.code == KEY_LEFT || ev.is_char(97u8) || ev.is_char(104u8) { // Left, 'a', 'h'
+            if flipped {
+                if self.cursor_file < 7 { self.cursor_file = self.cursor_file + 1; }
+            } else {
+                if self.cursor_file > 0 { self.cursor_file = self.cursor_file - 1; }
+            }
+            return;
+        }
+
+        // Navigation: Right
+        if ev.code == KEY_RIGHT || ev.is_char(100u8) || ev.is_char(108u8) { // Right, 'd', 'l'
+            if flipped {
+                if self.cursor_file > 0 { self.cursor_file = self.cursor_file - 1; }
+            } else {
+                if self.cursor_file < 7 { self.cursor_file = self.cursor_file + 1; }
+            }
+            return;
+        }
+
+        // Action: Draw offer ('y' or 'Y')
+        if ev.is_char(121u8) || ev.is_char(89u8) {
+            self.draw_requested = true;
+            return;
+        }
+
+        // Action: Resign ('r' or 'R')
+        if ev.is_char(114u8) || ev.is_char(82u8) {
+            self.resign_requested = true;
+            return;
+        }
+
+        // Action: Undo ('u' or 'U')
+        if ev.is_char(117u8) || ev.is_char(85u8) {
+            self.undo_requested = true;
+            return;
+        }
+
+        // Action: PGN Export ('p' or 'P')
+        if ev.is_char(112u8) || ev.is_char(80u8) {
+            self.pgn_export_requested = true;
+            return;
+        }
+
+        // Selection: Enter or Space
+        if ev.code == KEY_ENTER || ev.is_char(32u8) {
+            let cur_sq = self.get_cursor_sq();
+
+            // Case 1: No square selected yet
+            if self.selected_sq < 0 {
+                let piece = b.squares[cur_sq as usize];
+                if piece != 0u8 && get_piece_color(piece) == local_color {
+                    self.selected_sq = cur_sq;
+                    // Compute legal moves originating from cur_sq
+                    let all_legal = generate_legal_moves(b);
+                    var targets = Vec.new();
+                    var i = 0usize;
+                    while i < all_legal.len {
+                        let m = all_legal.ptr[i];
+                        if m.from_sq == cur_sq {
+                            targets.push(m.to_sq);
+                        }
+                        i = i + 1usize;
+                    }
+                    self.legal_target_sqs = targets;
+                }
+                return;
+            }
+
+            // Case 2: Square already selected
+            if self.selected_sq >= 0 {
+                if cur_sq == self.selected_sq {
+                    // Deselect if pressed again on same square
+                    self.clear_selection();
+                    return;
+                }
+
+                // Check if target is in legal moves
+                let all_legal = generate_legal_moves(b);
+                var chosen_move = Move.none();
+                var i = 0usize;
+                while i < all_legal.len {
+                    let m = all_legal.ptr[i];
+                    if m.from_sq == self.selected_sq && m.to_sq == cur_sq {
+                        // Promotion default to Queen
+                        if m.is_promo() {
+                            if m.promo_type == PIECE_QUEEN {
+                                chosen_move = m;
+                                break;
+                            }
+                        } else {
+                            chosen_move = m;
+                            break;
+                        }
+                    }
+                    i = i + 1usize;
+                }
+
+                if !chosen_move.is_none() {
+                    self.pending_chosen_move = chosen_move;
+                    self.clear_selection();
+                    return;
+                }
+
+                // If clicked on another piece of own color, reselect
+                let piece = b.squares[cur_sq as usize];
+                if piece != 0u8 && get_piece_color(piece) == local_color {
+                    self.selected_sq = cur_sq;
+                    var targets = Vec.new();
+                    var j = 0usize;
+                    while j < all_legal.len {
+                        let m = all_legal.ptr[j];
+                        if m.from_sq == cur_sq {
+                            targets.push(m.to_sq);
+                        }
+                        j = j + 1usize;
+                    }
+                    self.legal_target_sqs = targets;
+                } else {
+                    self.clear_selection();
+                }
+            }
+        }
+    }
+
+    pub fn close_input(var self) {
+        self.reader.close_reader();
+    }
+}

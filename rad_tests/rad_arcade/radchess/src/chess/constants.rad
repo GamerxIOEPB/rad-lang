@@ -1,0 +1,169 @@
+// ==============================================================================
+// RadChess: Chess Constants, Types & Bitfield Helpers
+// Pure Rad, zero external dependencies.
+// ==============================================================================
+
+// Colors
+pub const COLOR_WHITE: i32 = 0
+pub const COLOR_BLACK: i32 = 1
+pub const COLOR_NONE: i32  = 2
+
+// Piece Types
+pub const PIECE_NONE: u8   = 0u8
+pub const PIECE_PAWN: u8   = 1u8
+pub const PIECE_KNIGHT: u8 = 2u8
+pub const PIECE_BISHOP: u8 = 3u8
+pub const PIECE_ROOK: u8   = 4u8
+pub const PIECE_QUEEN: u8  = 5u8
+pub const PIECE_KING: u8   = 6u8
+
+pub const PIECE_WHITE_PAWN: u8   = 1u8
+pub const PIECE_WHITE_KNIGHT: u8 = 2u8
+pub const PIECE_WHITE_BISHOP: u8 = 3u8
+pub const PIECE_WHITE_ROOK: u8   = 4u8
+pub const PIECE_WHITE_QUEEN: u8  = 5u8
+pub const PIECE_WHITE_KING: u8   = 6u8
+
+pub const PIECE_BLACK_PAWN: u8   = 9u8
+pub const PIECE_BLACK_KNIGHT: u8 = 10u8
+pub const PIECE_BLACK_BISHOP: u8 = 11u8
+pub const PIECE_BLACK_ROOK: u8   = 12u8
+pub const PIECE_BLACK_QUEEN: u8  = 13u8
+pub const PIECE_BLACK_KING: u8   = 14u8
+
+// Castling Rights Bitfield
+pub const CASTLE_WK: u8 = 1u8  // White Kingside (e1-g1)
+pub const CASTLE_WQ: u8 = 2u8  // White Queenside (e1-c1)
+pub const CASTLE_BK: u8 = 4u8  // Black Kingside (e8-g8)
+pub const CASTLE_BQ: u8 = 8u8  // Black Queenside (e8-c8)
+pub const CASTLE_ALL: u8 = 15u8
+
+// Move Flags
+pub const FLAG_NORMAL: u8    = 0u8
+pub const FLAG_CAPTURE: u8   = 1u8
+pub const FLAG_EP: u8        = 2u8
+pub const FLAG_CASTLE_K: u8  = 4u8
+pub const FLAG_CASTLE_Q: u8  = 8u8
+pub const FLAG_PROMOTION: u8 = 16u8
+
+// Game Status / Results
+pub const STATUS_ONGOING: i32   = 0
+pub const STATUS_WHITE_WON: i32 = 1
+pub const STATUS_BLACK_WON: i32 = 2
+pub const STATUS_DRAW: i32      = 3
+
+// Draw Reasons
+pub const DRAW_STALEMATE: i32    = 1
+pub const DRAW_REPETITION: i32   = 2
+pub const DRAW_50_MOVES: i32     = 3
+pub const DRAW_INSUFFICIENT: i32 = 4
+pub const DRAW_AGREED: i32       = 5
+
+// Piece Byte Encoding:
+// 0 = Empty
+// White: bit 3 = 0. P=1, N=2, B=3, R=4, Q=5, K=6
+// Black: bit 3 = 1. p=9, n=10, b=11, r=12, q=13, k=14
+
+pub fn make_piece(color: i32, ptype: u8) -> u8 {
+    if ptype == PIECE_NONE {
+        return 0u8
+    }
+    if color == COLOR_BLACK {
+        return (8u8 | ptype)
+    }
+    return ptype
+}
+
+pub fn get_piece_type(p: u8) -> u8 {
+    return p & 7u8
+}
+
+pub fn get_piece_color(p: u8) -> i32 {
+    if p == 0u8 {
+        return COLOR_NONE
+    }
+    if (p & 8u8) != 0u8 {
+        return COLOR_BLACK
+    }
+    return COLOR_WHITE
+}
+
+pub fn make_sq(file: usize, rank: usize) -> u8 {
+    return ((rank * 8usize) + file) as u8
+}
+
+pub fn sq_file(sq: u8) -> usize {
+    return (sq as usize) % 8usize
+}
+
+pub fn sq_rank(sq: u8) -> usize {
+    return (sq as usize) / 8usize
+}
+
+pub fn chess_str_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+pub fn chess_str_eq(a: str, b: str) -> bool {
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+pub fn chess_int_to_str(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0")
+    }
+    var v = val
+    var is_neg = false
+    if v < 0i64 {
+        is_neg = true
+        v = -v
+    }
+    var rev = String.new()
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8
+        rev.push_byte(48u8 + digit)
+        v = v / 10i64
+    }
+    if is_neg {
+        rev.push_byte(45u8) // '-'
+    }
+    var res = String.new()
+    var len = rev.len()
+    let p = rev.as_ptr()
+    while len > 0usize {
+        len = len - 1usize
+        res.push_byte(p[len])
+    }
+    return res
+}
+
+pub fn chess_parse_int(s: str) -> i32 {
+    let p = s as *raw u8;
+    let len = chess_str_len(s);
+    var v = 0i32;
+    var i = 0usize;
+    while i < len {
+        let ch = p[i];
+        if ch >= 48u8 && ch <= 57u8 {
+            v = (v * 10) + ((ch - 48u8) as i32);
+        }
+        i = i + 1usize;
+    }
+    v
+}
+

@@ -1,0 +1,18 @@
+import "../src/ai/search";
+
+fn main() {
+    var tt = TranspositionTable.new(16384usize)
+    var b_mate = Board.new()
+    b_mate.load_fen("r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4")
+
+    println("Running search on Scholar's mate puzzle (White to move)...")
+    let best = search_best_move(b_mate, tt, 2)
+    let uci = best.to_uci()
+    print("Found best move: ")
+    println(uci.as_ptr() as str)
+    if chess_str_eq(uci.as_ptr() as str, "h5f7") {
+        println("TEST PASSED: Found Qxf7# checkmate!")
+    } else {
+        println("TEST FAILED: Did not find Qxf7#")
+    }
+}

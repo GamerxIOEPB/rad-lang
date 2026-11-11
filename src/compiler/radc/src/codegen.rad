@@ -141,6 +141,20 @@ impl Codegen {
                                 }
                                 fi = fi + 1usize
                             }
+                        } else if self.parser.exprs.ptr[callee].kind == EXPR_FIELD_ACCESS {
+                            let recv_id = self.parser.exprs.ptr[callee].left
+                            if self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
+                                let rname = self.parser.exprs.ptr[recv_id].str_val.as_ptr() as str
+                                if str_eq(rname, "Vec") {
+                                    return "Vec"
+                                }
+                                if str_eq(rname, "String") {
+                                    return "String"
+                                }
+                                if self.is_struct_name(rname) {
+                                    return rname
+                                }
+                            }
                         }
                     }
                 }
@@ -269,7 +283,8 @@ impl Codegen {
         }
         if k == EXPR_BINARY {
             let op = ep[id].op
-            if op == TOK_EQEQ || op == TOK_NEQ || op == TOK_LT || op == TOK_LEQ || op == TOK_GT || op == TOK_GEQ || op == TOK_ANDAND || op == TOK_OROR {
+            if op == TOK_EQEQ || op == TOK_NEQ || op == TOK_LT || op == TOK_LEQ || op == TOK_GT || op == TOK_GEQ || op == TOK_ANDAND || op == TOK_OROR ||
+               op == TOK_AMP || op == TOK_PIPE || op == TOK_CARET || op == TOK_SHL || op == TOK_SHR || op == TOK_PERCENT {
                 return false
             }
             return self.is_expr_float(ep[id].left) || self.is_expr_float(ep[id].right)
@@ -328,7 +343,7 @@ impl Codegen {
             }
             fi = fi + 1usize
         }
-        if str_eq(fname, "puts") || str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "system") || str_eq(fname, "free") || str_eq(fname, "fclose") || str_eq(fname, "ftell") || str_eq(fname, "getenv") || (str_eq(fname, "printf") && param_idx == 0usize) {
+        if str_eq(fname, "puts") || str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "system") || str_eq(fname, "free") || str_eq(fname, "fclose") || str_eq(fname, "ftell") || str_eq(fname, "getenv") || (str_eq(fname, "printf") && param_idx == 0usize) || str_eq(fname, "atexit") || str_eq(fname, "__rad_register_panic_hook") {
             return "ptr"
         }
         if str_eq(fname, "fopen") {
@@ -367,8 +382,14 @@ impl Codegen {
             }
             fi = fi + 1usize
         }
-        if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") {
+        if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") || str_eq(fname, "__rad_get_terminal_guard") {
             return "ptr"
+        }
+        if str_starts_with(fname, "__rad_") {
+            return "void"
+        }
+        if str_eq(fname, "atexit") {
+            return "i32"
         }
         if str_eq(fname, "fread") || str_eq(fname, "fwrite") || str_eq(fname, "ftell") {
             return "i64"
@@ -514,7 +535,29 @@ impl Codegen {
         }
         if k == EXPR_IDENT {
             let vname = ep[id].str_val.as_ptr() as str
-            return str_eq(self.get_var_type(vname), "ptr")
+            var is_alloc = false
+            var ai = 0usize
+            while ai < self.allocated_vars.len {
+                if str_eq(self.allocated_vars.ptr[ai].as_ptr() as str, vname) {
+                    is_alloc = true
+                    break
+                }
+                ai = ai + 1usize
+            }
+            if is_alloc {
+                return str_eq(self.get_var_type(vname), "ptr")
+            }
+            var fi = 0usize
+            while fi < self.parser.functions.len {
+                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, vname) {
+                    return true
+                }
+                fi = fi + 1usize
+            }
+            if str_starts_with(vname, "__rad_") {
+                return true
+            }
+            return false
         }
         if k == EXPR_CAST {
             let target_ty = self.emit_llvm_type(ep[id].target_type.as_ptr() as str)
@@ -976,7 +1019,7 @@ impl Codegen {
                 return res
             }
 
-            // Semantic check: ensure identifier was declared/allocated
+            // Semantic check: check if identifier was declared/allocated
             var is_alloc = false
             var ai = 0usize
             while ai < self.allocated_vars.len {
@@ -986,7 +1029,31 @@ impl Codegen {
                 }
                 ai = ai + 1usize
             }
+
             if !is_alloc {
+                var is_func = false
+                var fi = 0usize
+                while fi < self.parser.functions.len {
+                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, vname) {
+                        is_func = true
+                        break
+                    }
+                    fi = fi + 1usize
+                }
+                if !is_func && str_starts_with(vname, "__rad_") {
+                    is_func = true
+                }
+
+                if is_func {
+                    let fn_ptr = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(fn_ptr).as_ptr() as str)
+                    self.ir.push_str(" = bitcast ptr @")
+                    self.ir.push_str(vname)
+                    self.ir.push_str(" to ptr\n")
+                    return fn_ptr
+                }
+
                 var err = String.new()
                 err.push_str("unresolved identifier '")
                 err.push_str(vname)
@@ -1291,7 +1358,8 @@ impl Codegen {
                    str_eq(callee_name, "ftell") || str_eq(callee_name, "getenv") || str_eq(callee_name, "strcmp") ||
                    str_eq(callee_name, "isatty") || str_eq(callee_name, "input") ||
                    str_eq(callee_name, "dprintf") || str_eq(callee_name, "eprintln") || str_eq(callee_name, "system") ||
-                   str_eq(callee_name, "sqrt") || str_eq(callee_name, "remove") || str_starts_with(callee_name, "syscall") || self.is_struct_name(callee_name) || str_eq(callee_name, "swap") {
+                   str_eq(callee_name, "sqrt") || str_eq(callee_name, "remove") || str_starts_with(callee_name, "syscall") || self.is_struct_name(callee_name) || str_eq(callee_name, "swap") ||
+                   str_eq(callee_name, "atexit") || str_starts_with(callee_name, "__rad_") {
                     is_known = true
                 }
             }
@@ -2174,30 +2242,8 @@ impl Codegen {
             self.emit_str(int_to_str(f_idx as i32).as_ptr() as str)
             self.emit_str("\n")
 
-            var field_is_float = false
-            var field_is_ptr = false
-            var si = 0usize
-            while si < self.parser.structs.len {
-                let sdef = self.parser.structs.ptr[si]
-                if str_len(s_type) == 0usize || str_starts_with(s_type, "*") || str_eq(sdef.struct_name.as_ptr() as str, s_type) {
-                    var fi = 0usize
-                    while fi < sdef.field_names.len {
-                        if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
-                            let fty = sdef.field_types.ptr[fi].as_ptr() as str
-                            if str_eq(fty, "f64") || str_eq(fty, "f32") {
-                                field_is_float = true
-                            }
-                            let lty = self.emit_llvm_type(fty)
-                            if str_eq(lty, "ptr") || str_eq(fty, "str") || str_eq(fty, "String") || str_starts_with(fty, "*raw") {
-                                field_is_ptr = true
-                            }
-                            break
-                        }
-                        fi = fi + 1usize
-                    }
-                }
-                si = si + 1usize
-            }
+            let field_is_float = self.is_expr_float(expr_id)
+            let field_is_ptr = self.is_expr_ptr(expr_id)
 
             let load_reg = self.alloc_ssa()
             self.emit_str("  %")
@@ -3710,7 +3756,8 @@ impl Codegen {
         header.push_str("declare double @sqrt(double)\n")
         header.push_str("declare i32 @remove(ptr)\n")
         header.push_str("declare i32 @getchar()\n")
-        header.push_str("declare i32 @fflush(ptr)\n\n")
+        header.push_str("declare i32 @fflush(ptr)\n")
+        header.push_str("declare i32 @atexit(ptr)\n\n")
 
         // Emit extern function declarations
         var ext_i = 0usize
@@ -3725,6 +3772,7 @@ impl Codegen {
                    !str_eq(fname, "getenv") && !str_eq(fname, "strcmp") && !str_eq(fname, "exit") &&
                    !str_eq(fname, "dprintf") && !str_eq(fname, "sqrt") && !str_eq(fname, "remove") &&
                    !str_eq(fname, "getchar") && !str_eq(fname, "fflush") && !str_eq(fname, "input") &&
+                   !str_starts_with(fname, "__rad_") && !str_eq(fname, "atexit") &&
                    !str_starts_with(fname, "syscall") {
                     var already_declared = false
                     var prev_i = 0usize
@@ -3825,11 +3873,20 @@ impl Codegen {
         header.push_str("@.eprint_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n")
         header.push_str("define void @eprintln(ptr %msg) {\nentry:\n  %fmt = getelementptr inbounds [4 x i8], ptr @.eprint_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt, ptr %msg)\n  ret void\n}\n\n")
 
+        header.push_str("@__rad_panic_cleanup_hook = global ptr null, align 8\n")
+        header.push_str("define void @__rad_register_panic_hook(ptr %hook) {\nentry:\n  store ptr %hook, ptr @__rad_panic_cleanup_hook, align 8\n  ret void\n}\n\n")
+        header.push_str("define void @__rad_run_panic_hook() {\nentry:\n  %h = load ptr, ptr @__rad_panic_cleanup_hook, align 8\n  %is_null = icmp eq ptr %h, null\n  br i1 %is_null, label %done, label %call_hook\ncall_hook:\n  call void %h()\n  br label %done\ndone:\n  ret void\n}\n\n")
+
+        header.push_str("@__rad_terminal_guard_buf = global [128 x i8] zeroinitializer, align 8\n")
+        header.push_str("define ptr @__rad_get_terminal_guard() {\nentry:\n  ret ptr @__rad_terminal_guard_buf\n}\n\n")
+
+        header.push_str("define void @__rad_sigreturn_trampoline() {\nentry:\n  call void asm sideeffect \"mov $$15, %rax\\0Asyscall\", \"\"()\n  ret void\n}\n\n")
+
         header.push_str("@.panic_bounds_fmt = private unnamed_addr constant [64 x i8] c\"rad runtime panic: index out of bounds: index %lld >= len %lld\\0A\\00\", align 1\n")
-        header.push_str("define void @__rad_panic_bounds(i64 %idx, i64 %len) {\nentry:\n  %fmt = getelementptr inbounds [64 x i8], ptr @.panic_bounds_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt, i64 %idx, i64 %len)\n  call void @exit(i32 1)\n  ret void\n}\n\n")
+        header.push_str("define void @__rad_panic_bounds(i64 %idx, i64 %len) {\nentry:\n  call void @__rad_run_panic_hook()\n  %fmt = getelementptr inbounds [64 x i8], ptr @.panic_bounds_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt, i64 %idx, i64 %len)\n  call void @exit(i32 1)\n  ret void\n}\n\n")
 
         header.push_str("@.panic_div_fmt = private unnamed_addr constant [46 x i8] c\"rad runtime panic: attempt to divide by zero\\0A\\00\", align 1\n")
-        header.push_str("define void @__rad_panic_div_zero() {\nentry:\n  %fmt = getelementptr inbounds [46 x i8], ptr @.panic_div_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt)\n  call void @exit(i32 1)\n  ret void\n}\n\n")
+        header.push_str("define void @__rad_panic_div_zero() {\nentry:\n  call void @__rad_run_panic_hook()\n  %fmt = getelementptr inbounds [46 x i8], ptr @.panic_div_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt)\n  call void @exit(i32 1)\n  ret void\n}\n\n")
 
         header.push_str("define ptr @vec_from(ptr %slice) {\nentry:\n  %is_null = icmp eq ptr %slice, null\n  br i1 %is_null, label %ret_empty, label %do_copy\nret_empty:\n  %empty_vec = call ptr @new()\n  ret ptr %empty_vec\ndo_copy:\n  %len_ptr = getelementptr inbounds i8, ptr %slice, i64 16\n  %len = load i64, ptr %len_ptr, align 8\n  %obj = call ptr @malloc(i64 24)\n  %cap = shl i64 %len, 1\n  %adj_cap_cond = icmp ult i64 %cap, 16\n  %adj_cap = select i1 %adj_cap_cond, i64 16, i64 %cap\n  %bytes = shl i64 %adj_cap, 3\n  %buf = call ptr @malloc(i64 %bytes)\n  store ptr %buf, ptr %obj, align 8\n  %cap_slot = getelementptr inbounds i8, ptr %obj, i64 8\n  store i64 %adj_cap, ptr %cap_slot, align 8\n  %len_slot = getelementptr inbounds i8, ptr %obj, i64 16\n  store i64 %len, ptr %len_slot, align 8\n  %src_buf = load ptr, ptr %slice, align 8\n  br label %loop\nloop:\n  %i = phi i64 [ 0, %do_copy ], [ %next_i, %body ]\n  %is_done = icmp uge i64 %i, %len\n  br i1 %is_done, label %exit, label %body\nbody:\n  %src_slot = getelementptr inbounds i64, ptr %src_buf, i64 %i\n  %val = load i64, ptr %src_slot, align 8\n  %dst_slot = getelementptr inbounds i64, ptr %buf, i64 %i\n  store i64 %val, ptr %dst_slot, align 8\n  %next_i = add i64 %i, 1\n  br label %loop\nexit:\n  ret ptr %obj\n}\n\n")
 

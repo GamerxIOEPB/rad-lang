@@ -1,0 +1,113 @@
+// ==============================================================================
+// RadChess: Move Representation & UCI Notation
+// ==============================================================================
+
+import "./constants";
+
+pub struct Move {
+    pub from_sq: u8,
+    pub to_sq: u8,
+    pub promo_type: u8,
+    pub flags: u8,
+}
+
+impl Move {
+    pub fn none() -> Move {
+        return Move { from_sq: 0u8, to_sq: 0u8, promo_type: 0u8, flags: 0u8 }
+    }
+
+    pub fn new(from_sq: u8, to_sq: u8, flags: u8) -> Move {
+        return Move { from_sq: from_sq, to_sq: to_sq, promo_type: 0u8, flags: flags }
+    }
+
+    pub fn promo(from_sq: u8, to_sq: u8, promo_type: u8, is_capture: bool) -> Move {
+        var fl = FLAG_PROMOTION
+        if is_capture {
+            fl = fl | FLAG_CAPTURE
+        }
+        return Move { from_sq: from_sq, to_sq: to_sq, promo_type: promo_type, flags: fl }
+    }
+
+    pub fn is_none(self) -> bool {
+        return self.from_sq == 0u8 && self.to_sq == 0u8 && self.flags == 0u8
+    }
+
+    pub fn is_capture(self) -> bool {
+        return (self.flags & (FLAG_CAPTURE | FLAG_EP)) != 0u8
+    }
+
+    pub fn is_promo(self) -> bool {
+        return (self.flags & FLAG_PROMOTION) != 0u8
+    }
+
+    pub fn is_castle(self) -> bool {
+        return (self.flags & (FLAG_CASTLE_K | FLAG_CASTLE_Q)) != 0u8
+    }
+
+    pub fn is_ep(self) -> bool {
+        return (self.flags & FLAG_EP) != 0u8
+    }
+
+    pub fn eq(self, other: Move) -> bool {
+        return self.from_sq == other.from_sq &&
+               self.to_sq == other.to_sq &&
+               self.promo_type == other.promo_type
+    }
+
+    pub fn to_uci(self) -> String {
+        var s = String.new()
+        if self.is_none() {
+            s.push_str("0000")
+            return s
+        }
+
+        let f1 = sq_file(self.from_sq)
+        let r1 = sq_rank(self.from_sq)
+        let f2 = sq_file(self.to_sq)
+        let r2 = sq_rank(self.to_sq)
+
+        s.push_byte((97usize + f1) as u8) // 'a' + f1
+        s.push_byte((49usize + r1) as u8) // '1' + r1
+        s.push_byte((97usize + f2) as u8) // 'a' + f2
+        s.push_byte((49usize + r2) as u8) // '1' + r2
+
+        if self.is_promo() {
+            if self.promo_type == PIECE_QUEEN {
+                s.push_byte(113u8) // 'q'
+            } else if self.promo_type == PIECE_ROOK {
+                s.push_byte(114u8) // 'r'
+            } else if self.promo_type == PIECE_BISHOP {
+                s.push_byte(98u8)  // 'b'
+            } else if self.promo_type == PIECE_KNIGHT {
+                s.push_byte(110u8) // 'n'
+            }
+        }
+        s.push_byte(0u8)
+        return s
+    }
+}
+
+pub fn sq_to_coord(sq: u8) -> String {
+    var s = String.new()
+    let f = sq_file(sq)
+    let r = sq_rank(sq)
+    s.push_byte((97usize + f) as u8)
+    s.push_byte((49usize + r) as u8)
+    s.push_byte(0u8)
+    return s
+}
+
+pub fn coord_to_sq(s: str) -> i32 {
+    let p = s as *raw u8
+    if (s as usize) == 0usize || chess_str_len(s) < 2usize {
+        return -1
+    }
+    let f = p[0]
+    let r = p[1]
+    if f < 97u8 || f > 104u8 || r < 49u8 || r > 56u8 {
+        return -1
+    }
+    let file = (f - 97u8) as usize
+    let rank = (r - 49u8) as usize
+    return ((rank * 8usize) + file) as i32
+}

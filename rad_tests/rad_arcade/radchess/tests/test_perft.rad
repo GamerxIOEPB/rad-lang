@@ -1,0 +1,96 @@
+// ==============================================================================
+// RadChess: Official Perft Verification Test Suite
+// Verifies legal move generation, castling, en passant, promotions, pins, and check evasions.
+// ==============================================================================
+
+import "../src/chess/constants";
+import "../src/chess/moves";
+import "../src/chess/board";
+import "../src/chess/rules";
+
+fn perft(var b: Board, depth: i32) -> u64 {
+    if depth == 0 {
+        return 1u64
+    }
+    let moves = generate_legal_moves(b)
+    if depth == 1 {
+        return moves.len as u64
+    }
+    var nodes = 0u64
+    var i = 0usize
+    while i < moves.len {
+        let m = moves.ptr[i]
+        b.make_move(m)
+        nodes = nodes + perft(b, depth - 1)
+        b.unmake_move()
+        i = i + 1usize
+    }
+    return nodes
+}
+
+fn test_pos(name: str, fen: str, d1: u64, d2: u64, d3: u64) -> bool {
+    print("Testing ")
+    print(name)
+    print("... ")
+
+    var b = Board.new()
+    if chess_str_len(fen) > 0usize {
+        b.load_fen(fen)
+    } else {
+        b.reset_start_pos()
+    }
+
+    let n1 = perft(b, 1)
+    if n1 != d1 {
+        let n1_i = n1 as i64
+        let d1_i = d1 as i64
+        println(f"FAILED depth 1: expected {d1_i}, got {n1_i}")
+        return false
+    }
+
+    let n2 = perft(b, 2)
+    if n2 != d2 {
+        let n2_i = n2 as i64
+        let d2_i = d2 as i64
+        println(f"FAILED depth 2: expected {d2_i}, got {n2_i}")
+        return false
+    }
+
+    let n3 = perft(b, 3)
+    if n3 != d3 {
+        let n3_i = n3 as i64
+        let d3_i = d3 as i64
+        println(f"FAILED depth 3: expected {d3_i}, got {n3_i}")
+        return false
+    }
+
+    println("PASSED")
+    return true
+}
+
+fn main() {
+    println("=== RadChess Perft Test Suite ===")
+
+    var ok = test_pos("Initial Position (D1=20, D2=400, D3=8902)", "", 20u64, 400u64, 8902u64)
+    ok = ok && test_pos("Kiwipete Position 2 (Castling/Pins/EP)", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 48u64, 2039u64, 97862u64)
+    ok = ok && test_pos("Position 3 (EP & Endgames)", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 14u64, 191u64, 2812u64)
+    ok = ok && test_pos("Position 4 (Promotions & Checks)", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 6u64, 264u64, 9467u64)
+
+    print("Testing Initial Position Depth 4 (target: 197281)... ")
+    var b = Board.new()
+    b.reset_start_pos()
+    let n4 = perft(b, 4)
+    if n4 == 197281u64 {
+        println("PASSED (197,281 nodes)")
+    } else {
+        let n4_i = n4 as i64
+        println(f"FAILED (expected 197281, got {n4_i})")
+        ok = false
+    }
+
+    if ok {
+        println("All Perft tests passed successfully!")
+    } else {
+        println("Perft tests failed!")
+    }
+}

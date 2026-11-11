@@ -1,0 +1,102 @@
+// ==============================================================================
+// RadChess: Transposition Table & Zobrist Caching
+// ==============================================================================
+
+import "../chess/constants";
+import "../chess/moves";
+import "../chess/board";
+
+pub const TT_EXACT: i32 = 0
+pub const TT_ALPHA: i32 = 1 // Upper bound (score <= alpha)
+pub const TT_BETA: i32  = 2 // Lower bound (score >= beta)
+
+pub struct TTEntry {
+    pub tt_key: u64,
+    pub tt_depth: i32,
+    pub tt_flag: i32,
+    pub tt_score: i32,
+    pub tt_best_move: Move,
+}
+
+pub struct TTLookupResult {
+    pub hit: i32, // 0=miss, 1=score cutoff, 2=move hint
+    pub tt_res_score: i32,
+    pub tt_res_move: Move,
+}
+
+pub struct TranspositionTable {
+    pub tt_entries: *raw var TTEntry,
+    pub tt_capacity: usize,
+}
+
+impl TranspositionTable {
+    pub fn new(capacity: usize) -> TranspositionTable {
+        let mem = malloc(capacity * 8usize) as *raw var TTEntry
+        var i = 0usize
+        while i < capacity {
+            mem[i] = TTEntry {
+                tt_key: 0u64,
+                tt_depth: -1,
+                tt_flag: 0,
+                tt_score: 0,
+                tt_best_move: Move.none(),
+            }
+            i = i + 1usize
+        }
+        return TranspositionTable {
+            tt_entries: mem,
+            tt_capacity: capacity,
+        }
+    }
+
+    pub fn clear(var self) {
+        var i = 0usize
+        while i < self.tt_capacity {
+            self.tt_entries[i] = TTEntry {
+                tt_key: 0u64,
+                tt_depth: -1,
+                tt_flag: 0,
+                tt_score: 0,
+                tt_best_move: Move.none(),
+            }
+            i = i + 1usize
+        }
+    }
+
+    pub fn store(var self, key: u64, depth: i32, score: i32, flag: i32, best_move: Move) {
+        let mask = self.tt_capacity - 1usize
+        let idx = (key as usize) & mask
+        let current = self.tt_entries[idx]
+        // Overwrite if empty or same position or deeper search
+        if (current as usize) == 0usize || current.tt_key == 0u64 || current.tt_key == key || depth >= current.tt_depth {
+            self.tt_entries[idx] = TTEntry {
+                tt_key: key,
+                tt_depth: depth,
+                tt_flag: flag,
+                tt_score: score,
+                tt_best_move: best_move,
+            }
+        }
+    }
+
+    pub fn lookup(self, key: u64, depth: i32, alpha: i32, beta: i32) -> TTLookupResult {
+        let mask = self.tt_capacity - 1usize
+        let idx = (key as usize) & mask
+        let entry = self.tt_entries[idx]
+        if (entry as usize) != 0usize && entry.tt_key == key {
+            if entry.tt_depth >= depth {
+                if entry.tt_flag == TT_EXACT {
+                    return TTLookupResult { hit: 1, tt_res_score: entry.tt_score, tt_res_move: entry.tt_best_move }
+                }
+                if entry.tt_flag == TT_ALPHA && entry.tt_score <= alpha {
+                    return TTLookupResult { hit: 1, tt_res_score: alpha, tt_res_move: entry.tt_best_move }
+                }
+                if entry.tt_flag == TT_BETA && entry.tt_score >= beta {
+                    return TTLookupResult { hit: 1, tt_res_score: beta, tt_res_move: entry.tt_best_move }
+                }
+            }
+            return TTLookupResult { hit: 2, tt_res_score: entry.tt_score, tt_res_move: entry.tt_best_move }
+        }
+        return TTLookupResult { hit: 0, tt_res_score: 0, tt_res_move: Move.none() }
+    }
+}

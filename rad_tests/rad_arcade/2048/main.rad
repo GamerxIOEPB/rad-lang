@@ -1,0 +1,527 @@
+// ==============================================================================
+// Rad Arcade: 2048
+// Classic 2048 sliding-tile puzzle game in pure native Rad.
+// Zero external dependencies — pure syscalls, terminal, and double-buffered console.
+// ==============================================================================
+
+import terminal;
+import keyboard;
+import console;
+import time;
+
+const GRID_SIZE: usize = 4usize
+const TILE_W: usize = 9usize
+const TILE_H: usize = 3usize
+const BOARD_X: usize = 6usize
+const BOARD_Y: usize = 6usize
+
+struct Game2048 {
+    // 4x4 board stored in 16-element buffer
+    grid: *raw var i64,
+    score: i64,
+    best_score: i64,
+    won: bool,
+    won_acknowledged: bool,
+    game_over: bool,
+    paused: bool,
+    rng_state: u64,
+}
+
+impl Game2048 {
+    fn new() -> Game2048 {
+        let buf = malloc(16usize * 8usize) as *raw var i64
+        var g = Game2048 {
+            grid: buf,
+            score: 0i64,
+            best_score: 0i64,
+            won: false,
+            won_acknowledged: false,
+            game_over: false,
+            paused: false,
+            rng_state: 88172645463325252u64,
+        }
+        g.reset()
+        return g
+    }
+
+    fn rand_u32(var self) -> u32 {
+        self.rng_state = (self.rng_state * 6364136223846793005u64) + 1442695040888963407u64
+        return ((self.rng_state >> 32u64) & 4294967295u64) as u32
+    }
+
+    fn reset(var self) {
+        var i = 0usize
+        while i < 16usize {
+            self.grid[i] = 0i64
+            i = i + 1usize
+        }
+        self.score = 0i64
+        self.won = false
+        self.won_acknowledged = false
+        self.game_over = false
+        self.paused = false
+
+        // Start with two tiles
+        self.spawn_tile()
+        self.spawn_tile()
+    }
+
+    fn spawn_tile(var self) {
+        // Collect empty positions
+        var empty_indices = malloc(16usize * 8usize) as *raw var usize
+        var count = 0usize
+        var i = 0usize
+        while i < 16usize {
+            if self.grid[i] == 0i64 {
+                empty_indices[count] = i
+                count = count + 1usize
+            }
+            i = i + 1usize
+        }
+
+        if count > 0usize {
+            let choice_idx = (self.rand_u32() as usize) % count
+            let pos = empty_indices[choice_idx]
+            // 90% chance of 2, 10% chance of 4
+            let r = (self.rand_u32() as usize) % 10usize
+            if r == 0usize {
+                self.grid[pos] = 4i64
+            } else {
+                self.grid[pos] = 2i64
+            }
+        }
+        free(empty_indices as *raw u8)
+    }
+
+    fn can_move(self) -> bool {
+        // Check for any empty cells
+        var i = 0usize
+        while i < 16usize {
+            if self.grid[i] == 0i64 {
+                return true
+            }
+            i = i + 1usize
+        }
+
+        // Check horizontal adjacent
+        var r = 0usize
+        while r < 4usize {
+            var c = 0usize
+            while c < 3usize {
+                let v1 = self.grid[r * 4usize + c]
+                let v2 = self.grid[r * 4usize + (c + 1usize)]
+                if v1 == v2 {
+                    return true
+                }
+                c = c + 1usize
+            }
+            r = r + 1usize
+        }
+
+        // Check vertical adjacent
+        var col = 0usize
+        while col < 4usize {
+            var row = 0usize
+            while row < 3usize {
+                let v1 = self.grid[row * 4usize + col]
+                let v2 = self.grid[(row + 1usize) * 4usize + col]
+                if v1 == v2 {
+                    return true
+                }
+                row = row + 1usize
+            }
+            col = col + 1usize
+        }
+
+        return false
+    }
+
+    // Slide and merge a single 4-element line to the left
+    // Returns true if the line was changed
+    fn slide_line_left(var self, line: *raw var i64) -> bool {
+        var changed = false
+
+        // 1. Compress non-zero elements
+        var compressed = malloc(4usize * 8usize) as *raw var i64
+        var pos = 0usize
+        var i = 0usize
+        while i < 4usize {
+            compressed[i] = 0i64
+            if line[i] != 0i64 {
+                compressed[pos] = line[i]
+                pos = pos + 1usize
+            }
+            i = i + 1usize
+        }
+
+        // 2. Merge adjacent identical elements
+        var merged = malloc(4usize * 8usize) as *raw var i64
+        var m_pos = 0usize
+        i = 0usize
+        while i < 4usize {
+            merged[i] = 0i64
+            i = i + 1usize
+        }
+
+        i = 0usize
+        while i < 4usize {
+            if compressed[i] != 0i64 {
+                if i + 1usize < 4usize && compressed[i] == compressed[i + 1usize] {
+                    let val = compressed[i] * 2i64
+                    merged[m_pos] = val
+                    self.score = self.score + val
+                    if self.score > self.best_score {
+                        self.best_score = self.score
+                    }
+                    if val == 2048i64 && !self.won {
+                        self.won = true
+                    }
+                    m_pos = m_pos + 1usize
+                    i = i + 2usize
+                } else {
+                    merged[m_pos] = compressed[i]
+                    m_pos = m_pos + 1usize
+                    i = i + 1usize
+                }
+            } else {
+                i = i + 1usize
+            }
+        }
+
+        // 3. Write back and detect changes
+        i = 0usize
+        while i < 4usize {
+            if line[i] != merged[i] {
+                changed = true
+            }
+            line[i] = merged[i]
+            i = i + 1usize
+        }
+
+        free(compressed as *raw u8)
+        free(merged as *raw u8)
+        return changed
+    }
+
+    fn move_left(var self) -> bool {
+        var moved = false
+        var r = 0usize
+        let line = malloc(4usize * 8usize) as *raw var i64
+        while r < 4usize {
+            var c = 0usize
+            while c < 4usize {
+                line[c] = self.grid[r * 4usize + c]
+                c = c + 1usize
+            }
+            if self.slide_line_left(line) {
+                moved = true
+            }
+            c = 0usize
+            while c < 4usize {
+                self.grid[r * 4usize + c] = line[c]
+                c = c + 1usize
+            }
+            r = r + 1usize
+        }
+        free(line as *raw u8)
+        return moved
+    }
+
+    fn move_right(var self) -> bool {
+        var moved = false
+        var r = 0usize
+        let line = malloc(4usize * 8usize) as *raw var i64
+        while r < 4usize {
+            // Reverse row into line
+            var c = 0usize
+            while c < 4usize {
+                line[c] = self.grid[r * 4usize + (3usize - c)]
+                c = c + 1usize
+            }
+            if self.slide_line_left(line) {
+                moved = true
+            }
+            // Reverse back
+            c = 0usize
+            while c < 4usize {
+                self.grid[r * 4usize + (3usize - c)] = line[c]
+                c = c + 1usize
+            }
+            r = r + 1usize
+        }
+        free(line as *raw u8)
+        return moved
+    }
+
+    fn move_up(var self) -> bool {
+        var moved = false
+        var col = 0usize
+        let line = malloc(4usize * 8usize) as *raw var i64
+        while col < 4usize {
+            // Column into line
+            var r = 0usize
+            while r < 4usize {
+                line[r] = self.grid[r * 4usize + col]
+                r = r + 1usize
+            }
+            if self.slide_line_left(line) {
+                moved = true
+            }
+            // Column back
+            r = 0usize
+            while r < 4usize {
+                self.grid[r * 4usize + col] = line[r]
+                r = r + 1usize
+            }
+            col = col + 1usize
+        }
+        free(line as *raw u8)
+        return moved
+    }
+
+    fn move_down(var self) -> bool {
+        var moved = false
+        var col = 0usize
+        let line = malloc(4usize * 8usize) as *raw var i64
+        while col < 4usize {
+            // Reverse column into line
+            var r = 0usize
+            while r < 4usize {
+                line[r] = self.grid[(3usize - r) * 4usize + col]
+                r = r + 1usize
+            }
+            if self.slide_line_left(line) {
+                moved = true
+            }
+            // Reverse back
+            r = 0usize
+            while r < 4usize {
+                self.grid[(3usize - r) * 4usize + col] = line[r]
+                r = r + 1usize
+            }
+            col = col + 1usize
+        }
+        free(line as *raw u8)
+        return moved
+    }
+
+    fn handle_move(var self, dx: i32, dy: i32) {
+        if self.game_over || self.paused {
+            return
+        }
+
+        var moved = false
+        if dx == -1 {
+            moved = self.move_left()
+        } else if dx == 1 {
+            moved = self.move_right()
+        } else if dy == -1 {
+            moved = self.move_up()
+        } else if dy == 1 {
+            moved = self.move_down()
+        }
+
+        if moved {
+            self.spawn_tile()
+            if !self.can_move() {
+                self.game_over = true
+            }
+        }
+    }
+
+    fn get_tile_colors(val: i64) -> Color {
+        if val == 2i64 {
+            return Color.bright_white()
+        } else if val == 4i64 {
+            return Color.bright_yellow()
+        } else if val == 8i64 {
+            return Color.bright_red()
+        } else if val == 16i64 {
+            return Color.red()
+        } else if val == 32i64 {
+            return Color.bright_magenta()
+        } else if val == 64i64 {
+            return Color.magenta()
+        } else if val == 128i64 {
+            return Color.bright_cyan()
+        } else if val == 256i64 {
+            return Color.cyan()
+        } else if val == 512i64 {
+            return Color.bright_green()
+        } else if val == 1024i64 {
+            return Color.green()
+        } else if val == 2048i64 {
+            return Color.bright_yellow()
+        } else if val > 2048i64 {
+            return Color.bright_blue()
+        }
+        return Color.bright_black()
+    }
+
+    fn get_tile_bg(val: i64) -> Color {
+        if val == 2i64 {
+            return Color.ansi(0u8)
+        } else if val == 4i64 {
+            return Color.ansi(0u8)
+        } else if val == 8i64 {
+            return Color.ansi(1u8)
+        } else if val == 16i64 {
+            return Color.ansi(1u8)
+        } else if val == 32i64 {
+            return Color.ansi(5u8)
+        } else if val == 64i64 {
+            return Color.ansi(5u8)
+        } else if val == 128i64 {
+            return Color.ansi(6u8)
+        } else if val == 256i64 {
+            return Color.ansi(6u8)
+        } else if val == 512i64 {
+            return Color.ansi(2u8)
+        } else if val == 1024i64 {
+            return Color.ansi(2u8)
+        } else if val == 2048i64 {
+            return Color.ansi(3u8)
+        } else if val > 2048i64 {
+            return Color.ansi(4u8)
+        }
+        return Color.default()
+    }
+
+    fn render(self, var con: Console) {
+        con.clear()
+
+        // 1. Header & Title Banner
+        con.print_str(BOARD_X, 1usize, "2 0 4 8", Color.bright_yellow(), Color.default())
+        con.print_str(BOARD_X + 9usize, 1usize, "Join the numbers to get to the 2048 tile!", Color.white(), Color.default())
+
+        // 2. Score Boxes
+        // SCORE BOX
+        con.draw_box(BOARD_X + 16usize, 2usize, 11usize, 3usize, Color.bright_black(), Color.default())
+        con.print_str(BOARD_X + 18usize, 2usize, "SCORE", Color.bright_yellow(), Color.default())
+        let s_str = int_to_str(self.score)
+        let s_pad = (9usize - s_str.len()) / 2usize
+        con.print_str(BOARD_X + 17usize + s_pad, 3usize, s_str.as_ptr() as str, Color.bright_white(), Color.default())
+
+        // BEST SCORE BOX
+        con.draw_box(BOARD_X + 28usize, 2usize, 11usize, 3usize, Color.bright_black(), Color.default())
+        con.print_str(BOARD_X + 31usize, 2usize, "BEST", Color.bright_cyan(), Color.default())
+        let b_str = int_to_str(self.best_score)
+        let b_pad = (9usize - b_str.len()) / 2usize
+        con.print_str(BOARD_X + 29usize + b_pad, 3usize, b_str.as_ptr() as str, Color.bright_white(), Color.default())
+
+        // 3. Draw 4x4 Grid Board Outline
+        let grid_total_w = 4usize * (TILE_W + 1usize) + 1usize
+        let grid_total_h = 4usize * (TILE_H + 1usize) + 1usize
+        con.draw_box(BOARD_X - 1usize, BOARD_Y - 1usize, grid_total_w, grid_total_h, Color.bright_black(), Color.default())
+
+        // 4. Draw Individual Tiles
+        var r = 0usize
+        while r < 4usize {
+            var c = 0usize
+            while c < 4usize {
+                let val = self.grid[r * 4usize + c]
+                let tx = BOARD_X + c * (TILE_W + 1usize)
+                let ty = BOARD_Y + r * (TILE_H + 1usize)
+
+                let fg = Game2048.get_tile_colors(val)
+                let bg = Game2048.get_tile_bg(val)
+
+                if val == 0i64 {
+                    // Empty cell: dotted outline
+                    con.draw_rect(tx, ty, TILE_W, TILE_H, 32u8, Color.default(), Color.default())
+                    con.print_str(tx + 4usize, ty + 1usize, "·", Color.bright_black(), Color.default())
+                } else {
+                    // Solid tile
+                    con.draw_rect(tx, ty, TILE_W, TILE_H, 32u8, fg, bg)
+                    let num_str = int_to_str(val)
+                    let n_len = num_str.len()
+                    let pad_x = (TILE_W - n_len) / 2usize
+                    con.print_str(tx + pad_x, ty + 1usize, num_str.as_ptr() as str, fg, bg)
+                }
+
+                c = c + 1usize
+            }
+            r = r + 1usize
+        }
+
+        // 5. Status Messages & Controls Footer
+        let footer_y = BOARD_Y + grid_total_h
+        con.print_str(BOARD_X, footer_y, "Controls: Arrows / WASD to Slide   R: Restart   P: Pause   Q: Quit", Color.bright_black(), Color.default())
+
+        if self.game_over {
+            con.draw_box(BOARD_X + 3usize, BOARD_Y + 5usize, 34usize, 5usize, Color.bright_red(), Color.black())
+            con.print_str(BOARD_X + 11usize, BOARD_Y + 6usize, "G A M E   O V E R !", Color.bright_red(), Color.black())
+            con.print_str(BOARD_X + 8usize, BOARD_Y + 8usize, "Press 'R' to Play Again", Color.bright_white(), Color.black())
+        } else if self.won && !self.won_acknowledged {
+            con.draw_box(BOARD_X + 3usize, BOARD_Y + 5usize, 34usize, 5usize, Color.bright_yellow(), Color.black())
+            con.print_str(BOARD_X + 8usize, BOARD_Y + 6usize, "Y O U   R E A C H E D   2 0 4 8 !", Color.bright_yellow(), Color.black())
+            con.print_str(BOARD_X + 6usize, BOARD_Y + 8usize, "Press Enter or Arrow to Keep Going", Color.bright_white(), Color.black())
+        } else if self.paused {
+            con.draw_box(BOARD_X + 8usize, BOARD_Y + 6usize, 24usize, 3usize, Color.bright_yellow(), Color.black())
+            con.print_str(BOARD_X + 14usize, BOARD_Y + 7usize, "P A U S E D", Color.bright_yellow(), Color.black())
+        }
+
+        con.present()
+    }
+
+    fn destroy(var self) {
+        if (self.grid as usize) != 0usize {
+            free(self.grid as *raw u8)
+            self.grid = 0usize as *raw var i64
+        }
+    }
+}
+
+fn main() {
+    var term = TerminalSession.new()
+    term.enable_raw_mode()
+    term.enter_alternate_screen()
+    term.hide_cursor()
+
+    var kbd = KeyboardReader.new()
+    var con = Console.new(54usize, 26usize)
+    var timer = FrameTimer.new(60u32)
+    var game = Game2048.new()
+
+    var running = true
+    while running {
+        let _dt = timer.tick()
+
+        while true {
+            let evt = kbd.read_key(0)
+            if evt.code == KEY_NONE {
+                break
+            }
+
+            if (evt.code == KEY_ESC || evt.is_char(113u8) || evt.is_ctrl(99u8) || evt.is_eof()) && !evt.is_release {
+                running = false
+            } else if evt.is_char(112u8) && !evt.is_release { // 'p'
+                game.paused = !game.paused
+            } else if evt.is_char(114u8) && !evt.is_release { // 'r'
+                game.reset()
+            } else if game.won && !game.won_acknowledged && !evt.is_release {
+                if evt.code == KEY_ENTER || evt.is_char(32u8) || evt.code == KEY_UP || evt.code == KEY_DOWN || evt.code == KEY_LEFT || evt.code == KEY_RIGHT {
+                    game.won_acknowledged = true
+                }
+            } else if !game.paused && !game.game_over && !evt.is_release {
+                if evt.code == KEY_LEFT || evt.is_char(97u8) || evt.is_char(65u8) { // Left / 'a'
+                    game.handle_move(-1, 0)
+                } else if evt.code == KEY_RIGHT || evt.is_char(100u8) || evt.is_char(68u8) { // Right / 'd'
+                    game.handle_move(1, 0)
+                } else if evt.code == KEY_UP || evt.is_char(119u8) || evt.is_char(87u8) { // Up / 'w'
+                    game.handle_move(0, -1)
+                } else if evt.code == KEY_DOWN || evt.is_char(115u8) || evt.is_char(83u8) { // Down / 's'
+                    game.handle_move(0, 1)
+                }
+            }
+        }
+
+        game.render(con)
+        timer.pace()
+    }
+
+    game.destroy()
+    con.close_console()
+    kbd.close_reader()
+    term.close()
+}

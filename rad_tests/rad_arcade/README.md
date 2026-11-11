@@ -95,6 +95,25 @@ The arcade games are powered by native standard library infrastructure under `li
   - `R`: Restart Match
   - `Q` / `Esc`: Quit
 
+### 8. 2048 (`rad_tests/rad_arcade/2048/`)
+- **Description**: Classic 2048 number-tile sliding puzzle with responsive smooth board controls, tile merging, dynamic color palette for each tier, live score & high-score tracking, and win / game-over detection.
+- **Controls**:
+  - `Arrows` / `WASD`: Slide and Merge Tiles
+  - `P`: Pause
+  - `R`: Restart Game
+  - `Q` / `Esc`: Quit
+
+### 9. RadChess (`rad_tests/rad_arcade/radchess/`)
+- **Description**: Complete native Linux terminal chess engine and multiplayer suite. Features complete FIDE rules (castling, en passant, promotion, checkmate, stalemate, 50-move rule, 3-fold repetition), offline Negamax AI with alpha-beta pruning and transposition tables (4 difficulty levels), zero-config UDP LAN discovery & TCP multiplayer, dual chess clocks, 5 visual themes, Unicode & ASCII piece sets, PGN export, and global signal-safe terminal restoration.
+- **Controls**:
+  - `Arrows` / `WASD` / `HJKL`: Navigate Board & Menus
+  - `Space` / `Enter`: Select Square / Confirm Move / Choose Menu
+  - `Esc`: Clear Selection / Return
+  - `D`: Offer Draw
+  - `R`: Resign Active Match / Rematch
+  - `P`: Export PGN
+  - `Q`: Back / Exit Game
+
 ---
 
 ## How to Build & Run
@@ -127,6 +146,12 @@ radc rad_tests/rad_arcade/dungeon/main.rad -o dungeon && ./dungeon
 
 # 3D Raycaster
 radc rad_tests/rad_arcade/raycaster/main.rad -o raycaster && ./raycaster
+
+# 2048
+radc rad_tests/rad_arcade/2048/main.rad -o 2048 && ./2048
+
+# RadChess
+radc rad_tests/rad_arcade/radchess/src/main.rad -o radchess -O2 && ./radchess
 ```
 
 All standard library terminal, keyboard, console, and timing dependencies (`std::terminal`, `std::keyboard`, `std::console`, `std::time`) are resolved and compiled automatically.

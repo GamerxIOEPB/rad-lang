@@ -1,0 +1,44 @@
+// ==============================================================================
+// RadChess — Native Linux Terminal Chess Application
+// 100% Pure Rad, Self-Contained, Zero C / Rust / External Dependencies.
+// ==============================================================================
+
+import terminal;
+import "./app";
+
+fn sleep_ms(ms: i64) {
+    let req = malloc(16usize) as *raw var i64;
+    req[0usize] = ms / 1000i64;
+    req[1usize] = (ms % 1000i64) * 1000000i64;
+    let _ = syscall2(35i64, req as *raw u8, 0usize as *raw u8);
+    free(req as *raw u8);
+}
+
+fn main() -> i32 {
+    var term = TerminalSession.new();
+    term.enter_alternate_screen();
+    term.hide_cursor();
+    let _ = term.enable_raw_mode();
+
+    var app = App.new();
+
+    // Main 60 FPS Event & Render Loop
+    while app.app_state != APP_STATE_EXIT {
+        let frame_start = get_monotonic_time_ms();
+
+        app.update(frame_start);
+        app.render();
+
+        let frame_end = get_monotonic_time_ms();
+        let elapsed = frame_end - frame_start;
+        if elapsed < 20i64 {
+            sleep_ms(20i64 - elapsed);
+        }
+    }
+
+    app.close_app();
+    term.close();
+
+    println("Thank you for playing RadChess!");
+    0
+}

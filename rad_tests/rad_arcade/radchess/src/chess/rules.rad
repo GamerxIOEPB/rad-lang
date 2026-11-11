@@ -1,0 +1,740 @@
+// ==============================================================================
+// RadChess: Move Generation, Check, Castling, En Passant & Chess Rules
+// ==============================================================================
+
+import "./constants";
+import "./moves";
+import "./board";
+
+pub fn is_square_attacked(b: Board, sq: u8, by_color: i32) -> bool {
+    let target_sq = sq as usize
+    let file = sq_file(sq)
+    let rank = sq_rank(sq)
+
+    // 1. Pawn Attacks
+    if by_color == COLOR_WHITE {
+        // Attacking pawn must be at rank - 1, file +/- 1
+        if rank > 0usize {
+            if file > 0usize {
+                let p = b.squares[target_sq - 9usize]
+                if p == make_piece(COLOR_WHITE, PIECE_PAWN) { return true }
+            }
+            if file < 7usize {
+                let p = b.squares[target_sq - 7usize]
+                if p == make_piece(COLOR_WHITE, PIECE_PAWN) { return true }
+            }
+        }
+    } else {
+        // Attacking pawn must be at rank + 1, file +/- 1
+        if rank < 7usize {
+            if file > 0usize {
+                let p = b.squares[target_sq + 7usize]
+                if p == make_piece(COLOR_BLACK, PIECE_PAWN) { return true }
+            }
+            if file < 7usize {
+                let p = b.squares[target_sq + 9usize]
+                if p == make_piece(COLOR_BLACK, PIECE_PAWN) { return true }
+            }
+        }
+    }
+
+    // 2. Knight Attacks
+    let n_piece = make_piece(by_color, PIECE_KNIGHT)
+    if rank < 6usize && file < 7usize && b.squares[target_sq + 17usize] == n_piece { return true }
+    if rank < 6usize && file > 0usize && b.squares[target_sq + 15usize] == n_piece { return true }
+    if rank < 7usize && file < 6usize && b.squares[target_sq + 10usize] == n_piece { return true }
+    if rank < 7usize && file > 1usize && b.squares[target_sq + 6usize] == n_piece  { return true }
+    if rank > 0usize && file < 6usize && b.squares[target_sq - 6usize] == n_piece  { return true }
+    if rank > 0usize && file > 1usize && b.squares[target_sq - 10usize] == n_piece { return true }
+    if rank > 1usize && file < 7usize && b.squares[target_sq - 15usize] == n_piece { return true }
+    if rank > 1usize && file > 0usize && b.squares[target_sq - 17usize] == n_piece { return true }
+
+    // 3. King Attacks (adjacent squares)
+    let k_piece = make_piece(by_color, PIECE_KING)
+    if rank < 7usize && b.squares[target_sq + 8usize] == k_piece { return true }
+    if rank > 0usize && b.squares[target_sq - 8usize] == k_piece { return true }
+    if file < 7usize && b.squares[target_sq + 1usize] == k_piece { return true }
+    if file > 0usize && b.squares[target_sq - 1usize] == k_piece { return true }
+    if rank < 7usize && file < 7usize && b.squares[target_sq + 9usize] == k_piece { return true }
+    if rank < 7usize && file > 0usize && b.squares[target_sq + 7usize] == k_piece { return true }
+    if rank > 0usize && file < 7usize && b.squares[target_sq - 7usize] == k_piece { return true }
+    if rank > 0usize && file > 0usize && b.squares[target_sq - 9usize] == k_piece { return true }
+
+    // 4. Straight Ray Attacks (Rook or Queen)
+    let r_piece = make_piece(by_color, PIECE_ROOK)
+    let q_piece = make_piece(by_color, PIECE_QUEEN)
+
+    // Ray North (+8)
+    var r = rank + 1usize
+    while r < 8usize {
+        let p = b.squares[(r * 8usize) + file]
+        if p != 0u8 {
+            if p == r_piece || p == q_piece { return true }
+            break
+        }
+        r = r + 1usize
+    }
+
+    // Ray South (-8)
+    if rank > 0usize {
+        var r_s = rank - 1usize
+        var loop_s = true
+        while loop_s {
+            let p = b.squares[(r_s * 8usize) + file]
+            if p != 0u8 {
+                if p == r_piece || p == q_piece { return true }
+                break
+            }
+            if r_s == 0usize { loop_s = false } else { r_s = r_s - 1usize }
+        }
+    }
+
+    // Ray East (+1)
+    var f = file + 1usize
+    while f < 8usize {
+        let p = b.squares[(rank * 8usize) + f]
+        if p != 0u8 {
+            if p == r_piece || p == q_piece { return true }
+            break
+        }
+        f = f + 1usize
+    }
+
+    // Ray West (-1)
+    if file > 0usize {
+        var f_w = file - 1usize
+        var loop_w = true
+        while loop_w {
+            let p = b.squares[(rank * 8usize) + f_w]
+            if p != 0u8 {
+                if p == r_piece || p == q_piece { return true }
+                break
+            }
+            if f_w == 0usize { loop_w = false } else { f_w = f_w - 1usize }
+        }
+    }
+
+    // 5. Diagonal Ray Attacks (Bishop or Queen)
+    let b_piece = make_piece(by_color, PIECE_BISHOP)
+
+    // North-East (+9)
+    r = rank + 1usize
+    f = file + 1usize
+    while r < 8usize && f < 8usize {
+        let p = b.squares[(r * 8usize) + f]
+        if p != 0u8 {
+            if p == b_piece || p == q_piece { return true }
+            break
+        }
+        r = r + 1usize
+        f = f + 1usize
+    }
+
+    // North-West (+7)
+    r = rank + 1usize
+    if file > 0usize {
+        var fw = file - 1usize
+        var loop_nw = true
+        while r < 8usize && loop_nw {
+            let p = b.squares[(r * 8usize) + fw]
+            if p != 0u8 {
+                if p == b_piece || p == q_piece { return true }
+                break
+            }
+            r = r + 1usize
+            if fw == 0usize { loop_nw = false } else { fw = fw - 1usize }
+        }
+    }
+
+    // South-East (-7)
+    if rank > 0usize {
+        var rs = rank - 1usize
+        f = file + 1usize
+        var loop_se = true
+        while f < 8usize && loop_se {
+            let p = b.squares[(rs * 8usize) + f]
+            if p != 0u8 {
+                if p == b_piece || p == q_piece { return true }
+                break
+            }
+            f = f + 1usize
+            if rs == 0usize { loop_se = false } else { rs = rs - 1usize }
+        }
+    }
+
+    // South-West (-9)
+    if rank > 0usize && file > 0usize {
+        var rs = rank - 1usize
+        var fw = file - 1usize
+        var loop_sw = true
+        while loop_sw {
+            let p = b.squares[(rs * 8usize) + fw]
+            if p != 0u8 {
+                if p == b_piece || p == q_piece { return true }
+                break
+            }
+            if rs == 0usize || fw == 0usize { loop_sw = false }
+            else { rs = rs - 1usize; fw = fw - 1usize }
+        }
+    }
+
+    return false
+}
+
+pub fn in_check(b: Board, color: i32) -> bool {
+    let k_piece = make_piece(color, PIECE_KING)
+    var sq = 0usize
+    while sq < 64usize {
+        if b.squares[sq] == k_piece {
+            var opp_color = COLOR_BLACK
+            if color == COLOR_BLACK {
+                opp_color = COLOR_WHITE
+            }
+            return is_square_attacked(b, sq as u8, opp_color)
+        }
+        sq = sq + 1usize
+    }
+    return false
+}
+
+pub fn generate_pseudo_legal_moves(b: Board, var moves: Vec<Move>, captures_only: bool) {
+    let us = b.side_to_move
+    var them = COLOR_BLACK
+    if us == COLOR_BLACK {
+        them = COLOR_WHITE
+    }
+
+    var sq = 0usize
+    while sq < 64usize {
+        let piece = b.squares[sq]
+        if piece != 0u8 && get_piece_color(piece) == us {
+            let p_type = get_piece_type(piece)
+            let file = sq_file(sq as u8)
+            let rank = sq_rank(sq as u8)
+
+            // PAWN MOVES
+            if p_type == PIECE_PAWN {
+                if us == COLOR_WHITE {
+                    // Single Push
+                    if rank < 7usize {
+                        let fwd = sq + 8usize
+                        if b.squares[fwd] == 0u8 {
+                            if rank == 6usize {
+                                // Promotions
+                                moves.push(Move.promo(sq as u8, fwd as u8, PIECE_QUEEN, false))
+                                if !captures_only {
+                                    moves.push(Move.promo(sq as u8, fwd as u8, PIECE_ROOK, false))
+                                    moves.push(Move.promo(sq as u8, fwd as u8, PIECE_BISHOP, false))
+                                    moves.push(Move.promo(sq as u8, fwd as u8, PIECE_KNIGHT, false))
+                                }
+                            } else if !captures_only {
+                                moves.push(Move.new(sq as u8, fwd as u8, FLAG_NORMAL))
+                                // Double Push from Rank 2
+                                if rank == 1usize {
+                                    let fwd2 = sq + 16usize
+                                    if b.squares[fwd2] == 0u8 {
+                                        moves.push(Move.new(sq as u8, fwd2 as u8, FLAG_NORMAL))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Pawn Captures (Left: +7, Right: +9)
+                    if rank < 7usize {
+                        if file > 0usize {
+                            let cap_sq = sq + 7usize
+                            let target = b.squares[cap_sq]
+                            if target != 0u8 && get_piece_color(target) == them {
+                                if rank == 6usize {
+                                    moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_QUEEN, true))
+                                    if !captures_only {
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_ROOK, true))
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_BISHOP, true))
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_KNIGHT, true))
+                                    }
+                                } else {
+                                    moves.push(Move.new(sq as u8, cap_sq as u8, FLAG_CAPTURE))
+                                }
+                            } else if b.ep_sq >= 0 && (b.ep_sq as usize) == cap_sq {
+                                moves.push(Move.new(sq as u8, cap_sq as u8, FLAG_EP))
+                            }
+                        }
+
+                        if file < 7usize {
+                            let cap_sq = sq + 9usize
+                            let target = b.squares[cap_sq]
+                            if target != 0u8 && get_piece_color(target) == them {
+                                if rank == 6usize {
+                                    moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_QUEEN, true))
+                                    if !captures_only {
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_ROOK, true))
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_BISHOP, true))
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_KNIGHT, true))
+                                    }
+                                } else {
+                                    moves.push(Move.new(sq as u8, cap_sq as u8, FLAG_CAPTURE))
+                                }
+                            } else if b.ep_sq >= 0 && (b.ep_sq as usize) == cap_sq {
+                                moves.push(Move.new(sq as u8, cap_sq as u8, FLAG_EP))
+                            }
+                        }
+                    }
+                } else {
+                    // Black Pawn Moves
+                    // Single Push
+                    if rank > 0usize {
+                        let fwd = sq - 8usize
+                        if b.squares[fwd] == 0u8 {
+                            if rank == 1usize {
+                                // Promotions
+                                moves.push(Move.promo(sq as u8, fwd as u8, PIECE_QUEEN, false))
+                                if !captures_only {
+                                    moves.push(Move.promo(sq as u8, fwd as u8, PIECE_ROOK, false))
+                                    moves.push(Move.promo(sq as u8, fwd as u8, PIECE_BISHOP, false))
+                                    moves.push(Move.promo(sq as u8, fwd as u8, PIECE_KNIGHT, false))
+                                }
+                            } else if !captures_only {
+                                moves.push(Move.new(sq as u8, fwd as u8, FLAG_NORMAL))
+                                // Double Push from Rank 7
+                                if rank == 6usize {
+                                    let fwd2 = sq - 16usize
+                                    if b.squares[fwd2] == 0u8 {
+                                        moves.push(Move.new(sq as u8, fwd2 as u8, FLAG_NORMAL))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Pawn Captures (Left: -9, Right: -7)
+                    if rank > 0usize {
+                        if file > 0usize {
+                            let cap_sq = sq - 9usize
+                            let target = b.squares[cap_sq]
+                            if target != 0u8 && get_piece_color(target) == them {
+                                if rank == 1usize {
+                                    moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_QUEEN, true))
+                                    if !captures_only {
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_ROOK, true))
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_BISHOP, true))
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_KNIGHT, true))
+                                    }
+                                } else {
+                                    moves.push(Move.new(sq as u8, cap_sq as u8, FLAG_CAPTURE))
+                                }
+                            } else if b.ep_sq >= 0 && (b.ep_sq as usize) == cap_sq {
+                                moves.push(Move.new(sq as u8, cap_sq as u8, FLAG_EP))
+                            }
+                        }
+
+                        if file < 7usize {
+                            let cap_sq = sq - 7usize
+                            let target = b.squares[cap_sq]
+                            if target != 0u8 && get_piece_color(target) == them {
+                                if rank == 1usize {
+                                    moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_QUEEN, true))
+                                    if !captures_only {
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_ROOK, true))
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_BISHOP, true))
+                                        moves.push(Move.promo(sq as u8, cap_sq as u8, PIECE_KNIGHT, true))
+                                    }
+                                } else {
+                                    moves.push(Move.new(sq as u8, cap_sq as u8, FLAG_CAPTURE))
+                                }
+                            } else if b.ep_sq >= 0 && (b.ep_sq as usize) == cap_sq {
+                                moves.push(Move.new(sq as u8, cap_sq as u8, FLAG_EP))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // KNIGHT MOVES
+            if p_type == PIECE_KNIGHT {
+                var ki = 0usize
+                while ki < 8usize {
+                    var valid = false
+                    var target_sq = 0usize
+                    if ki == 0usize && rank < 6usize && file < 7usize { target_sq = sq + 17usize; valid = true }
+                    else if ki == 1usize && rank < 6usize && file > 0usize { target_sq = sq + 15usize; valid = true }
+                    else if ki == 2usize && rank < 7usize && file < 6usize { target_sq = sq + 10usize; valid = true }
+                    else if ki == 3usize && rank < 7usize && file > 1usize { target_sq = sq + 6usize; valid = true }
+                    else if ki == 4usize && rank > 0usize && file < 6usize { target_sq = sq - 6usize; valid = true }
+                    else if ki == 5usize && rank > 0usize && file > 1usize { target_sq = sq - 10usize; valid = true }
+                    else if ki == 6usize && rank > 1usize && file < 7usize { target_sq = sq - 15usize; valid = true }
+                    else if ki == 7usize && rank > 1usize && file > 0usize { target_sq = sq - 17usize; valid = true }
+
+                    if valid {
+                        let target = b.squares[target_sq]
+                        if target == 0u8 {
+                            if !captures_only {
+                                moves.push(Move.new(sq as u8, target_sq as u8, FLAG_NORMAL))
+                            }
+                        } else if get_piece_color(target) == them {
+                            moves.push(Move.new(sq as u8, target_sq as u8, FLAG_CAPTURE))
+                        }
+                    }
+                    ki = ki + 1usize
+                }
+            }
+
+            // BISHOP & QUEEN (Diagonals)
+            if p_type == PIECE_BISHOP || p_type == PIECE_QUEEN {
+                // North-East (+9)
+                var r = rank + 1usize
+                var f = file + 1usize
+                while r < 8usize && f < 8usize {
+                    let dsq = (r * 8usize) + f
+                    let target = b.squares[dsq]
+                    if target == 0u8 {
+                        if !captures_only { moves.push(Move.new(sq as u8, dsq as u8, FLAG_NORMAL)) }
+                    } else {
+                        if get_piece_color(target) == them {
+                            moves.push(Move.new(sq as u8, dsq as u8, FLAG_CAPTURE))
+                        }
+                        break
+                    }
+                    r = r + 1usize
+                    f = f + 1usize
+                }
+
+                // North-West (+7)
+                r = rank + 1usize
+                if file > 0usize {
+                    var fw = file - 1usize
+                    var loop_nw = true
+                    while r < 8usize && loop_nw {
+                        let dsq = (r * 8usize) + fw
+                        let target = b.squares[dsq]
+                        if target == 0u8 {
+                            if !captures_only { moves.push(Move.new(sq as u8, dsq as u8, FLAG_NORMAL)) }
+                        } else {
+                            if get_piece_color(target) == them {
+                                moves.push(Move.new(sq as u8, dsq as u8, FLAG_CAPTURE))
+                            }
+                            break
+                        }
+                        r = r + 1usize
+                        if fw == 0usize { loop_nw = false } else { fw = fw - 1usize }
+                    }
+                }
+
+                // South-East (-7)
+                if rank > 0usize {
+                    var rs = rank - 1usize
+                    f = file + 1usize
+                    var loop_se = true
+                    while f < 8usize && loop_se {
+                        let dsq = (rs * 8usize) + f
+                        let target = b.squares[dsq]
+                        if target == 0u8 {
+                            if !captures_only { moves.push(Move.new(sq as u8, dsq as u8, FLAG_NORMAL)) }
+                        } else {
+                            if get_piece_color(target) == them {
+                                moves.push(Move.new(sq as u8, dsq as u8, FLAG_CAPTURE))
+                            }
+                            break
+                        }
+                        f = f + 1usize
+                        if rs == 0usize { loop_se = false } else { rs = rs - 1usize }
+                    }
+                }
+
+                // South-West (-9)
+                if rank > 0usize && file > 0usize {
+                    var rs = rank - 1usize
+                    var fw = file - 1usize
+                    var loop_sw = true
+                    while loop_sw {
+                        let dsq = (rs * 8usize) + fw
+                        let target = b.squares[dsq]
+                        if target == 0u8 {
+                            if !captures_only { moves.push(Move.new(sq as u8, dsq as u8, FLAG_NORMAL)) }
+                        } else {
+                            if get_piece_color(target) == them {
+                                moves.push(Move.new(sq as u8, dsq as u8, FLAG_CAPTURE))
+                            }
+                            break
+                        }
+                        if rs == 0usize || fw == 0usize { loop_sw = false }
+                        else { rs = rs - 1usize; fw = fw - 1usize }
+                    }
+                }
+            }
+
+            // ROOK & QUEEN (Straights)
+            if p_type == PIECE_ROOK || p_type == PIECE_QUEEN {
+                // North (+8)
+                var r = rank + 1usize
+                while r < 8usize {
+                    let dsq = (r * 8usize) + file
+                    let target = b.squares[dsq]
+                    if target == 0u8 {
+                        if !captures_only { moves.push(Move.new(sq as u8, dsq as u8, FLAG_NORMAL)) }
+                    } else {
+                        if get_piece_color(target) == them {
+                            moves.push(Move.new(sq as u8, dsq as u8, FLAG_CAPTURE))
+                        }
+                        break
+                    }
+                    r = r + 1usize
+                }
+
+                // South (-8)
+                if rank > 0usize {
+                    var rs = rank - 1usize
+                    var loop_s = true
+                    while loop_s {
+                        let dsq = (rs * 8usize) + file
+                        let target = b.squares[dsq]
+                        if target == 0u8 {
+                            if !captures_only { moves.push(Move.new(sq as u8, dsq as u8, FLAG_NORMAL)) }
+                        } else {
+                            if get_piece_color(target) == them {
+                                moves.push(Move.new(sq as u8, dsq as u8, FLAG_CAPTURE))
+                            }
+                            break
+                        }
+                        if rs == 0usize { loop_s = false } else { rs = rs - 1usize }
+                    }
+                }
+
+                // East (+1)
+                var f = file + 1usize
+                while f < 8usize {
+                    let dsq = (rank * 8usize) + f
+                    let target = b.squares[dsq]
+                    if target == 0u8 {
+                        if !captures_only { moves.push(Move.new(sq as u8, dsq as u8, FLAG_NORMAL)) }
+                    } else {
+                        if get_piece_color(target) == them {
+                            moves.push(Move.new(sq as u8, dsq as u8, FLAG_CAPTURE))
+                        }
+                        break
+                    }
+                    f = f + 1usize
+                }
+
+                // West (-1)
+                if file > 0usize {
+                    var fw = file - 1usize
+                    var loop_w = true
+                    while loop_w {
+                        let dsq = (rank * 8usize) + fw
+                        let target = b.squares[dsq]
+                        if target == 0u8 {
+                            if !captures_only { moves.push(Move.new(sq as u8, dsq as u8, FLAG_NORMAL)) }
+                        } else {
+                            if get_piece_color(target) == them {
+                                moves.push(Move.new(sq as u8, dsq as u8, FLAG_CAPTURE))
+                            }
+                            break
+                        }
+                        if fw == 0usize { loop_w = false } else { fw = fw - 1usize }
+                    }
+                }
+            }
+
+            // KING MOVES
+            if p_type == PIECE_KING {
+                var ki = 0usize
+                while ki < 8usize {
+                    var valid = false
+                    var target_sq = 0usize
+                    if ki == 0usize && rank < 7usize { target_sq = sq + 8usize; valid = true }
+                    else if ki == 1usize && rank > 0usize { target_sq = sq - 8usize; valid = true }
+                    else if ki == 2usize && file < 7usize { target_sq = sq + 1usize; valid = true }
+                    else if ki == 3usize && file > 0usize { target_sq = sq - 1usize; valid = true }
+                    else if ki == 4usize && rank < 7usize && file < 7usize { target_sq = sq + 9usize; valid = true }
+                    else if ki == 5usize && rank < 7usize && file > 0usize { target_sq = sq + 7usize; valid = true }
+                    else if ki == 6usize && rank > 0usize && file < 7usize { target_sq = sq - 7usize; valid = true }
+                    else if ki == 7usize && rank > 0usize && file > 0usize { target_sq = sq - 9usize; valid = true }
+
+                    if valid {
+                        let target = b.squares[target_sq]
+                        if target == 0u8 {
+                            if !captures_only { moves.push(Move.new(sq as u8, target_sq as u8, FLAG_NORMAL)) }
+                        } else if get_piece_color(target) == them {
+                            moves.push(Move.new(sq as u8, target_sq as u8, FLAG_CAPTURE))
+                        }
+                    }
+                    ki = ki + 1usize
+                }
+
+                // Castling Moves (King cannot castle out of check or through check)
+                if !captures_only {
+                    if us == COLOR_WHITE && sq == 4usize {
+                        // Kingside (e1-g1)
+                        if (b.castling & CASTLE_WK) != 0u8 {
+                            if b.squares[5usize] == 0u8 && b.squares[6usize] == 0u8 {
+                                if !is_square_attacked(b, 4u8, COLOR_BLACK) &&
+                                   !is_square_attacked(b, 5u8, COLOR_BLACK) &&
+                                   !is_square_attacked(b, 6u8, COLOR_BLACK) {
+                                    moves.push(Move.new(4u8, 6u8, FLAG_CASTLE_K))
+                                }
+                            }
+                        }
+                        // Queenside (e1-c1)
+                        if (b.castling & CASTLE_WQ) != 0u8 {
+                            if b.squares[1usize] == 0u8 && b.squares[2usize] == 0u8 && b.squares[3usize] == 0u8 {
+                                if !is_square_attacked(b, 4u8, COLOR_BLACK) &&
+                                   !is_square_attacked(b, 3u8, COLOR_BLACK) &&
+                                   !is_square_attacked(b, 2u8, COLOR_BLACK) {
+                                    moves.push(Move.new(4u8, 2u8, FLAG_CASTLE_Q))
+                                }
+                            }
+                        }
+                    } else if us == COLOR_BLACK && sq == 60usize {
+                        // Kingside (e8-g8)
+                        if (b.castling & CASTLE_BK) != 0u8 {
+                            if b.squares[61usize] == 0u8 && b.squares[62usize] == 0u8 {
+                                if !is_square_attacked(b, 60u8, COLOR_WHITE) &&
+                                   !is_square_attacked(b, 61u8, COLOR_WHITE) &&
+                                   !is_square_attacked(b, 62u8, COLOR_WHITE) {
+                                    moves.push(Move.new(60u8, 62u8, FLAG_CASTLE_K))
+                                }
+                            }
+                        }
+                        // Queenside (e8-c8)
+                        if (b.castling & CASTLE_BQ) != 0u8 {
+                            if b.squares[57usize] == 0u8 && b.squares[58usize] == 0u8 && b.squares[59usize] == 0u8 {
+                                if !is_square_attacked(b, 60u8, COLOR_WHITE) &&
+                                   !is_square_attacked(b, 59u8, COLOR_WHITE) &&
+                                   !is_square_attacked(b, 58u8, COLOR_WHITE) {
+                                    moves.push(Move.new(60u8, 58u8, FLAG_CASTLE_Q))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        sq = sq + 1usize
+    }
+}
+
+pub fn generate_legal_moves(var b: Board) -> Vec<Move> {
+    let pseudo = Vec.new()
+    generate_pseudo_legal_moves(b, pseudo, false)
+
+    var legal = Vec.new()
+    let us = b.side_to_move
+    var i = 0usize
+    while i < pseudo.len {
+        let m = pseudo.ptr[i]
+        b.make_move(m)
+        if !in_check(b, us) {
+            legal.push(m)
+        }
+        b.unmake_move()
+        i = i + 1usize
+    }
+    return legal
+}
+
+pub fn generate_legal_captures(var b: Board) -> Vec<Move> {
+    let pseudo = Vec.new()
+    generate_pseudo_legal_moves(b, pseudo, true)
+
+    var legal = Vec.new()
+    let us = b.side_to_move
+    var i = 0usize
+    while i < pseudo.len {
+        let m = pseudo.ptr[i]
+        b.make_move(m)
+        if !in_check(b, us) {
+            legal.push(m)
+        }
+        b.unmake_move()
+        i = i + 1usize
+    }
+    return legal
+}
+
+pub fn is_insufficient_material(b: Board) -> bool {
+    var white_pieces = 0
+    var black_pieces = 0
+    var white_bishops = 0
+    var black_bishops = 0
+    var white_knights = 0
+    var black_knights = 0
+
+    var sq = 0usize
+    while sq < 64usize {
+        let p = b.squares[sq]
+        if p != 0u8 {
+            let pt = get_piece_type(p)
+            let color = get_piece_color(p)
+            if pt == PIECE_PAWN || pt == PIECE_ROOK || pt == PIECE_QUEEN {
+                return false
+            }
+            if color == COLOR_WHITE {
+                white_pieces = white_pieces + 1
+                if pt == PIECE_BISHOP { white_bishops = white_bishops + 1 }
+                else if pt == PIECE_KNIGHT { white_knights = white_knights + 1 }
+            } else {
+                black_pieces = black_pieces + 1
+                if pt == PIECE_BISHOP { black_bishops = black_bishops + 1 }
+                else if pt == PIECE_KNIGHT { black_knights = black_knights + 1 }
+            }
+        }
+        sq = sq + 1usize
+    }
+
+    // King vs King
+    if white_pieces == 1 && black_pieces == 1 {
+        return true
+    }
+    // King + Bishop vs King
+    if (white_pieces == 2 && white_bishops == 1 && black_pieces == 1) ||
+       (black_pieces == 2 && black_bishops == 1 && white_pieces == 1) {
+        return true
+    }
+    // King + Knight vs King
+    if (white_pieces == 2 && white_knights == 1 && black_pieces == 1) ||
+       (black_pieces == 2 && black_knights == 1 && white_pieces == 1) {
+        return true
+    }
+
+    return false
+}
+
+// Check current game status:
+// Returns: STATUS_ONGOING, STATUS_WHITE_WON, STATUS_BLACK_WON, or STATUS_DRAW
+// Out param draw_reason is set if status == STATUS_DRAW
+pub fn evaluate_game_status(var b: Board, var draw_reason: *raw var i32) -> i32 {
+    let legal = generate_legal_moves(b)
+    if legal.len == 0usize {
+        if in_check(b, b.side_to_move) {
+            if b.side_to_move == COLOR_WHITE {
+                return STATUS_BLACK_WON
+            } else {
+                return STATUS_WHITE_WON
+            }
+        } else {
+            draw_reason[0] = DRAW_STALEMATE
+            return STATUS_DRAW
+        }
+    }
+
+    // 50-move rule
+    if b.halfmove_clock >= 100 {
+        draw_reason[0] = DRAW_50_MOVES
+        return STATUS_DRAW
+    }
+
+    // Threefold repetition
+    if b.repetition_count() >= 3 {
+        draw_reason[0] = DRAW_REPETITION
+        return STATUS_DRAW
+    }
+
+    // Insufficient material
+    if is_insufficient_material(b) {
+        draw_reason[0] = DRAW_INSUFFICIENT
+        return STATUS_DRAW
+    }
+
+    return STATUS_ONGOING
+}

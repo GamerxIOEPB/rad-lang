@@ -1,0 +1,20 @@
+import "../src/multiplayer/transport";
+import "../src/multiplayer/protocol";
+import "../src/multiplayer/discovery";
+import "../src/multiplayer/session";
+
+fn main() -> i32 {
+    let mut_session = NetworkSession.new("TestHost");
+    let ok = mut_session.start_hosting(45870, COLOR_WHITE, 0);
+    if ok {
+        println("TEST PASSED: NetworkSession started hosting!");
+    } else {
+        println("TEST FAILED: start_hosting failed");
+    }
+    mut_session.close_session();
+
+    let mut_disc = LanBeaconManager.new();
+    println("TEST PASSED: LanBeaconManager initialized!");
+    mut_disc.close_discovery();
+    0
+}

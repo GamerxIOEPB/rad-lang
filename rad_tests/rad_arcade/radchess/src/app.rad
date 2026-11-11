@@ -1,0 +1,716 @@
+// ==============================================================================
+// RadChess: Main Application State Machine & Game Controller
+// Ties together Chess Engine, Offline AI, LAN Multiplayer & Interactive TUI.
+// ==============================================================================
+
+import "./config";
+import "./chess/constants";
+import "./chess/moves";
+import "./chess/board";
+import "./chess/rules";
+import "./chess/notation";
+import "./ai/evaluate";
+import "./ai/transposition";
+import "./ai/search";
+import "./multiplayer/constants";
+import "./multiplayer/transport";
+import "./multiplayer/discovery";
+import "./multiplayer/session";
+import "./terminal/colors";
+import "./terminal/render";
+import "./terminal/menu";
+import "./terminal/input";
+
+pub const APP_STATE_MAIN_MENU: i32      = 0;
+pub const APP_STATE_AI_SETUP: i32       = 1;
+pub const APP_STATE_ONLINE_MENU: i32    = 2;
+pub const APP_STATE_SETTINGS: i32       = 3;
+pub const APP_STATE_PLAYING_AI: i32     = 4;
+pub const APP_STATE_PLAYING_ONLINE: i32 = 5;
+pub const APP_STATE_GAME_OVER: i32      = 6;
+pub const APP_STATE_EXIT: i32           = 7;
+
+pub fn get_monotonic_time_ms() -> i64 {
+    let ts = malloc(16usize) as *raw var i64;
+    // SYS_clock_gettime = 228, CLOCK_MONOTONIC = 1
+    let _ = syscall2(228i64, 1i64, ts as *raw u8);
+    let sec = ts[0usize];
+    let nsec = ts[1usize];
+    free(ts as *raw u8);
+    (sec * 1000i64) + (nsec / 1000000i64)
+}
+
+pub struct App {
+    pub app_state: i32,
+    pub cfg: ChessConfig,
+    pub b: Board,
+    pub tt: TranspositionTable,
+    pub inp: ChessInputState,
+    pub net_sess: NetworkSession,
+    pub beacon: LanBeaconManager,
+
+    // Menu selections
+    pub main_idx: i32,
+    pub ai_idx: i32,
+    pub online_idx: i32,
+    pub settings_idx: i32,
+
+    // Match configuration
+    pub ai_side_choice: i32, // 0=White, 1=Black, 2=Random
+    pub ai_diff_level: i32,  // 1..4
+    pub match_tc_idx: i32,   // 0..3
+    pub user_side: i32,      // COLOR_WHITE or COLOR_BLACK
+
+    // Live match state
+    pub white_player_title: String,
+    pub black_player_title: String,
+    pub white_clock_ms: i32,
+    pub black_clock_ms: i32,
+    pub last_from_sq: i32,
+    pub last_to_sq: i32,
+    pub match_history_sans: Vec<String>,
+    pub match_banner: String,
+    pub match_over: bool,
+    pub match_result_text: String,
+    pub last_frame_time_ms: i64,
+}
+
+impl App {
+    pub fn new() -> App {
+        let loaded_cfg = ChessConfig.load();
+        let board = Board.new();
+        let table = TranspositionTable.new(16384usize);
+        let input_st = ChessInputState.new();
+        let session = NetworkSession.new(loaded_cfg.player_name.as_ptr() as str);
+        let b_mgr = LanBeaconManager.new();
+
+        App {
+            app_state: APP_STATE_MAIN_MENU,
+            cfg: loaded_cfg,
+            b: board,
+            tt: table,
+            inp: input_st,
+            net_sess: session,
+            beacon: b_mgr,
+            main_idx: 0,
+            ai_idx: 0,
+            online_idx: 0,
+            settings_idx: 0,
+            ai_side_choice: 0,
+            ai_diff_level: 2,
+            match_tc_idx: 2,
+            user_side: COLOR_WHITE,
+            white_player_title: String.from_str("White"),
+            black_player_title: String.from_str("Black"),
+            white_clock_ms: 300000,
+            black_clock_ms: 300000,
+            last_from_sq: -1,
+            last_to_sq: -1,
+            match_history_sans: Vec.new(),
+            match_banner: String.from_str("RadChess Ready"),
+            match_over: false,
+            match_result_text: String.new(),
+            last_frame_time_ms: get_monotonic_time_ms(),
+        }
+    }
+
+    pub fn start_ai_match(var self) {
+        self.b = Board.new();
+        self.tt.clear();
+        self.inp.clear_selection();
+        self.last_from_sq = -1;
+        self.last_to_sq = -1;
+        self.match_history_sans = Vec.new();
+        self.match_over = false;
+        self.match_result_text = String.new();
+
+        if self.ai_side_choice == 0 {
+            self.user_side = COLOR_WHITE;
+        } else if self.ai_side_choice == 1 {
+            self.user_side = COLOR_BLACK;
+        } else {
+            // Random side
+            let now = get_monotonic_time_ms();
+            if (now % 2i64) == 0i64 {
+                self.user_side = COLOR_WHITE;
+            } else {
+                self.user_side = COLOR_BLACK;
+            }
+        }
+
+        var diff_str = "Easy";
+        if self.ai_diff_level == 1 { diff_str = "Beginner"; }
+        else if self.ai_diff_level == 3 { diff_str = "Medium"; }
+        else if self.ai_diff_level == 4 { diff_str = "Hard"; }
+
+        var ai_name = String.new();
+        ai_name.push_str("RadAI (");
+        ai_name.push_str(diff_str);
+        ai_name.push_str(")");
+
+        if self.user_side == COLOR_WHITE {
+            self.white_player_title = self.cfg.player_name;
+            self.black_player_title = ai_name;
+        } else {
+            self.white_player_title = ai_name;
+            self.black_player_title = self.cfg.player_name;
+        }
+
+        // Set time control
+        if self.match_tc_idx == 1 { // 3+2
+            self.white_clock_ms = 180000;
+            self.black_clock_ms = 180000;
+        } else if self.match_tc_idx == 2 { // 5+3
+            self.white_clock_ms = 300000;
+            self.black_clock_ms = 300000;
+        } else if self.match_tc_idx == 3 { // 10+0
+            self.white_clock_ms = 600000;
+            self.black_clock_ms = 600000;
+        } else {
+            self.white_clock_ms = 0;
+            self.black_clock_ms = 0;
+        }
+
+        self.match_banner = String.from_str("Match Started vs AI! Your Move.");
+        self.app_state = APP_STATE_PLAYING_AI;
+    }
+
+    pub fn start_online_hosting(var self) {
+        self.b = Board.new();
+        self.inp.clear_selection();
+        self.last_from_sq = -1;
+        self.last_to_sq = -1;
+        self.match_history_sans = Vec.new();
+        self.match_over = false;
+        self.match_result_text = String.new();
+        self.user_side = COLOR_WHITE;
+
+        self.net_sess.start_hosting(NET_TCP_DEFAULT_PORT, COLOR_WHITE, self.match_tc_idx);
+        self.white_player_title = self.cfg.player_name;
+        self.black_player_title = String.from_str("Waiting...");
+
+        self.match_banner = String.from_str("Hosting on port 45870... Broadcasting beacon.");
+        self.app_state = APP_STATE_PLAYING_ONLINE;
+    }
+
+    pub fn start_online_joining(var self, host_ip: str) {
+        self.b = Board.new();
+        self.inp.clear_selection();
+        self.last_from_sq = -1;
+        self.last_to_sq = -1;
+        self.match_history_sans = Vec.new();
+        self.match_over = false;
+        self.match_result_text = String.new();
+
+        self.net_sess.connect_to_host(host_ip, NET_TCP_DEFAULT_PORT);
+        self.user_side = COLOR_BLACK;
+
+        self.white_player_title = String.from_str("Host");
+        self.black_player_title = self.cfg.player_name;
+
+        self.match_banner = String.from_str("Connecting to LAN host...");
+        self.app_state = APP_STATE_PLAYING_ONLINE;
+    }
+
+    // Execute a move on the board
+    pub fn commit_move(var self, m: Move) {
+        let san = move_to_san(self.b, m);
+        self.match_history_sans.push(san);
+
+        self.last_from_sq = m.from_sq;
+        self.last_to_sq = m.to_sq;
+
+        self.b.make_move(m);
+
+        // Check endgame status
+        let draw_reason = malloc(8usize) as *raw var i32;
+        let status = evaluate_game_status(self.b, draw_reason);
+        let d_reason = draw_reason[0usize];
+        free(draw_reason as *raw u8);
+
+        if status != STATUS_ONGOING {
+            self.match_over = true;
+            if status == STATUS_WHITE_WON {
+                self.match_result_text = String.from_str("Checkmate! White wins!");
+                self.match_banner = String.from_str("1-0 Checkmate! White wins!");
+            } else if status == STATUS_BLACK_WON {
+                self.match_result_text = String.from_str("Checkmate! Black wins!");
+                self.match_banner = String.from_str("0-1 Checkmate! Black wins!");
+            } else if status == STATUS_DRAW {
+                if d_reason == DRAW_STALEMATE {
+                    self.match_result_text = String.from_str("Draw by Stalemate");
+                    self.match_banner = String.from_str("1/2-1/2 Draw by Stalemate");
+                } else if d_reason == DRAW_INSUFFICIENT {
+                    self.match_result_text = String.from_str("Draw by Insufficient Material");
+                    self.match_banner = String.from_str("1/2-1/2 Draw (Insufficient Material)");
+                } else if d_reason == DRAW_50_MOVES {
+                    self.match_result_text = String.from_str("Draw by 50-Move Rule");
+                    self.match_banner = String.from_str("1/2-1/2 Draw (50-Move Rule)");
+                } else if d_reason == DRAW_REPETITION {
+                    self.match_result_text = String.from_str("Draw by Threefold Repetition");
+                    self.match_banner = String.from_str("1/2-1/2 Draw (Threefold Repetition)");
+                } else {
+                    self.match_result_text = String.from_str("Draw agreed");
+                    self.match_banner = String.from_str("1/2-1/2 Draw");
+                }
+            }
+        } else if in_check(self.b, self.b.side_to_move) {
+            self.match_banner = String.from_str("CHECK!");
+        } else {
+            if self.b.side_to_move == COLOR_WHITE {
+                self.match_banner = String.from_str("White to move");
+            } else {
+                self.match_banner = String.from_str("Black to move");
+            }
+        }
+    }
+
+    // Main update tick
+    pub fn update(var self, now_ms: i64) {
+        let delta_ms = (now_ms - self.last_frame_time_ms) as i32;
+        self.last_frame_time_ms = now_ms;
+
+        // 1. Main Menu State
+        if self.app_state == APP_STATE_MAIN_MENU {
+            let ev = self.inp.reader.read_key(0);
+            if ev.code == KEY_EOF {
+                self.app_state = APP_STATE_EXIT;
+                return;
+            }
+            if ev.is_press() {
+                if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
+                    if self.main_idx > 0 { self.main_idx = self.main_idx - 1; }
+                } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
+                    if self.main_idx < 3 { self.main_idx = self.main_idx + 1; }
+                } else if ev.code == KEY_ENTER || ev.is_char(32u8) {
+                    if self.main_idx == 0 {
+                        self.ai_idx = 3; // Focus on Start
+                        self.app_state = APP_STATE_AI_SETUP;
+                    } else if self.main_idx == 1 {
+                        self.online_idx = 0;
+                        self.app_state = APP_STATE_ONLINE_MENU;
+                    } else if self.main_idx == 2 {
+                        self.settings_idx = 0;
+                        self.app_state = APP_STATE_SETTINGS;
+                    } else if self.main_idx == 3 {
+                        self.app_state = APP_STATE_EXIT;
+                    }
+                } else if ev.is_char(49u8) { // '1'
+                    self.app_state = APP_STATE_AI_SETUP;
+                } else if ev.is_char(50u8) { // '2'
+                    self.app_state = APP_STATE_ONLINE_MENU;
+                } else if ev.is_char(51u8) { // '3'
+                    self.app_state = APP_STATE_SETTINGS;
+                } else if ev.is_char(52u8) || ev.is_char(113u8) { // '4' or 'q'
+                    self.app_state = APP_STATE_EXIT;
+                }
+            }
+            return;
+        }
+
+        // 2. AI Setup Menu State
+        if self.app_state == APP_STATE_AI_SETUP {
+            let ev = self.inp.reader.read_key(0);
+            if ev.code == KEY_EOF {
+                self.app_state = APP_STATE_EXIT;
+                return;
+            }
+            if ev.is_press() {
+                if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
+                    if self.ai_idx > 0 { self.ai_idx = self.ai_idx - 1; }
+                } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
+                    if self.ai_idx < 4 { self.ai_idx = self.ai_idx + 1; }
+                } else if ev.code == KEY_LEFT || ev.code == KEY_RIGHT || ev.code == KEY_ENTER || ev.is_char(32u8) {
+                    if self.ai_idx == 0 {
+                        self.ai_side_choice = (self.ai_side_choice + 1) % 3;
+                    } else if self.ai_idx == 1 {
+                        self.ai_diff_level = (self.ai_diff_level % 4) + 1;
+                    } else if self.ai_idx == 2 {
+                        self.match_tc_idx = (self.match_tc_idx + 1) % 4;
+                    } else if self.ai_idx == 3 {
+                        self.start_ai_match();
+                    } else if self.ai_idx == 4 {
+                        self.app_state = APP_STATE_MAIN_MENU;
+                    }
+                } else if ev.code == KEY_ESC || ev.is_char(113u8) || ev.is_char(98u8) {
+                    self.app_state = APP_STATE_MAIN_MENU;
+                }
+            }
+            return;
+        }
+
+        // 3. Online Menu State
+        if self.app_state == APP_STATE_ONLINE_MENU {
+            let ev = self.inp.reader.read_key(0);
+            if ev.code == KEY_EOF {
+                self.app_state = APP_STATE_EXIT;
+                return;
+            }
+            if ev.is_press() {
+                if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
+                    if self.online_idx > 0 { self.online_idx = self.online_idx - 1; }
+                } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
+                    if self.online_idx < 3 { self.online_idx = self.online_idx + 1; }
+                } else if ev.code == KEY_ENTER || ev.is_char(32u8) {
+                    if self.online_idx == 0 {
+                        self.start_online_hosting();
+                    } else if self.online_idx == 1 {
+                        // Scan LAN rooms
+                        let rooms = self.beacon.poll_rooms(now_ms);
+                        if rooms.len > 0usize {
+                            let r0 = rooms.ptr[0usize];
+                            self.start_online_joining(r0.room_ip.as_ptr() as str);
+                        } else {
+                            // If no rooms discovered yet, default to localhost connect
+                            self.start_online_joining("127.0.0.1");
+                        }
+                    } else if self.online_idx == 2 {
+                        self.start_online_joining("127.0.0.1");
+                    } else if self.online_idx == 3 {
+                        self.app_state = APP_STATE_MAIN_MENU;
+                    }
+                } else if ev.code == KEY_ESC || ev.is_char(113u8) || ev.is_char(98u8) {
+                    self.app_state = APP_STATE_MAIN_MENU;
+                }
+            }
+            return;
+        }
+
+        // 4. Settings State
+        if self.app_state == APP_STATE_SETTINGS {
+            let ev = self.inp.reader.read_key(0);
+            if ev.code == KEY_EOF {
+                self.app_state = APP_STATE_EXIT;
+                return;
+            }
+            if ev.is_press() {
+                if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
+                    if self.settings_idx > 0 { self.settings_idx = self.settings_idx - 1; }
+                } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
+                    if self.settings_idx < 4 { self.settings_idx = self.settings_idx + 1; }
+                } else if ev.code == KEY_LEFT || ev.code == KEY_RIGHT || ev.code == KEY_ENTER || ev.is_char(32u8) {
+                    if self.settings_idx == 1 {
+                        self.cfg.piece_theme = 1 - self.cfg.piece_theme;
+                    } else if self.settings_idx == 2 {
+                        self.cfg.color_theme = (self.cfg.color_theme + 1) % 5;
+                    } else if self.settings_idx == 3 {
+                        self.cfg.show_coords = !self.cfg.show_coords;
+                    } else if self.settings_idx == 4 {
+                        self.cfg.save();
+                        self.app_state = APP_STATE_MAIN_MENU;
+                    }
+                } else if ev.code == KEY_ESC || ev.is_char(113u8) || ev.is_char(98u8) {
+                    self.cfg.save();
+                    self.app_state = APP_STATE_MAIN_MENU;
+                }
+            }
+            return;
+        }
+
+        // 5. Playing vs Computer
+        if self.app_state == APP_STATE_PLAYING_AI {
+            if self.match_over {
+                let ev = self.inp.reader.read_key(0);
+                if ev.code == KEY_EOF {
+                    self.app_state = APP_STATE_EXIT;
+                    return;
+                }
+                if ev.is_press() {
+                    if ev.code == KEY_ESC || ev.is_char(113u8) {
+                        self.app_state = APP_STATE_MAIN_MENU;
+                    } else if ev.is_char(114u8) || ev.is_char(121u8) { // Rematch
+                        self.start_ai_match();
+                    }
+                }
+                return;
+            }
+
+            // Decrement active side clock
+            if self.white_clock_ms > 0 && delta_ms > 0 {
+                if self.b.side_to_move == COLOR_WHITE {
+                    self.white_clock_ms = self.white_clock_ms - delta_ms;
+                    if self.white_clock_ms <= 0 {
+                        self.white_clock_ms = 0;
+                        self.match_over = true;
+                        self.match_result_text = String.from_str("Black wins on time!");
+                        self.match_banner = String.from_str("Time forfeit! 0-1 Black wins.");
+                        return;
+                    }
+                } else {
+                    self.black_clock_ms = self.black_clock_ms - delta_ms;
+                    if self.black_clock_ms <= 0 {
+                        self.black_clock_ms = 0;
+                        self.match_over = true;
+                        self.match_result_text = String.from_str("White wins on time!");
+                        self.match_banner = String.from_str("Time forfeit! 1-0 White wins.");
+                        return;
+                    }
+                }
+            }
+
+            // User turn
+            if self.b.side_to_move == self.user_side {
+                let flipped = self.user_side == COLOR_BLACK;
+                self.inp.process_input(self.b, self.user_side, flipped);
+
+                if self.inp.esc_pressed {
+                    self.app_state = APP_STATE_MAIN_MENU;
+                    return;
+                }
+
+                if self.inp.resign_requested {
+                    self.match_over = true;
+                    self.match_result_text = String.from_str("Resigned");
+                    self.match_banner = String.from_str("You resigned. Opponent wins!");
+                    return;
+                }
+
+                if self.inp.undo_requested {
+                    // Undo player move + AI move (2 plies)
+                    if self.b.undo_count >= 2usize {
+                        self.b.unmake_move();
+                        self.b.unmake_move();
+                        if self.match_history_sans.len >= 2usize {
+                            self.match_history_sans.pop();
+                            self.match_history_sans.pop();
+                        }
+                        self.match_banner = String.from_str("Move undone.");
+                    }
+                    return;
+                }
+
+                if !self.inp.pending_chosen_move.is_none() {
+                    self.commit_move(self.inp.pending_chosen_move);
+                }
+            } else {
+                // AI Turn: search best move
+                let ai_best = search_best_move(self.b, self.tt, self.ai_diff_level);
+                if !ai_best.is_none() {
+                    self.commit_move(ai_best);
+                }
+            }
+            return;
+        }
+
+        // 6. Playing Online
+        if self.app_state == APP_STATE_PLAYING_ONLINE {
+            self.net_sess.poll_events(now_ms);
+
+            // If hosting, broadcast UDP beacon every 1 second
+            if self.net_sess.net_role == NET_ROLE_HOST && self.net_sess.net_state == NET_STATE_LISTENING {
+                if (now_ms - self.beacon.last_beacon_sent_ms) > 1000i64 {
+                    self.beacon.broadcast_beacon(
+                        self.cfg.player_name.as_ptr() as str,
+                        NET_TCP_DEFAULT_PORT,
+                        self.user_side,
+                        self.match_tc_idx
+                    );
+                    self.beacon.last_beacon_sent_ms = now_ms;
+                }
+            }
+
+            if self.match_over {
+                let ev = self.inp.reader.read_key(0);
+                if ev.code == KEY_EOF {
+                    self.net_sess.close_session();
+                    self.app_state = APP_STATE_EXIT;
+                    return;
+                }
+                if ev.is_press() {
+                    if ev.code == KEY_ESC || ev.is_char(113u8) {
+                        self.net_sess.close_session();
+                        self.app_state = APP_STATE_MAIN_MENU;
+                    }
+                }
+                return;
+            }
+
+            // Sync remote moves
+            if self.net_sess.has_pending_remote_move {
+                self.net_sess.has_pending_remote_move = false;
+                let parsed = parse_input_move(self.b, self.net_sess.pending_remote_move_uci.as_ptr() as str);
+                if !parsed.is_none() {
+                    self.commit_move(parsed);
+                }
+            }
+
+            if self.net_sess.remote_resigned {
+                self.match_over = true;
+                self.match_result_text = String.from_str("Opponent resigned");
+                self.match_banner = String.from_str("Opponent resigned. You win!");
+                return;
+            }
+
+            // Local user move
+            if self.b.side_to_move == self.net_sess.local_color {
+                let flipped = self.net_sess.local_color == COLOR_BLACK;
+                self.inp.process_input(self.b, self.net_sess.local_color, flipped);
+
+                if self.inp.esc_pressed {
+                    self.net_sess.close_session();
+                    self.app_state = APP_STATE_MAIN_MENU;
+                    return;
+                }
+
+                if self.inp.resign_requested {
+                    self.net_sess.send_resign();
+                    self.match_over = true;
+                    self.match_result_text = String.from_str("You resigned");
+                    self.match_banner = String.from_str("You resigned. Opponent wins!");
+                    return;
+                }
+
+                if self.inp.draw_requested {
+                    self.net_sess.send_draw_offer();
+                    return;
+                }
+
+                if !self.inp.pending_chosen_move.is_none() {
+                    let m = self.inp.pending_chosen_move;
+                    let uci = m.to_uci();
+                    self.net_sess.send_move(uci.as_ptr() as str, self.white_clock_ms, self.black_clock_ms);
+                    self.commit_move(m);
+                }
+            }
+        }
+    }
+
+    // Main render call
+    pub fn render(self) {
+        // Clear terminal screen and position cursor at home (1,1)
+        print("\x1b[2J\x1b[H");
+
+        if self.app_state == APP_STATE_MAIN_MENU {
+            render_main_menu(self.main_idx);
+            return;
+        }
+
+        if self.app_state == APP_STATE_AI_SETUP {
+            render_ai_menu(self.ai_idx, self.ai_side_choice, self.ai_diff_level, self.match_tc_idx);
+            return;
+        }
+
+        if self.app_state == APP_STATE_ONLINE_MENU {
+            render_online_menu(self.online_idx, self.user_side, self.match_tc_idx);
+            return;
+        }
+
+        if self.app_state == APP_STATE_SETTINGS {
+            render_settings_menu(
+                self.settings_idx,
+                self.cfg.player_name.as_ptr() as str,
+                self.cfg.piece_theme,
+                self.cfg.color_theme,
+                self.cfg.show_coords
+            );
+            return;
+        }
+
+        if self.app_state == APP_STATE_PLAYING_AI || self.app_state == APP_STATE_PLAYING_ONLINE {
+            let flipped = self.user_side == COLOR_BLACK;
+
+            // Header HUD
+            draw_header();
+
+            // Opponent bar
+            print("  [Opponent] ");
+            print(BOLD);
+            print(FG_BRIGHT_WHITE);
+            if flipped {
+                print(self.white_player_title.as_ptr() as str);
+            } else {
+                print(self.black_player_title.as_ptr() as str);
+            }
+            print(RESET);
+            print("  Clock: ");
+            print(FG_YELLOW);
+            var opp_clock = self.black_clock_ms;
+            if flipped { opp_clock = self.white_clock_ms; }
+            print(format_clock_time(opp_clock).as_ptr() as str);
+            print(RESET);
+            print("  Captured: ");
+            print(render_captured_tray(self.b, self.cfg.piece_theme, !flipped).as_ptr() as str);
+            println("");
+            println("");
+
+            // Chessboard
+            let cur_sq = self.inp.get_cursor_sq();
+            render_board(
+                self.b,
+                cur_sq,
+                self.inp.selected_sq,
+                self.inp.legal_target_sqs,
+                self.last_from_sq,
+                self.last_to_sq,
+                flipped,
+                self.cfg.color_theme,
+                self.cfg.piece_theme,
+                self.cfg.show_coords
+            );
+
+            // Player bar
+            println("");
+            print("  [You]      ");
+            print(BOLD);
+            print(FG_BRIGHT_CYAN);
+            if flipped {
+                print(self.black_player_title.as_ptr() as str);
+            } else {
+                print(self.white_player_title.as_ptr() as str);
+            }
+            print(RESET);
+            print("  Clock: ");
+            print(FG_YELLOW);
+            var my_clock = self.white_clock_ms;
+            if flipped { my_clock = self.black_clock_ms; }
+            print(format_clock_time(my_clock).as_ptr() as str);
+            print(RESET);
+            print("  Captured: ");
+            print(render_captured_tray(self.b, self.cfg.piece_theme, flipped).as_ptr() as str);
+            println("");
+
+            // Move History & Status Banner
+            println("");
+            print("  ");
+            print(BG_SELECTED);
+            print(FG_BLACK);
+            print(" STATUS ");
+            print(RESET);
+            print(" ");
+            print(BOLD);
+            print(FG_BRIGHT_WHITE);
+            print(self.match_banner.as_ptr() as str);
+            print(RESET);
+            println("");
+
+            // Move list snippet (last 4 moves)
+            if self.match_history_sans.len > 0usize {
+                print("  Moves: ");
+                var start_h = 0usize;
+                if self.match_history_sans.len > 8usize {
+                    start_h = self.match_history_sans.len - 8usize;
+                }
+                var hi = start_h;
+                while hi < self.match_history_sans.len {
+                    print(self.match_history_sans.ptr[hi].as_ptr() as str);
+                    print(" ");
+                    hi = hi + 1usize;
+                }
+                println("");
+            }
+
+            // Keyboard navigation hint
+            print("  ");
+            print(DIM);
+            print("[Arrows/WASD/HJKL] Move · [Enter/Space] Select · [U] Undo · [R] Resign · [Esc] Menu");
+            print(RESET);
+            println("");
+        }
+    }
+
+    pub fn close_app(var self) {
+        self.net_sess.close_session();
+        self.beacon.close_discovery();
+        self.inp.close_input();
+    }
+}

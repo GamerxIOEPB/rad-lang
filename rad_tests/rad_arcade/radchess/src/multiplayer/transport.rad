@@ -1,0 +1,245 @@
+// ==============================================================================
+// RadChess: Direct Linux Network Socket Wrappers (Syscalls 41, 42, 43, 49, 50, 54)
+// Zero C, zero libc, pure Rad systems architecture.
+// ==============================================================================
+
+import "./constants";
+import "../chess/constants";
+
+pub fn net_htons(port: i32) -> i32 {
+    let b0 = port & 255;
+    let b1 = (port >> 8) & 255;
+    (b0 << 8) | b1
+}
+
+pub fn net_ntohs(port: i32) -> i32 {
+    net_htons(port)
+}
+
+// Parse IPv4 string "A.B.C.D" into network byte order u32
+pub fn parse_ipv4_addr(s: str) -> u32 {
+    let p = s as *raw u8;
+    let len = net_str_len(s);
+    var oct0 = 0u32;
+    var oct1 = 0u32;
+    var oct2 = 0u32;
+    var oct3 = 0u32;
+    var cur_val = 0u32;
+    var octet_idx = 0usize;
+    var i = 0usize;
+
+    while i < len {
+        let ch = p[i];
+        if ch >= 48u8 && ch <= 57u8 {
+            cur_val = (cur_val * 10u32) + ((ch - 48u8) as u32);
+        } else if ch == 46u8 { // '.'
+            if octet_idx == 0usize { oct0 = cur_val; }
+            else if octet_idx == 1usize { oct1 = cur_val; }
+            else if octet_idx == 2usize { oct2 = cur_val; }
+            octet_idx = octet_idx + 1usize;
+            cur_val = 0u32;
+        }
+        i = i + 1usize;
+    }
+    if octet_idx == 3usize {
+        oct3 = cur_val;
+    }
+
+    oct0 | (oct1 << 8u32) | (oct2 << 16u32) | (oct3 << 24u32)
+}
+
+// Convert network byte order u32 to human-readable IPv4 string
+pub fn format_ipv4_addr(ip: u32) -> String {
+    let b0 = (ip & 255u32) as i64;
+    let b1 = ((ip >> 8u32) & 255u32) as i64;
+    let b2 = ((ip >> 16u32) & 255u32) as i64;
+    let b3 = ((ip >> 24u32) & 255u32) as i64;
+
+    var s = String.new();
+    s.push_str(chess_int_to_str(b0).as_ptr() as str);
+    s.push_str(".");
+    s.push_str(chess_int_to_str(b1).as_ptr() as str);
+    s.push_str(".");
+    s.push_str(chess_int_to_str(b2).as_ptr() as str);
+    s.push_str(".");
+    s.push_str(chess_int_to_str(b3).as_ptr() as str);
+    s
+}
+
+// SYS_socket = 41 (domain=2 AF_INET, type=1 SOCK_STREAM, proto=0)
+pub fn create_tcp_socket() -> i32 {
+    let fd = syscall3(41i64, 2i64, 1i64, 0i64);
+    fd as i32
+}
+
+// SYS_socket = 41 (domain=2 AF_INET, type=2 SOCK_DGRAM, proto=0)
+pub fn create_udp_socket() -> i32 {
+    let fd = syscall3(41i64, 2i64, 2i64, 0i64);
+    fd as i32
+}
+
+// SYS_fcntl = 72 (F_GETFL = 3, F_SETFL = 4, O_NONBLOCK = 2048)
+pub fn set_nonblocking(fd: i32) {
+    if fd < 0 { return; }
+    let flags = syscall3(72i64, fd as i64, 3i64, 0i64);
+    let _ = syscall3(72i64, fd as i64, 4i64, flags | 2048i64);
+}
+
+// SYS_setsockopt = 54 (level=1 SOL_SOCKET, optname=2 SO_REUSEADDR, val=1)
+pub fn set_reuseaddr(fd: i32) {
+    if fd < 0 { return; }
+    let opt = malloc(8usize) as *raw var u8;
+    let opt_i32 = opt as *raw var i32;
+    opt_i32[0usize] = 1;
+    let _ = syscall5(54i64, fd as i64, 1i64, 2i64, opt as *raw u8, 4i64);
+    free(opt as *raw u8);
+}
+
+// SYS_setsockopt = 54 (level=1 SOL_SOCKET, optname=6 SO_BROADCAST, val=1)
+pub fn set_broadcast(fd: i32) {
+    if fd < 0 { return; }
+    let opt = malloc(8usize) as *raw var u8;
+    let opt_i32 = opt as *raw var i32;
+    opt_i32[0usize] = 1;
+    let _ = syscall5(54i64, fd as i64, 1i64, 6i64, opt as *raw u8, 4i64);
+    free(opt as *raw u8);
+}
+
+// Build 16-byte sockaddr_in
+fn build_sockaddr_in(buf: *raw var u8, port: i32, ip_u32: u32) {
+    var i = 0usize;
+    while i < 16usize {
+        buf[i] = 0u8;
+        i = i + 1usize;
+    }
+    // sin_family = AF_INET (2)
+    buf[0usize] = 2u8;
+    buf[1usize] = 0u8;
+
+    // sin_port (big endian)
+    let net_port = net_htons(port);
+    buf[2usize] = (net_port & 255) as u8;
+    buf[3usize] = ((net_port >> 8) & 255) as u8;
+
+    // sin_addr (in_addr)
+    buf[4usize] = (ip_u32 & 255u32) as u8;
+    buf[5usize] = ((ip_u32 >> 8u32) & 255u32) as u8;
+    buf[6usize] = ((ip_u32 >> 16u32) & 255u32) as u8;
+    buf[7usize] = ((ip_u32 >> 24u32) & 255u32) as u8;
+}
+
+// SYS_bind = 49
+pub fn bind_socket(fd: i32, port: i32, ip_u32: u32) -> bool {
+    let sa = malloc(16usize) as *raw var u8;
+    build_sockaddr_in(sa, port, ip_u32);
+    let r = syscall3(49i64, fd as i64, sa as *raw u8, 16i64);
+    free(sa as *raw u8);
+    r == 0i64
+}
+
+// SYS_listen = 50
+pub fn listen_socket(fd: i32, backlog: i32) -> bool {
+    let r = syscall2(50i64, fd as i64, backlog as i64);
+    r == 0i64
+}
+
+// SYS_accept = 43
+pub fn accept_socket(fd: i32) -> i32 {
+    let sa = malloc(16usize) as *raw var u8;
+    let sa_len = malloc(8usize) as *raw var i32;
+    sa_len[0usize] = 16;
+    let client_fd = syscall3(43i64, fd as i64, sa as *raw u8, sa_len as *raw u8);
+    free(sa as *raw u8);
+    free(sa_len as *raw u8);
+    client_fd as i32
+}
+
+// SYS_connect = 42
+pub fn connect_socket(fd: i32, ip_str: str, port: i32) -> i32 {
+    let sa = malloc(16usize) as *raw var u8;
+    let ip_u32 = parse_ipv4_addr(ip_str);
+    build_sockaddr_in(sa, port, ip_u32);
+    let r = syscall3(42i64, fd as i64, sa as *raw u8, 16i64);
+    free(sa as *raw u8);
+    r as i32
+}
+
+// SYS_poll = 7
+pub fn poll_socket(fd: i32, for_write: bool, timeout_ms: i32) -> bool {
+    if fd < 0 { return false; }
+    let pfd = malloc(16usize) as *raw var u8;
+    // fd
+    pfd[0usize] = (fd & 255) as u8;
+    pfd[1usize] = ((fd >> 8) & 255) as u8;
+    pfd[2usize] = ((fd >> 16) & 255) as u8;
+    pfd[3usize] = ((fd >> 24) & 255) as u8;
+
+    // events: POLLIN=1, POLLOUT=4
+    if for_write {
+        pfd[4usize] = 4u8;
+    } else {
+        pfd[4usize] = 1u8;
+    }
+    pfd[5usize] = 0u8;
+    pfd[6usize] = 0u8;
+    pfd[7usize] = 0u8;
+
+    let n = syscall3(7i64, pfd as *raw u8, 1i64, timeout_ms as i64);
+    var ready = false;
+    if n > 0i64 {
+        let rev0 = pfd[6usize] as i32;
+        let rev1 = pfd[7usize] as i32;
+        let rev = rev0 | (rev1 << 8);
+        ready = (rev & 29) != 0; // POLLIN(1) | POLLOUT(4) | POLLERR(8) | POLLHUP(16)
+    }
+    free(pfd as *raw u8);
+    ready
+}
+
+// SYS_sendto = 44
+pub fn send_udp(fd: i32, buf: *raw u8, len: usize, ip_u32: u32, port: i32) -> i64 {
+    let sa = malloc(16usize) as *raw var u8;
+    build_sockaddr_in(sa, port, ip_u32);
+    let r = syscall6(44i64, fd as i64, buf, len as i64, 0i64, sa as *raw u8, 16i64);
+    free(sa as *raw u8);
+    r
+}
+
+// SYS_recvfrom = 45
+pub fn recv_udp(fd: i32, buf: *raw var u8, max_len: usize, out_ip: *raw var u32, out_port: *raw var i32) -> i64 {
+    let sa = malloc(16usize) as *raw var u8;
+    let sa_len = malloc(8usize) as *raw var i32;
+    sa_len[0usize] = 16;
+    let n = syscall6(45i64, fd as i64, buf as *raw u8, max_len as i64, 0i64, sa as *raw u8, sa_len as *raw u8);
+    if n > 0i64 {
+        let b0 = sa[4usize] as u32;
+        let b1 = sa[5usize] as u32;
+        let b2 = sa[6usize] as u32;
+        let b3 = sa[7usize] as u32;
+        out_ip[0usize] = b0 | (b1 << 8u32) | (b2 << 16u32) | (b3 << 24u32);
+
+        let p0 = sa[2usize] as i32;
+        let p1 = sa[3usize] as i32;
+        out_port[0usize] = net_ntohs(p0 | (p1 << 8));
+    }
+    free(sa as *raw u8);
+    free(sa_len as *raw u8);
+    n
+}
+
+// SYS_write = 1
+pub fn send_tcp(fd: i32, buf: *raw u8, len: usize) -> i64 {
+    syscall3(1i64, fd as i64, buf, len as i64)
+}
+
+// SYS_read = 0
+pub fn recv_tcp(fd: i32, buf: *raw var u8, max_len: usize) -> i64 {
+    syscall3(0i64, fd as i64, buf, max_len as i64)
+}
+
+// SYS_close = 3
+pub fn close_socket(fd: i32) {
+    if fd >= 0 {
+        let _ = syscall1(3i64, fd as i64);
+    }
+}

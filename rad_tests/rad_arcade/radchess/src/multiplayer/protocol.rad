@@ -1,0 +1,117 @@
+// ==============================================================================
+// RadChess: Text Framing Protocol for LAN Multiplayer
+// Line-delimited string messages with deterministic parsing.
+// ==============================================================================
+
+import "./constants";
+import "../chess/constants";
+
+// Extract n-th colon-delimited token from "CMD:arg0:arg1:arg2\n"
+pub fn parse_protocol_field(raw: str, field_idx: usize) -> String {
+    let p = raw as *raw u8;
+    let len = chess_str_len(raw);
+    var cur_idx = 0usize;
+    var start_i = 0usize;
+    var i = 0usize;
+    var found = false;
+
+    while i < len {
+        let ch = p[i];
+        if ch == 58u8 || ch == 10u8 || ch == 13u8 { // ':' or '\n' or '\r'
+            if cur_idx == field_idx {
+                found = true;
+                break;
+            }
+            cur_idx = cur_idx + 1usize;
+            start_i = i + 1usize;
+        }
+        i = i + 1usize;
+    }
+    if !found && cur_idx == field_idx && start_i <= len {
+        found = true;
+    }
+
+    var res = String.new();
+    if found && i >= start_i {
+        var k = start_i;
+        while k < i {
+            let ch = p[k];
+            if ch != 10u8 && ch != 13u8 {
+                res.push_byte(ch);
+            }
+            k = k + 1usize;
+        }
+    }
+    res
+}
+
+pub fn parse_protocol_opcode(raw: str) -> i32 {
+    let cmd = parse_protocol_field(raw, 0usize);
+    let s = cmd.as_ptr() as str;
+    if chess_str_eq(s, "HELLO") { return MSG_HELLO; }
+    if chess_str_eq(s, "WELCOME") { return MSG_WELCOME; }
+    if chess_str_eq(s, "START") { return MSG_START; }
+    if chess_str_eq(s, "MOVE") { return MSG_MOVE; }
+    if chess_str_eq(s, "DRAW_OFFER") { return MSG_DRAW_OFFER; }
+    if chess_str_eq(s, "DRAW_ACCEPT") { return MSG_DRAW_ACCEPT; }
+    if chess_str_eq(s, "DRAW_DECLINE") { return MSG_DRAW_DECLINE; }
+    if chess_str_eq(s, "RESIGN") { return MSG_RESIGN; }
+    if chess_str_eq(s, "REMATCH_REQ") { return MSG_REMATCH_REQ; }
+    if chess_str_eq(s, "REMATCH_ACCEPT") { return MSG_REMATCH_ACCEPT; }
+    if chess_str_eq(s, "PING") { return MSG_PING; }
+    if chess_str_eq(s, "PONG") { return MSG_PONG; }
+    MSG_UNKNOWN
+}
+
+pub fn build_msg_hello(player_name: str, preferred_color: i32, time_control: i32) -> String {
+    var msg = String.new();
+    msg.push_str("HELLO:");
+    msg.push_str(player_name);
+    msg.push_str(":");
+    msg.push_str(chess_int_to_str(preferred_color as i64).as_ptr() as str);
+    msg.push_str(":");
+    msg.push_str(chess_int_to_str(time_control as i64).as_ptr() as str);
+    msg.push_str("\n");
+    msg
+}
+
+pub fn build_msg_welcome(host_name: str, client_color: i32, time_control: i32) -> String {
+    var msg = String.new();
+    msg.push_str("WELCOME:");
+    msg.push_str(host_name);
+    msg.push_str(":");
+    msg.push_str(chess_int_to_str(client_color as i64).as_ptr() as str);
+    msg.push_str(":");
+    msg.push_str(chess_int_to_str(time_control as i64).as_ptr() as str);
+    msg.push_str("\n");
+    msg
+}
+
+pub fn build_msg_start(white_name: str, black_name: str) -> String {
+    var msg = String.new();
+    msg.push_str("START:");
+    msg.push_str(white_name);
+    msg.push_str(":");
+    msg.push_str(black_name);
+    msg.push_str("\n");
+    msg
+}
+
+pub fn build_msg_move(uci: str, white_ms: i32, black_ms: i32) -> String {
+    var msg = String.new();
+    msg.push_str("MOVE:");
+    msg.push_str(uci);
+    msg.push_str(":");
+    msg.push_str(chess_int_to_str(white_ms as i64).as_ptr() as str);
+    msg.push_str(":");
+    msg.push_str(chess_int_to_str(black_ms as i64).as_ptr() as str);
+    msg.push_str("\n");
+    msg
+}
+
+pub fn build_simple_msg(opcode_name: str) -> String {
+    var msg = String.new();
+    msg.push_str(opcode_name);
+    msg.push_str("\n");
+    msg
+}

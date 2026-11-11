@@ -1,0 +1,212 @@
+// ==============================================================================
+// RadChess: Standard Algebraic Notation (SAN), UCI Parsing & PGN Export
+// ==============================================================================
+
+import "./constants";
+import "./moves";
+import "./board";
+import "./rules";
+
+pub fn piece_to_san_char(ptype: u8) -> u8 {
+    if ptype == PIECE_KNIGHT { return 78u8 } // 'N'
+    if ptype == PIECE_BISHOP { return 66u8 } // 'B'
+    if ptype == PIECE_ROOK   { return 82u8 } // 'R'
+    if ptype == PIECE_QUEEN  { return 81u8 } // 'Q'
+    if ptype == PIECE_KING   { return 75u8 } // 'K'
+    return 0u8
+}
+
+pub fn move_to_san(var b: Board, m: Move) -> String {
+    var san = String.new()
+    if m.is_none() {
+        san.push_str("--")
+        return san
+    }
+
+    let p = b.get_piece(m.from_sq)
+    let p_type = get_piece_type(p)
+
+    // 1. Castling
+    if (m.flags & FLAG_CASTLE_K) != 0u8 {
+        san.push_str("O-O")
+    } else if (m.flags & FLAG_CASTLE_Q) != 0u8 {
+        san.push_str("O-O-O")
+    } else if p_type == PIECE_PAWN {
+        // 2. Pawn Moves
+        if m.is_capture() {
+            let f1 = sq_file(m.from_sq)
+            san.push_byte((97usize + f1) as u8) // 'a' + f1
+            san.push_byte(120u8)                // 'x'
+        }
+        let dest = sq_to_coord(m.to_sq)
+        san.push_str(dest.as_ptr() as str)
+
+        // Promotion
+        if m.is_promo() {
+            san.push_byte(61u8) // '='
+            let pch = piece_to_san_char(m.promo_type)
+            if pch != 0u8 {
+                san.push_byte(pch)
+            } else {
+                san.push_byte(81u8) // 'Q'
+            }
+        }
+    } else {
+        // 3. Piece Moves (N, B, R, Q, K)
+        let pch = piece_to_san_char(p_type)
+        san.push_byte(pch)
+
+        // Disambiguation check
+        let legal = generate_legal_moves(b)
+        var need_file = false
+        var need_rank = false
+        var same_file_count = 0
+        var other_count = 0
+
+        var i = 0usize
+        while i < legal.len {
+            let cand = legal.ptr[i]
+            if cand.from_sq != m.from_sq && cand.to_sq == m.to_sq {
+                let cand_p = b.get_piece(cand.from_sq)
+                if get_piece_type(cand_p) == p_type {
+                    other_count = other_count + 1
+                    if sq_file(cand.from_sq) == sq_file(m.from_sq) {
+                        same_file_count = same_file_count + 1
+                    }
+                }
+            }
+            i = i + 1usize
+        }
+
+        if other_count > 0 {
+            if same_file_count == 0 {
+                need_file = true
+            } else {
+                need_rank = true
+            }
+        }
+
+        if need_file {
+            let f = sq_file(m.from_sq)
+            san.push_byte((97usize + f) as u8)
+        }
+        if need_rank {
+            let r = sq_rank(m.from_sq)
+            san.push_byte((49usize + r) as u8)
+        }
+
+        if m.is_capture() {
+            san.push_byte(120u8) // 'x'
+        }
+
+        let dest = sq_to_coord(m.to_sq)
+        san.push_str(dest.as_ptr() as str)
+    }
+
+    // 4. Check / Checkmate suffix
+    b.make_move(m)
+    let in_chk = in_check(b, b.side_to_move)
+    if in_chk {
+        let opp_legal = generate_legal_moves(b)
+        if opp_legal.len == 0usize {
+            san.push_byte(35u8) // '#'
+        } else {
+            san.push_byte(43u8) // '+'
+        }
+    }
+    b.unmake_move()
+
+    san.push_byte(0u8)
+    return san
+}
+
+// Find a matching Move from user input (UCI e.g. "e2e4" or "e7e8q", or coordinates)
+pub fn parse_input_move(var b: Board, s: str) -> Move {
+    let legal = generate_legal_moves(b)
+    if (s as usize) == 0usize || chess_str_len(s) < 4usize {
+        return Move.none()
+    }
+
+    let p = s as *raw u8
+    let f1 = p[0]
+    let r1 = p[1]
+    let f2 = p[2]
+    let r2 = p[3]
+
+    if f1 < 97u8 || f1 > 104u8 || r1 < 49u8 || r1 > 56u8 ||
+       f2 < 97u8 || f2 > 104u8 || r2 < 49u8 || r2 > 56u8 {
+        return Move.none()
+    }
+
+    let from_sq = (((r1 - 49u8) as usize * 8usize) + (f1 - 97u8) as usize) as u8
+    let to_sq = (((r2 - 49u8) as usize * 8usize) + (f2 - 97u8) as usize) as u8
+
+    var promo = PIECE_NONE
+    if chess_str_len(s) >= 5usize {
+        let pch = p[4]
+        if pch == 113u8 || pch == 81u8 { promo = PIECE_QUEEN }
+        else if pch == 114u8 || pch == 82u8 { promo = PIECE_ROOK }
+        else if pch == 98u8  || pch == 66u8 { promo = PIECE_BISHOP }
+        else if pch == 110u8 || pch == 78u8 { promo = PIECE_KNIGHT }
+    }
+
+    var i = 0usize
+    while i < legal.len {
+        let cand = legal.ptr[i]
+        if cand.from_sq == from_sq && cand.to_sq == to_sq {
+            if cand.is_promo() {
+                if promo == PIECE_NONE || cand.promo_type == promo {
+                    return cand
+                }
+            } else {
+                return cand
+            }
+        }
+        i = i + 1usize
+    }
+
+    return Move.none()
+}
+
+pub fn export_pgn(
+    moves: Vec<Move>,
+    white_name: str,
+    black_name: str,
+    result_str: str
+) -> String {
+    var pgn = String.new()
+    pgn.push_str("[Event \"RadChess Local Match\"]\n")
+    pgn.push_str("[Site \"Linux Terminal\"]\n")
+    pgn.push_str("[Date \"2026.11.11\"]\n")
+    pgn.push_str("[White \"")
+    pgn.push_str(white_name)
+    pgn.push_str("\"]\n[Black \"")
+    pgn.push_str(black_name)
+    pgn.push_str("\"]\n[Result \"")
+    pgn.push_str(result_str)
+    pgn.push_str("\"]\n\n")
+
+    var replay = Board.new()
+    var i = 0usize
+    var move_num = 1
+    while i < moves.len {
+        let m = moves.ptr[i]
+        if (i % 2usize) == 0usize {
+            let m_str = chess_int_to_str(move_num as i64)
+            pgn.push_str(m_str.as_ptr() as str)
+            pgn.push_str(". ")
+            move_num = move_num + 1
+        }
+        let san = move_to_san(replay, m)
+        pgn.push_str(san.as_ptr() as str)
+        pgn.push_str(" ")
+        replay.make_move(m)
+        i = i + 1usize
+    }
+    replay.destroy()
+
+    pgn.push_str(result_str)
+    pgn.push_str("\n\n")
+    pgn.push_byte(0u8)
+    return pgn
+}

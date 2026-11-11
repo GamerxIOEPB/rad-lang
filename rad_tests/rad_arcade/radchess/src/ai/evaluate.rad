@@ -1,0 +1,186 @@
+// ==============================================================================
+// RadChess: Position Evaluation & Piece-Square Tables (PST)
+// ==============================================================================
+
+import "../chess/constants";
+import "../chess/moves";
+import "../chess/board";
+
+// Material Values (centipawns)
+pub const VAL_PAWN: i32   = 100
+pub const VAL_KNIGHT: i32 = 320
+pub const VAL_BISHOP: i32 = 330
+pub const VAL_ROOK: i32   = 500
+pub const VAL_QUEEN: i32  = 900
+pub const VAL_KING: i32   = 20000
+
+// Piece-Square Tables (White perspective, square 0=a1..63=h8)
+// Initialized in arrays of 64 i32 values.
+
+fn get_pawn_pst(sq: usize) -> i32 {
+    // 0=a1..7=h1, 8=a2..15=h2, 56=a8..63=h8
+    let rank = sq / 8usize
+    let file = sq % 8usize
+    if rank == 0usize || rank == 7usize { return 0 }
+    if rank == 1usize { return 0 }
+    if rank == 2usize {
+        if file == 3usize || file == 4usize { return 10 }
+        if file == 2usize || file == 5usize { return 5 }
+        return 0
+    }
+    if rank == 3usize {
+        if file == 3usize || file == 4usize { return 25 }
+        if file == 2usize || file == 5usize { return 10 }
+        return 5
+    }
+    if rank == 4usize {
+        if file == 3usize || file == 4usize { return 30 }
+        if file == 2usize || file == 5usize { return 15 }
+        return 10
+    }
+    if rank == 5usize { return 35 }
+    if rank == 6usize { return 50 }
+    return 0
+}
+
+fn get_knight_pst(sq: usize) -> i32 {
+    let rank = sq / 8usize
+    let file = sq % 8usize
+    // Penalty for edges
+    if rank == 0usize || rank == 7usize || file == 0usize || file == 7usize {
+        return -30
+    }
+    if rank == 1usize || rank == 6usize || file == 1usize || file == 6usize {
+        return -10
+    }
+    if (rank == 3usize || rank == 4usize) && (file == 3usize || file == 4usize) {
+        return 20
+    }
+    return 5
+}
+
+fn get_bishop_pst(sq: usize) -> i32 {
+    let rank = sq / 8usize
+    let file = sq % 8usize
+    if rank == 0usize || rank == 7usize || file == 0usize || file == 7usize {
+        return -10
+    }
+    if (rank == 3usize || rank == 4usize) && (file == 3usize || file == 4usize) {
+        return 15
+    }
+    return 5
+}
+
+fn get_rook_pst(sq: usize) -> i32 {
+    let rank = sq / 8usize
+    // 7th rank bonus
+    if rank == 6usize {
+        return 25
+    }
+    return 0
+}
+
+fn get_queen_pst(sq: usize) -> i32 {
+    let rank = sq / 8usize
+    let file = sq % 8usize
+    if (rank == 3usize || rank == 4usize) && (file == 3usize || file == 4usize) {
+        return 10
+    }
+    if rank == 0usize || rank == 7usize || file == 0usize || file == 7usize {
+        return -5
+    }
+    return 0
+}
+
+fn get_king_pst(sq: usize, is_endgame: bool) -> i32 {
+    let rank = sq / 8usize
+    let file = sq % 8usize
+    if is_endgame {
+        // In endgame, king wants to be active in center
+        if (rank == 3usize || rank == 4usize) && (file == 3usize || file == 4usize) {
+            return 30
+        }
+        if rank >= 2usize && rank <= 5usize && file >= 2usize && file <= 5usize {
+            return 15
+        }
+        return -10
+    }
+    // In midgame, king wants castled safety (g1, c1, b1, h1)
+    if rank == 0usize {
+        if file == 6usize || file == 5usize { return 20 } // g1, f1
+        if file == 2usize || file == 1usize { return 15 } // c1, b1
+        if file == 7usize { return 10 }
+        return -5
+    }
+    return -20
+}
+
+// Evaluate board from perspective of side to move (centipawns)
+pub fn evaluate_board(b: Board) -> i32 {
+    var white_score: i32 = 0
+    var black_score: i32 = 0
+    var total_non_pawn_mat: i32 = 0
+
+    var sq = 0usize
+    while sq < 64usize {
+        let p = b.squares[sq]
+        if p != 0u8 {
+            let p_type = get_piece_type(p)
+            let color = get_piece_color(p)
+
+            var base_val = 0
+            if p_type == PIECE_PAWN { base_val = VAL_PAWN }
+            else if p_type == PIECE_KNIGHT { base_val = VAL_KNIGHT; total_non_pawn_mat = total_non_pawn_mat + base_val }
+            else if p_type == PIECE_BISHOP { base_val = VAL_BISHOP; total_non_pawn_mat = total_non_pawn_mat + base_val }
+            else if p_type == PIECE_ROOK { base_val = VAL_ROOK; total_non_pawn_mat = total_non_pawn_mat + base_val }
+            else if p_type == PIECE_QUEEN { base_val = VAL_QUEEN; total_non_pawn_mat = total_non_pawn_mat + base_val }
+
+            if color == COLOR_WHITE {
+                white_score = white_score + base_val
+            } else {
+                black_score = black_score + base_val
+            }
+        }
+        sq = sq + 1usize
+    }
+
+    // Endgame detection: non-pawn material < 2600
+    let is_endgame = total_non_pawn_mat < 2600
+
+    // Add positional scores (PST)
+    sq = 0usize
+    while sq < 64usize {
+        let p = b.squares[sq]
+        if p != 0u8 {
+            let p_type = get_piece_type(p)
+            let color = get_piece_color(p)
+
+            // White square is sq, Black square is mirrored (sq ^ 56)
+            var psq = sq
+            if color == COLOR_BLACK {
+                psq = sq ^ 56usize
+            }
+
+            var pst_val = 0
+            if p_type == PIECE_PAWN { pst_val = get_pawn_pst(psq) }
+            else if p_type == PIECE_KNIGHT { pst_val = get_knight_pst(psq) }
+            else if p_type == PIECE_BISHOP { pst_val = get_bishop_pst(psq) }
+            else if p_type == PIECE_ROOK { pst_val = get_rook_pst(psq) }
+            else if p_type == PIECE_QUEEN { pst_val = get_queen_pst(psq) }
+            else if p_type == PIECE_KING { pst_val = get_king_pst(psq, is_endgame) }
+
+            if color == COLOR_WHITE {
+                white_score = white_score + pst_val
+            } else {
+                black_score = black_score + pst_val
+            }
+        }
+        sq = sq + 1usize
+    }
+
+    let diff = white_score - black_score
+    if b.side_to_move == COLOR_WHITE {
+        return diff
+    }
+    return -diff
+}
