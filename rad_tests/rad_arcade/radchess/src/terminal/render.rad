@@ -226,12 +226,7 @@ pub fn render_match_screen(
             }
 
             print(bg_esc);
-            if sq == cursor_sq {
-                print(FG_BRIGHT_YELLOW());
-                print(" ┌─┐ ");
-            } else {
-                print("     ");
-            }
+            print("     ");
             print(RESET());
             f_idx = f_idx + 1;
         }
@@ -352,9 +347,11 @@ pub fn render_match_screen(
 
             print(bg_esc);
             if sq == cursor_sq {
+                print(BOLD());
                 print(FG_BRIGHT_YELLOW());
                 print(" [");
             } else if sq == selected_sq {
+                print(BOLD());
                 print(FG_BRIGHT_YELLOW());
                 print(" {");
             } else {
@@ -380,9 +377,11 @@ pub fn render_match_screen(
             }
 
             if sq == cursor_sq {
+                print(BOLD());
                 print(FG_BRIGHT_YELLOW());
                 print("] ");
             } else if sq == selected_sq {
+                print(BOLD());
                 print(FG_BRIGHT_YELLOW());
                 print("} ");
             } else {
