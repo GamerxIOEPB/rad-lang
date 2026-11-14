@@ -103,6 +103,7 @@ impl Codegen {
                     }
                     if self.parser.exprs.ptr[init_e].kind == EXPR_METHOD_CALL {
                         let recv_id = self.parser.exprs.ptr[init_e].left
+                        let member = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
                         if self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
                             let rname = self.parser.exprs.ptr[recv_id].str_val.as_ptr() as str
                             if str_eq(rname, "Vec") {
@@ -110,6 +111,19 @@ impl Codegen {
                             }
                             if str_eq(rname, "String") {
                                 return "String"
+                            }
+                            if self.is_struct_name(rname) {
+                                if str_eq(member, "new") {
+                                    return rname
+                                }
+                                var mangled = String.new()
+                                mangled.push_str(rname)
+                                mangled.push_str("__")
+                                mangled.push_str(member)
+                                let ret = self.get_func_ret_type(mangled.as_ptr() as str)
+                                if str_len(ret) > 0usize {
+                                    return ret
+                                }
                             }
                         }
                     }

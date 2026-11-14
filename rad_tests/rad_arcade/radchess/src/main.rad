@@ -20,14 +20,17 @@ fn main() -> i32 {
     term.hide_cursor();
     let _ = term.enable_raw_mode();
 
-    var app = App.new();
+    var app: App = App.new();
 
-    // Main 60 FPS Event & Render Loop
+    // Main 50 FPS Event & Render Loop
     while app.app_state != APP_STATE_EXIT {
         let frame_start = get_monotonic_time_ms();
 
         app.update(frame_start);
-        app.render();
+        if app.needs_redraw {
+            app.render();
+            app.needs_redraw = false;
+        }
 
         let frame_end = get_monotonic_time_ms();
         let elapsed = frame_end - frame_start;

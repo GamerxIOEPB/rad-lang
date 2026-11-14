@@ -53,3 +53,8 @@ pub fn get_sq_bg(theme: i32, is_light: bool) -> str {
     if is_light { return "\x1b[48;5;253m"; }
     return "\x1b[48;5;67m";
 }
+
+pub fn put_line(s: str) {
+    print(s);
+    print("\r\n");
+}

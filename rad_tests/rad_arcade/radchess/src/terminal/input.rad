@@ -21,6 +21,7 @@ pub struct ChessInputState {
     pub undo_requested: bool,
     pub pgn_export_requested: bool,
     pub esc_pressed: bool,
+    pub has_input_event: bool,
     pub reader: KeyboardReader,
 }
 
@@ -38,6 +39,7 @@ impl ChessInputState {
             undo_requested: false,
             pgn_export_requested: false,
             esc_pressed: false,
+            has_input_event: false,
             reader: r,
         }
     }
@@ -60,6 +62,8 @@ impl ChessInputState {
         self.pgn_export_requested = false;
         self.esc_pressed = false;
 
+        self.has_input_event = false;
+
         let ev = self.reader.read_key(0);
         if ev.code == KEY_EOF {
             self.esc_pressed = true;
@@ -68,6 +72,7 @@ impl ChessInputState {
         if !ev.is_press() {
             return;
         }
+        self.has_input_event = true;
 
         // Escape
         if ev.code == KEY_ESC {

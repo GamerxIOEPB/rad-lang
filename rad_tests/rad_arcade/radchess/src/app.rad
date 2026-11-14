@@ -73,6 +73,8 @@ pub struct App {
     pub match_over: bool,
     pub match_result_text: String,
     pub last_frame_time_ms: i64,
+    pub needs_redraw: bool,
+    pub last_clock_sec: i64,
 }
 
 impl App {
@@ -111,10 +113,20 @@ impl App {
             match_over: false,
             match_result_text: String.new(),
             last_frame_time_ms: get_monotonic_time_ms(),
+            needs_redraw: true,
+            last_clock_sec: 0i64,
         }
     }
 
+    pub fn switch_state(var self, new_state: i32) {
+        print("\x1b[H\x1b[2J");
+        self.app_state = new_state;
+        self.needs_redraw = true;
+    }
+
     pub fn start_ai_match(var self) {
+        print("\x1b[H\x1b[2J");
+        self.needs_redraw = true;
         self.b = Board.new();
         self.tt.clear();
         self.inp.clear_selection();
@@ -176,6 +188,8 @@ impl App {
     }
 
     pub fn start_online_hosting(var self) {
+        print("\x1b[H\x1b[2J");
+        self.needs_redraw = true;
         self.b = Board.new();
         self.inp.clear_selection();
         self.last_from_sq = -1;
@@ -194,6 +208,8 @@ impl App {
     }
 
     pub fn start_online_joining(var self, host_ip: str) {
+        print("\x1b[H\x1b[2J");
+        self.needs_redraw = true;
         self.b = Board.new();
         self.inp.clear_selection();
         self.last_from_sq = -1;
@@ -221,6 +237,7 @@ impl App {
         self.last_to_sq = m.to_sq;
 
         self.b.make_move(m);
+        self.needs_redraw = true;
 
         // Check endgame status
         let draw_reason = malloc(8usize) as *raw var i32;
@@ -278,6 +295,7 @@ impl App {
                 return;
             }
             if ev.is_press() {
+                self.needs_redraw = true;
                 if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
                     if self.main_idx > 0 { self.main_idx = self.main_idx - 1; }
                 } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
@@ -285,22 +303,25 @@ impl App {
                 } else if ev.code == KEY_ENTER || ev.is_char(32u8) {
                     if self.main_idx == 0 {
                         self.ai_idx = 3; // Focus on Start
-                        self.app_state = APP_STATE_AI_SETUP;
+                        self.switch_state(APP_STATE_AI_SETUP);
                     } else if self.main_idx == 1 {
                         self.online_idx = 0;
-                        self.app_state = APP_STATE_ONLINE_MENU;
+                        self.switch_state(APP_STATE_ONLINE_MENU);
                     } else if self.main_idx == 2 {
                         self.settings_idx = 0;
-                        self.app_state = APP_STATE_SETTINGS;
+                        self.switch_state(APP_STATE_SETTINGS);
                     } else if self.main_idx == 3 {
                         self.app_state = APP_STATE_EXIT;
                     }
                 } else if ev.is_char(49u8) { // '1'
-                    self.app_state = APP_STATE_AI_SETUP;
+                    self.ai_idx = 3;
+                    self.switch_state(APP_STATE_AI_SETUP);
                 } else if ev.is_char(50u8) { // '2'
-                    self.app_state = APP_STATE_ONLINE_MENU;
+                    self.online_idx = 0;
+                    self.switch_state(APP_STATE_ONLINE_MENU);
                 } else if ev.is_char(51u8) { // '3'
-                    self.app_state = APP_STATE_SETTINGS;
+                    self.settings_idx = 0;
+                    self.switch_state(APP_STATE_SETTINGS);
                 } else if ev.is_char(52u8) || ev.is_char(113u8) { // '4' or 'q'
                     self.app_state = APP_STATE_EXIT;
                 }
@@ -316,6 +337,7 @@ impl App {
                 return;
             }
             if ev.is_press() {
+                self.needs_redraw = true;
                 if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
                     if self.ai_idx > 0 { self.ai_idx = self.ai_idx - 1; }
                 } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
@@ -330,10 +352,10 @@ impl App {
                     } else if self.ai_idx == 3 {
                         self.start_ai_match();
                     } else if self.ai_idx == 4 {
-                        self.app_state = APP_STATE_MAIN_MENU;
+                        self.switch_state(APP_STATE_MAIN_MENU);
                     }
                 } else if ev.code == KEY_ESC || ev.is_char(113u8) || ev.is_char(98u8) {
-                    self.app_state = APP_STATE_MAIN_MENU;
+                    self.switch_state(APP_STATE_MAIN_MENU);
                 }
             }
             return;
@@ -347,6 +369,7 @@ impl App {
                 return;
             }
             if ev.is_press() {
+                self.needs_redraw = true;
                 if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
                     if self.online_idx > 0 { self.online_idx = self.online_idx - 1; }
                 } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
@@ -367,10 +390,10 @@ impl App {
                     } else if self.online_idx == 2 {
                         self.start_online_joining("127.0.0.1");
                     } else if self.online_idx == 3 {
-                        self.app_state = APP_STATE_MAIN_MENU;
+                        self.switch_state(APP_STATE_MAIN_MENU);
                     }
                 } else if ev.code == KEY_ESC || ev.is_char(113u8) || ev.is_char(98u8) {
-                    self.app_state = APP_STATE_MAIN_MENU;
+                    self.switch_state(APP_STATE_MAIN_MENU);
                 }
             }
             return;
@@ -384,6 +407,7 @@ impl App {
                 return;
             }
             if ev.is_press() {
+                self.needs_redraw = true;
                 if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
                     if self.settings_idx > 0 { self.settings_idx = self.settings_idx - 1; }
                 } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
@@ -397,11 +421,11 @@ impl App {
                         self.cfg.show_coords = !self.cfg.show_coords;
                     } else if self.settings_idx == 4 {
                         self.cfg.save();
-                        self.app_state = APP_STATE_MAIN_MENU;
+                        self.switch_state(APP_STATE_MAIN_MENU);
                     }
                 } else if ev.code == KEY_ESC || ev.is_char(113u8) || ev.is_char(98u8) {
                     self.cfg.save();
-                    self.app_state = APP_STATE_MAIN_MENU;
+                    self.switch_state(APP_STATE_MAIN_MENU);
                 }
             }
             return;
@@ -416,8 +440,9 @@ impl App {
                     return;
                 }
                 if ev.is_press() {
+                    self.needs_redraw = true;
                     if ev.code == KEY_ESC || ev.is_char(113u8) {
-                        self.app_state = APP_STATE_MAIN_MENU;
+                        self.switch_state(APP_STATE_MAIN_MENU);
                     } else if ev.is_char(114u8) || ev.is_char(121u8) { // Rematch
                         self.start_ai_match();
                     }
@@ -434,6 +459,7 @@ impl App {
                         self.match_over = true;
                         self.match_result_text = String.from_str("Black wins on time!");
                         self.match_banner = String.from_str("Time forfeit! 0-1 Black wins.");
+                        self.needs_redraw = true;
                         return;
                     }
                 } else {
@@ -443,8 +469,14 @@ impl App {
                         self.match_over = true;
                         self.match_result_text = String.from_str("White wins on time!");
                         self.match_banner = String.from_str("Time forfeit! 1-0 White wins.");
+                        self.needs_redraw = true;
                         return;
                     }
+                }
+                let now_sec = now_ms / 1000i64;
+                if now_sec != self.last_clock_sec {
+                    self.last_clock_sec = now_sec;
+                    self.needs_redraw = true;
                 }
             }
 
@@ -452,9 +484,12 @@ impl App {
             if self.b.side_to_move == self.user_side {
                 let flipped = self.user_side == COLOR_BLACK;
                 self.inp.process_input(self.b, self.user_side, flipped);
+                if self.inp.has_input_event {
+                    self.needs_redraw = true;
+                }
 
                 if self.inp.esc_pressed {
-                    self.app_state = APP_STATE_MAIN_MENU;
+                    self.switch_state(APP_STATE_MAIN_MENU);
                     return;
                 }
 
@@ -462,6 +497,7 @@ impl App {
                     self.match_over = true;
                     self.match_result_text = String.from_str("Resigned");
                     self.match_banner = String.from_str("You resigned. Opponent wins!");
+                    self.needs_redraw = true;
                     return;
                 }
 
@@ -475,6 +511,7 @@ impl App {
                             self.match_history_sans.pop();
                         }
                         self.match_banner = String.from_str("Move undone.");
+                        self.needs_redraw = true;
                     }
                     return;
                 }
@@ -519,7 +556,7 @@ impl App {
                 if ev.is_press() {
                     if ev.code == KEY_ESC || ev.is_char(113u8) {
                         self.net_sess.close_session();
-                        self.app_state = APP_STATE_MAIN_MENU;
+                        self.switch_state(APP_STATE_MAIN_MENU);
                     }
                 }
                 return;
@@ -538,6 +575,7 @@ impl App {
                 self.match_over = true;
                 self.match_result_text = String.from_str("Opponent resigned");
                 self.match_banner = String.from_str("Opponent resigned. You win!");
+                self.needs_redraw = true;
                 return;
             }
 
@@ -545,10 +583,13 @@ impl App {
             if self.b.side_to_move == self.net_sess.local_color {
                 let flipped = self.net_sess.local_color == COLOR_BLACK;
                 self.inp.process_input(self.b, self.net_sess.local_color, flipped);
+                if self.inp.has_input_event {
+                    self.needs_redraw = true;
+                }
 
                 if self.inp.esc_pressed {
                     self.net_sess.close_session();
-                    self.app_state = APP_STATE_MAIN_MENU;
+                    self.switch_state(APP_STATE_MAIN_MENU);
                     return;
                 }
 
@@ -557,6 +598,7 @@ impl App {
                     self.match_over = true;
                     self.match_result_text = String.from_str("You resigned");
                     self.match_banner = String.from_str("You resigned. Opponent wins!");
+                    self.needs_redraw = true;
                     return;
                 }
 
@@ -577,8 +619,8 @@ impl App {
 
     // Main render call
     pub fn render(self) {
-        // Clear terminal screen and position cursor at home (1,1)
-        print("\x1b[H\x1b[2J");
+        // Position cursor at home (1,1) without blanking screen
+        print("\x1b[H");
 
         if self.app_state == APP_STATE_MAIN_MENU {
             render_main_menu(self.main_idx);
@@ -609,32 +651,8 @@ impl App {
         if self.app_state == APP_STATE_PLAYING_AI || self.app_state == APP_STATE_PLAYING_ONLINE {
             let flipped = self.user_side == COLOR_BLACK;
 
-            // Header HUD
-            draw_header();
-
-            // Opponent bar
-            print("  [Opponent] ");
-            print(BOLD());
-            print(FG_BRIGHT_WHITE());
-            if flipped {
-                print(self.white_player_title.as_ptr() as str);
-            } else {
-                print(self.black_player_title.as_ptr() as str);
-            }
-            print(RESET());
-            print("  Clock: ");
-            print(FG_YELLOW());
-            var opp_clock = self.black_clock_ms;
-            if flipped { opp_clock = self.white_clock_ms; }
-            print(format_clock_time(opp_clock).as_ptr() as str);
-            print(RESET());
-            print("  Captured: ");
-            print(render_captured_tray(self.b, self.cfg.piece_theme, !flipped).as_ptr() as str);
-            print("\r\n\r\n");
-
-            // Chessboard
             let cur_sq = self.inp.get_cursor_sq();
-            render_board(
+            render_match_screen(
                 self.b,
                 cur_sq,
                 self.inp.selected_sq,
@@ -644,66 +662,14 @@ impl App {
                 flipped,
                 self.cfg.color_theme,
                 self.cfg.piece_theme,
-                self.cfg.show_coords
+                self.cfg.show_coords,
+                self.white_player_title.as_ptr() as str,
+                self.black_player_title.as_ptr() as str,
+                self.white_clock_ms,
+                self.black_clock_ms,
+                self.match_banner.as_ptr() as str,
+                self.match_history_sans
             );
-
-            // Player bar
-            print("\r\n");
-            print("  [You]      ");
-            print(BOLD());
-            print(FG_BRIGHT_CYAN());
-            if flipped {
-                print(self.black_player_title.as_ptr() as str);
-            } else {
-                print(self.white_player_title.as_ptr() as str);
-            }
-            print(RESET());
-            print("  Clock: ");
-            print(FG_YELLOW());
-            var my_clock = self.white_clock_ms;
-            if flipped { my_clock = self.black_clock_ms; }
-            print(format_clock_time(my_clock).as_ptr() as str);
-            print(RESET());
-            print("  Captured: ");
-            print(render_captured_tray(self.b, self.cfg.piece_theme, flipped).as_ptr() as str);
-            print("\r\n");
-
-            // Move History & Status Banner
-            print("\r\n");
-            print("  ");
-            print(BG_SELECTED());
-            print(FG_BLACK());
-            print(" STATUS ");
-            print(RESET());
-            print(" ");
-            print(BOLD());
-            print(FG_BRIGHT_WHITE());
-            print(self.match_banner.as_ptr() as str);
-            print(RESET());
-            print("\r\n");
-
-            // Move list snippet (last 4 moves)
-            if self.match_history_sans.len > 0usize {
-                print("  Moves: ");
-                var start_h = 0usize;
-                if self.match_history_sans.len > 8usize {
-                    start_h = self.match_history_sans.len - 8usize;
-                }
-                var hi = start_h;
-                while hi < self.match_history_sans.len {
-                    print(self.match_history_sans.ptr[hi].as_ptr() as str);
-                    print(" ");
-                    hi = hi + 1usize;
-                }
-                print("\r\n");
-            }
-
-            // Keyboard navigation hint
-            print("  ");
-            print(DIM());
-            print("[Arrows/WASD/HJKL] Move · [Enter/Space] Select · [U] Undo · [R] Resign · [Esc] Menu");
-            print(RESET());
-            print("\r\n");
         }
     }
 

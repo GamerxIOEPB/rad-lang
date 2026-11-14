@@ -1,6 +1,6 @@
 // ==============================================================================
 // RadChess: Terminal Rendering Engine
-// Board rendering, unicode/ASCII pieces, clock displays, trays & HUD.
+// Full-screen board rendering, 5x2 large squares, side-by-side HUD & match panel.
 // ==============================================================================
 
 import "./colors";
@@ -8,7 +8,6 @@ import "../chess/constants";
 import "../chess/board";
 import "../chess/moves";
 
-// Get piece glyph representation
 pub fn get_piece_glyph(piece: u8, piece_theme: i32) -> str {
     if piece_theme == 1 { // ASCII
         if piece == PIECE_WHITE_KING { return "K"; }
@@ -45,7 +44,6 @@ pub fn get_piece_glyph(piece: u8, piece_theme: i32) -> str {
     return " ";
 }
 
-// Format milliseconds to MM:SS string
 pub fn format_clock_time(ms: i32) -> String {
     if ms <= 0 {
         return String.from_str("--:--");
@@ -67,173 +65,7 @@ pub fn format_clock_time(ms: i32) -> String {
     s
 }
 
-// Render complete board line by line
-pub fn render_board(
-    b: Board,
-    cursor_sq: i32,
-    selected_sq: i32,
-    legal_targets: Vec<i32>,
-    last_from: i32,
-    last_to: i32,
-    flipped: bool,
-    color_theme: i32,
-    piece_theme: i32,
-    show_coords: bool
-) {
-    // 8 ranks
-    var r_idx = 0;
-    while r_idx < 8 {
-        var rank = 7 - r_idx;
-        if flipped {
-            rank = r_idx;
-        }
-
-        // Left coordinate
-        if show_coords {
-            print("  ");
-            print(FG_CYAN());
-            print(chess_int_to_str((rank + 1) as i64).as_ptr() as str);
-            print(RESET());
-            print(" ");
-        } else {
-            print("    ");
-        }
-
-        // 8 files
-        var f_idx = 0;
-        while f_idx < 8 {
-            var file = f_idx;
-            if flipped {
-                file = 7 - f_idx;
-            }
-
-            let sq = (rank * 8) + file;
-            let piece = b.squares[sq as usize];
-            let is_light = ((rank + file) % 2) != 0;
-
-            // Determine background color
-            var bg_esc = get_sq_bg(color_theme, is_light);
-
-            if sq == selected_sq {
-                bg_esc = BG_SELECTED();
-            } else if sq == last_from || sq == last_to {
-                bg_esc = BG_LAST_MOVE();
-            } else {
-                // Check if sq in legal targets
-                var is_target = false;
-                var ti = 0usize;
-                while ti < legal_targets.len {
-                    if legal_targets.ptr[ti] == sq {
-                        is_target = true;
-                        break;
-                    }
-                    ti = ti + 1usize;
-                }
-                if is_target {
-                    bg_esc = BG_LEGAL_MOVE();
-                }
-            }
-
-            // Piece color
-            var fg_esc = FG_WHITE_PIECE();
-            let p_color = get_piece_color(piece);
-            if p_color == COLOR_BLACK {
-                fg_esc = FG_BLACK_PIECE();
-            }
-
-            let glyph = get_piece_glyph(piece, piece_theme);
-
-            // Bracket styling for cursor / selection
-            var l_bracket = " ";
-            var r_bracket = " ";
-            if sq == cursor_sq {
-                l_bracket = "[";
-                r_bracket = "]";
-            } else if sq == selected_sq {
-                l_bracket = "{";
-                r_bracket = "}";
-            }
-
-            print(bg_esc);
-            if sq == cursor_sq {
-                print(FG_BRIGHT_YELLOW());
-                print(l_bracket);
-            } else {
-                print(l_bracket);
-            }
-
-            if piece == 0u8 {
-                // Check if empty target
-                var is_target = false;
-                var ti = 0usize;
-                while ti < legal_targets.len {
-                    if legal_targets.ptr[ti] == sq {
-                        is_target = true;
-                        break;
-                    }
-                    ti = ti + 1usize;
-                }
-                if is_target {
-                    print(FG_BRIGHT_GREEN());
-                    print("•");
-                } else {
-                    print(" ");
-                }
-            } else {
-                print(fg_esc);
-                print(glyph);
-            }
-
-            if sq == cursor_sq {
-                print(FG_BRIGHT_YELLOW());
-                print(r_bracket);
-            } else {
-                print(r_bracket);
-            }
-
-            print(RESET());
-
-            f_idx = f_idx + 1;
-        }
-
-        // Right coordinate
-        if show_coords {
-            print(" ");
-            print(FG_CYAN());
-            print(chess_int_to_str((rank + 1) as i64).as_ptr() as str);
-            print(RESET());
-        }
-        print("\r\n");
-
-        r_idx = r_idx + 1;
-    }
-
-    // Bottom file letters
-    if show_coords {
-        print("     ");
-        var f_idx = 0;
-        while f_idx < 8 {
-            var file = f_idx;
-            if flipped {
-                file = 7 - f_idx;
-            }
-            let ch_byte = 97u8 + (file as u8); // 'a'..'h'
-            var s = String.new();
-            s.push_byte(ch_byte);
-            print(FG_CYAN());
-            print(" ");
-            print(s.as_ptr() as str);
-            print(" ");
-            print(RESET());
-            f_idx = f_idx + 1;
-        }
-        print("\r\n");
-    }
-}
-
-// Compute captured pieces trays for White and Black
 pub fn render_captured_tray(b: Board, piece_theme: i32, for_white: bool) -> String {
-    // Standard starting counts: P:8, N:2, B:2, R:2, Q:1
     var p_count = 0;
     var n_count = 0;
     var b_count = 0;
@@ -268,15 +100,403 @@ pub fn render_captured_tray(b: Board, piece_theme: i32, for_white: bool) -> Stri
     var piece_base = PIECE_BLACK_QUEEN;
     if for_white { piece_base = PIECE_WHITE_QUEEN; }
 
-    while i < lost_q { tray.push_str(get_piece_glyph(piece_base, piece_theme)); i = i + 1; }
+    while i < lost_q { tray.push_str(get_piece_glyph(piece_base, piece_theme)); tray.push_str(" "); i = i + 1; }
     i = 0;
-    while i < lost_r { tray.push_str(get_piece_glyph(piece_base + 1u8, piece_theme)); i = i + 1; }
+    while i < lost_r { tray.push_str(get_piece_glyph(piece_base + 1u8, piece_theme)); tray.push_str(" "); i = i + 1; }
     i = 0;
-    while i < lost_b { tray.push_str(get_piece_glyph(piece_base + 2u8, piece_theme)); i = i + 1; }
+    while i < lost_b { tray.push_str(get_piece_glyph(piece_base + 2u8, piece_theme)); tray.push_str(" "); i = i + 1; }
     i = 0;
-    while i < lost_n { tray.push_str(get_piece_glyph(piece_base + 3u8, piece_theme)); i = i + 1; }
+    while i < lost_n { tray.push_str(get_piece_glyph(piece_base + 3u8, piece_theme)); tray.push_str(" "); i = i + 1; }
     i = 0;
-    while i < lost_p { tray.push_str(get_piece_glyph(piece_base + 4u8, piece_theme)); i = i + 1; }
+    while i < lost_p { tray.push_str(get_piece_glyph(piece_base + 4u8, piece_theme)); tray.push_str(" "); i = i + 1; }
 
     tray
+}
+
+fn print_pad_str(s: str, target_len: usize) {
+    let p = s as *raw u8;
+    let len = chess_str_len(s);
+    var i = 0usize;
+    var printed = 0usize;
+    while i < len && printed < target_len {
+        let ch = p[i];
+        if ch >= 32u8 && ch < 127u8 {
+            var buf = String.new();
+            buf.push_byte(ch);
+            print(buf.as_ptr() as str);
+            printed = printed + 1usize;
+        }
+        i = i + 1usize;
+    }
+    while printed < target_len {
+        print(" ");
+        printed = printed + 1usize;
+    }
+}
+
+// Render complete full-screen match view
+pub fn render_match_screen(
+    b: Board,
+    cursor_sq: i32,
+    selected_sq: i32,
+    legal_targets: Vec<i32>,
+    last_from: i32,
+    last_to: i32,
+    flipped: bool,
+    color_theme: i32,
+    piece_theme: i32,
+    show_coords: bool,
+    white_title: str,
+    black_title: str,
+    white_clock_ms: i32,
+    black_clock_ms: i32,
+    match_banner: str,
+    history: Vec<String>
+) {
+    // 1. Top border (80 cols)
+    print(FG_BRIGHT_CYAN());
+    put_line("╔══════════════════════════════════════════════╦═══════════════════════════════╗");
+
+    // 2. Title row
+    print("║          ");
+    print(BOLD());
+    print(FG_BRIGHT_YELLOW());
+    print("♜ RAD CHESS — Native Linux ♜");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    print("        ║");
+    print(BOLD());
+    print(FG_BRIGHT_WHITE());
+    print("  MATCH INFORMATION            ");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("║");
+
+    // 3. Separator
+    put_line("╠══════════════════════════════════════════════╬═══════════════════════════════╣");
+
+    // Determine opponent vs player
+    var opp_title = black_title;
+    var opp_clock = black_clock_ms;
+    var my_title = white_title;
+    var my_clock = white_clock_ms;
+    if flipped {
+        opp_title = white_title;
+        opp_clock = white_clock_ms;
+        my_title = black_title;
+        my_clock = black_clock_ms;
+    }
+
+    let opp_tray = render_captured_tray(b, piece_theme, !flipped);
+    let my_tray = render_captured_tray(b, piece_theme, flipped);
+
+    // 8 ranks * 2 lines = 16 lines
+    var r_idx = 0;
+    while r_idx < 8 {
+        var rank = 7 - r_idx;
+        if flipped { rank = r_idx; }
+
+        let rank_char = chess_int_to_str((rank + 1) as i64);
+
+        // --- LINE 1: Top half of square ---
+        print(FG_BRIGHT_CYAN());
+        print("║    "); // 5 cols
+        print(RESET());
+
+        var f_idx = 0;
+        while f_idx < 8 {
+            var file = f_idx;
+            if flipped { file = 7 - f_idx; }
+            let sq = (rank * 8) + file;
+            let is_light = ((rank + file) % 2) != 0;
+
+            var bg_esc = get_sq_bg(color_theme, is_light);
+            if sq == selected_sq {
+                bg_esc = BG_SELECTED();
+            } else if sq == last_from || sq == last_to {
+                bg_esc = BG_LAST_MOVE();
+            } else {
+                var is_target = false;
+                var ti = 0usize;
+                while ti < legal_targets.len {
+                    if legal_targets.ptr[ti] == sq { is_target = true; break; }
+                    ti = ti + 1usize;
+                }
+                if is_target { bg_esc = BG_LEGAL_MOVE(); }
+            }
+
+            print(bg_esc);
+            if sq == cursor_sq {
+                print(FG_BRIGHT_YELLOW());
+                print(" ┌─┐ ");
+            } else {
+                print("     ");
+            }
+            print(RESET());
+            f_idx = f_idx + 1;
+        }
+
+        print("  ");
+        print(FG_BRIGHT_CYAN());
+        print("║");
+        print(RESET());
+
+        // Sidebar for Line 1 (even index: 0, 2, 4, 6, 8, 10, 12, 14)
+        let s_idx1 = r_idx * 2;
+        if s_idx1 == 0 {
+            print(BOLD()); print(FG_YELLOW());
+            print("  [Opponent]                   ");
+            print(RESET());
+        } else if s_idx1 == 2 {
+            print(FG_WHITE());
+            print("  Clock: ");
+            print(FG_BRIGHT_YELLOW());
+            print(format_clock_time(opp_clock).as_ptr() as str);
+            print(RESET());
+            print("                 ");
+        } else if s_idx1 == 4 {
+            print(FG_CYAN());
+            print(" ───────────────────────────── ");
+            print(RESET());
+        } else if s_idx1 == 6 {
+            print(FG_WHITE());
+            print("  Clock: ");
+            print(FG_BRIGHT_YELLOW());
+            print(format_clock_time(my_clock).as_ptr() as str);
+            print(RESET());
+            print("                 ");
+        } else if s_idx1 == 8 {
+            print(FG_CYAN());
+            print(" ───────────────────────────── ");
+            print(RESET());
+        } else if s_idx1 == 10 {
+            print(FG_WHITE());
+            print(" ");
+            print_pad_str(match_banner, 29usize);
+            print(" ");
+            print(RESET());
+        } else if s_idx1 == 12 {
+            print(BOLD()); print(FG_BRIGHT_WHITE());
+            print("  Recent Moves:                ");
+            print(RESET());
+        } else if s_idx1 == 14 {
+            // Move history line 2
+            if history.len > 4usize {
+                var hi = history.len - 4usize;
+                if hi > 4usize { hi = 4usize; }
+                var m_line = String.new();
+                while hi < history.len {
+                    m_line.push_str(history.ptr[hi].as_ptr() as str);
+                    m_line.push_str(" ");
+                    hi = hi + 1usize;
+                }
+                print(FG_WHITE());
+                print("  ");
+                print_pad_str(m_line.as_ptr() as str, 28usize);
+                print(" ");
+                print(RESET());
+            } else {
+                print("                               ");
+            }
+        } else {
+            print("                               ");
+        }
+
+        print(FG_BRIGHT_CYAN());
+        put_line("║");
+        print(RESET());
+
+
+        // --- LINE 2: Piece half of square ---
+        print(FG_BRIGHT_CYAN());
+        print("║");
+        if show_coords {
+            print(" ");
+            print(FG_CYAN());
+            print(rank_char.as_ptr() as str);
+            print("  ");
+        } else {
+            print("    ");
+        }
+        print(RESET());
+
+        f_idx = 0;
+        while f_idx < 8 {
+            var file = f_idx;
+            if flipped { file = 7 - f_idx; }
+            let sq = (rank * 8) + file;
+            let piece = b.squares[sq as usize];
+            let is_light = ((rank + file) % 2) != 0;
+
+            var bg_esc = get_sq_bg(color_theme, is_light);
+            if sq == selected_sq {
+                bg_esc = BG_SELECTED();
+            } else if sq == last_from || sq == last_to {
+                bg_esc = BG_LAST_MOVE();
+            } else {
+                var is_target = false;
+                var ti = 0usize;
+                while ti < legal_targets.len {
+                    if legal_targets.ptr[ti] == sq { is_target = true; break; }
+                    ti = ti + 1usize;
+                }
+                if is_target { bg_esc = BG_LEGAL_MOVE(); }
+            }
+
+            var fg_esc = FG_WHITE_PIECE();
+            if get_piece_color(piece) == COLOR_BLACK {
+                fg_esc = FG_BLACK_PIECE();
+            }
+
+            let glyph = get_piece_glyph(piece, piece_theme);
+
+            print(bg_esc);
+            if sq == cursor_sq {
+                print(FG_BRIGHT_YELLOW());
+                print(" [");
+            } else if sq == selected_sq {
+                print(FG_BRIGHT_YELLOW());
+                print(" {");
+            } else {
+                print("  ");
+            }
+
+            if piece == 0u8 {
+                var is_target = false;
+                var ti = 0usize;
+                while ti < legal_targets.len {
+                    if legal_targets.ptr[ti] == sq { is_target = true; break; }
+                    ti = ti + 1usize;
+                }
+                if is_target {
+                    print(FG_BRIGHT_GREEN());
+                    print("•");
+                } else {
+                    print(" ");
+                }
+            } else {
+                print(fg_esc);
+                print(glyph);
+            }
+
+            if sq == cursor_sq {
+                print(FG_BRIGHT_YELLOW());
+                print("] ");
+            } else if sq == selected_sq {
+                print(FG_BRIGHT_YELLOW());
+                print("} ");
+            } else {
+                print("  ");
+            }
+            print(RESET());
+
+            f_idx = f_idx + 1;
+        }
+
+        if show_coords {
+            print(" ");
+            print(FG_CYAN());
+            print(rank_char.as_ptr() as str);
+            print(FG_BRIGHT_CYAN());
+        } else {
+            print("  ");
+            print(FG_BRIGHT_CYAN());
+        }
+        print("║");
+        print(RESET());
+
+        // Sidebar for Line 2 (odd index: 1, 3, 5, 7, 9, 11, 13, 15)
+        let s_idx2 = r_idx * 2 + 1;
+        if s_idx2 == 1 {
+            print("  ");
+            print(BOLD()); print(FG_BRIGHT_WHITE());
+            print_pad_str(opp_title, 28usize);
+            print(" ");
+            print(RESET());
+        } else if s_idx2 == 3 {
+            print("  Capt: ");
+            print(FG_WHITE());
+            print_pad_str(opp_tray.as_ptr() as str, 22usize);
+            print(" ");
+            print(RESET());
+        } else if s_idx2 == 5 {
+            print(BOLD()); print(FG_BRIGHT_CYAN());
+            print("  [You]                        ");
+            print(RESET());
+        } else if s_idx2 == 7 {
+            print("  ");
+            print(BOLD()); print(FG_BRIGHT_WHITE());
+            print_pad_str(my_title, 28usize);
+            print(" ");
+            print(RESET());
+        } else if s_idx2 == 9 {
+            print("  Capt: ");
+            print(FG_WHITE());
+            print_pad_str(my_tray.as_ptr() as str, 22usize);
+            print(" ");
+            print(RESET());
+        } else if s_idx2 == 11 {
+            print(BOLD()); print(FG_BRIGHT_YELLOW());
+            print("  [STATUS]                     ");
+            print(RESET());
+        } else if s_idx2 == 13 {
+            // Move history line 1
+            if history.len > 0usize {
+                var hi = 0usize;
+                if history.len > 4usize { hi = history.len - 4usize; }
+                var count = 0usize;
+                var m_line = String.new();
+                while hi < history.len && count < 4usize {
+                    m_line.push_str(history.ptr[hi].as_ptr() as str);
+                    m_line.push_str(" ");
+                    hi = hi + 1usize;
+                    count = count + 1usize;
+                }
+                print(FG_WHITE());
+                print("  ");
+                print_pad_str(m_line.as_ptr() as str, 28usize);
+                print(" ");
+                print(RESET());
+            } else {
+                print("  (None)                       ");
+            }
+        } else if s_idx2 == 15 {
+            print(DIM());
+            print(" [Arrows] Move  [Enter] Select ");
+            print(RESET());
+        } else {
+            print("                               ");
+        }
+
+        print(FG_BRIGHT_CYAN());
+        put_line("║");
+        print(RESET());
+
+        r_idx = r_idx + 1;
+    }
+
+    // File letters row (Line 17)
+    print(FG_BRIGHT_CYAN());
+    print("║");
+    if show_coords {
+        print(FG_CYAN());
+        if flipped {
+            print("      h    g    f    e    d    c    b    a    ");
+        } else {
+            print("      a    b    c    d    e    f    g    h    ");
+        }
+    } else {
+        print("                                              ");
+    }
+    print(FG_BRIGHT_CYAN());
+    print("║");
+    print(DIM());
+    print(" [U] Undo   [R] Resign   [Esc] ");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("║");
+
+    // Bottom border (80 cols)
+    put_line("╚══════════════════════════════════════════════╩═══════════════════════════════╝");
+    print(RESET());
 }

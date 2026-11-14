@@ -25,11 +25,20 @@ struct Game2048 {
     game_over: bool,
     paused: bool,
     rng_state: u64,
+    // Reusable scratch buffers — zero runtime heap allocation
+    scratch_line: *raw var i64,
+    scratch_comp: *raw var i64,
+    scratch_merge: *raw var i64,
+    scratch_indices: *raw var usize,
 }
 
 impl Game2048 {
     fn new() -> Game2048 {
         let buf = malloc(16usize * 8usize) as *raw var i64
+        let s_line = malloc(4usize * 8usize) as *raw var i64
+        let s_comp = malloc(4usize * 8usize) as *raw var i64
+        let s_merge = malloc(4usize * 8usize) as *raw var i64
+        let s_indices = malloc(16usize * 8usize) as *raw var usize
         var g = Game2048 {
             grid: buf,
             score: 0i64,
@@ -39,14 +48,18 @@ impl Game2048 {
             game_over: false,
             paused: false,
             rng_state: 88172645463325252u64,
+            scratch_line: s_line,
+            scratch_comp: s_comp,
+            scratch_merge: s_merge,
+            scratch_indices: s_indices,
         }
         g.reset()
         return g
     }
 
-    fn rand_u32(var self) -> u32 {
+    fn rand_u32(var self) -> i64 {
         self.rng_state = (self.rng_state * 6364136223846793005u64) + 1442695040888963407u64
-        return ((self.rng_state >> 32u64) & 4294967295u64) as u32
+        return ((self.rng_state >> 33u64) & 2147483647u64) as i64
     }
 
     fn reset(var self) {
@@ -67,30 +80,34 @@ impl Game2048 {
     }
 
     fn spawn_tile(var self) {
-        // Collect empty positions
-        var empty_indices = malloc(16usize * 8usize) as *raw var usize
         var count = 0usize
         var i = 0usize
         while i < 16usize {
             if self.grid[i] == 0i64 {
-                empty_indices[count] = i
+                self.scratch_indices[count] = i
                 count = count + 1usize
             }
             i = i + 1usize
         }
 
         if count > 0usize {
-            let choice_idx = (self.rand_u32() as usize) % count
-            let pos = empty_indices[choice_idx]
-            // 90% chance of 2, 10% chance of 4
-            let r = (self.rand_u32() as usize) % 10usize
-            if r == 0usize {
-                self.grid[pos] = 4i64
-            } else {
-                self.grid[pos] = 2i64
+            var raw_rnd = self.rand_u32()
+            if raw_rnd < 0i64 { raw_rnd = -raw_rnd }
+            let choice_idx = (raw_rnd as usize) % count
+            if choice_idx < count {
+                let pos = self.scratch_indices[choice_idx]
+                if pos < 16usize {
+                    var r_rnd = self.rand_u32()
+                    if r_rnd < 0i64 { r_rnd = -r_rnd }
+                    let r = (r_rnd as usize) % 10usize
+                    if r == 0usize {
+                        self.grid[pos] = 4i64
+                    } else {
+                        self.grid[pos] = 2i64
+                    }
+                }
             }
         }
-        free(empty_indices as *raw u8)
     }
 
     fn can_move(self) -> bool {
@@ -141,34 +158,33 @@ impl Game2048 {
     fn slide_line_left(var self, line: *raw var i64) -> bool {
         var changed = false
 
-        // 1. Compress non-zero elements
-        var compressed = malloc(4usize * 8usize) as *raw var i64
-        var pos = 0usize
+        // 1. Zero out scratch buffers
         var i = 0usize
         while i < 4usize {
-            compressed[i] = 0i64
+            self.scratch_comp[i] = 0i64
+            self.scratch_merge[i] = 0i64
+            i = i + 1usize
+        }
+
+        // 2. Compress non-zero elements
+        var pos = 0usize
+        i = 0usize
+        while i < 4usize {
             if line[i] != 0i64 {
-                compressed[pos] = line[i]
+                self.scratch_comp[pos] = line[i]
                 pos = pos + 1usize
             }
             i = i + 1usize
         }
 
-        // 2. Merge adjacent identical elements
-        var merged = malloc(4usize * 8usize) as *raw var i64
+        // 3. Merge adjacent identical elements
         var m_pos = 0usize
         i = 0usize
         while i < 4usize {
-            merged[i] = 0i64
-            i = i + 1usize
-        }
-
-        i = 0usize
-        while i < 4usize {
-            if compressed[i] != 0i64 {
-                if i + 1usize < 4usize && compressed[i] == compressed[i + 1usize] {
-                    let val = compressed[i] * 2i64
-                    merged[m_pos] = val
+            if self.scratch_comp[i] != 0i64 {
+                if i + 1usize < 4usize && self.scratch_comp[i] == self.scratch_comp[i + 1usize] {
+                    let val = self.scratch_comp[i] * 2i64
+                    self.scratch_merge[m_pos] = val
                     self.score = self.score + val
                     if self.score > self.best_score {
                         self.best_score = self.score
@@ -179,7 +195,7 @@ impl Game2048 {
                     m_pos = m_pos + 1usize
                     i = i + 2usize
                 } else {
-                    merged[m_pos] = compressed[i]
+                    self.scratch_merge[m_pos] = self.scratch_comp[i]
                     m_pos = m_pos + 1usize
                     i = i + 1usize
                 }
@@ -188,120 +204,104 @@ impl Game2048 {
             }
         }
 
-        // 3. Write back and detect changes
+        // 4. Write back and detect changes
         i = 0usize
         while i < 4usize {
-            if line[i] != merged[i] {
+            if line[i] != self.scratch_merge[i] {
                 changed = true
             }
-            line[i] = merged[i]
+            line[i] = self.scratch_merge[i]
             i = i + 1usize
         }
 
-        free(compressed as *raw u8)
-        free(merged as *raw u8)
         return changed
     }
 
     fn move_left(var self) -> bool {
         var moved = false
         var r = 0usize
-        let line = malloc(4usize * 8usize) as *raw var i64
         while r < 4usize {
             var c = 0usize
             while c < 4usize {
-                line[c] = self.grid[r * 4usize + c]
+                self.scratch_line[c] = self.grid[r * 4usize + c]
                 c = c + 1usize
             }
-            if self.slide_line_left(line) {
+            if self.slide_line_left(self.scratch_line) {
                 moved = true
             }
             c = 0usize
             while c < 4usize {
-                self.grid[r * 4usize + c] = line[c]
+                self.grid[r * 4usize + c] = self.scratch_line[c]
                 c = c + 1usize
             }
             r = r + 1usize
         }
-        free(line as *raw u8)
         return moved
     }
 
     fn move_right(var self) -> bool {
         var moved = false
         var r = 0usize
-        let line = malloc(4usize * 8usize) as *raw var i64
         while r < 4usize {
-            // Reverse row into line
             var c = 0usize
             while c < 4usize {
-                line[c] = self.grid[r * 4usize + (3usize - c)]
+                self.scratch_line[c] = self.grid[r * 4usize + (3usize - c)]
                 c = c + 1usize
             }
-            if self.slide_line_left(line) {
+            if self.slide_line_left(self.scratch_line) {
                 moved = true
             }
-            // Reverse back
             c = 0usize
             while c < 4usize {
-                self.grid[r * 4usize + (3usize - c)] = line[c]
+                self.grid[r * 4usize + (3usize - c)] = self.scratch_line[c]
                 c = c + 1usize
             }
             r = r + 1usize
         }
-        free(line as *raw u8)
         return moved
     }
 
     fn move_up(var self) -> bool {
         var moved = false
         var col = 0usize
-        let line = malloc(4usize * 8usize) as *raw var i64
         while col < 4usize {
-            // Column into line
             var r = 0usize
             while r < 4usize {
-                line[r] = self.grid[r * 4usize + col]
+                self.scratch_line[r] = self.grid[r * 4usize + col]
                 r = r + 1usize
             }
-            if self.slide_line_left(line) {
+            if self.slide_line_left(self.scratch_line) {
                 moved = true
             }
-            // Column back
             r = 0usize
             while r < 4usize {
-                self.grid[r * 4usize + col] = line[r]
+                self.grid[r * 4usize + col] = self.scratch_line[r]
                 r = r + 1usize
             }
             col = col + 1usize
         }
-        free(line as *raw u8)
         return moved
     }
 
     fn move_down(var self) -> bool {
         var moved = false
         var col = 0usize
-        let line = malloc(4usize * 8usize) as *raw var i64
         while col < 4usize {
-            // Reverse column into line
             var r = 0usize
             while r < 4usize {
-                line[r] = self.grid[(3usize - r) * 4usize + col]
+                self.scratch_line[r] = self.grid[(3usize - r) * 4usize + col]
                 r = r + 1usize
             }
-            if self.slide_line_left(line) {
+            if self.slide_line_left(self.scratch_line) {
                 moved = true
             }
-            // Reverse back
             r = 0usize
             while r < 4usize {
-                self.grid[(3usize - r) * 4usize + col] = line[r]
+                self.grid[(3usize - r) * 4usize + col] = self.scratch_line[r]
                 r = r + 1usize
             }
             col = col + 1usize
         }
-        free(line as *raw u8)
         return moved
     }
 
@@ -370,6 +370,34 @@ impl Game2048 {
         return Color.indexed(237u8)
     }
 
+    fn get_tile_label(val: i64) -> str {
+        if val == 2i64 { return "2" }
+        if val == 4i64 { return "4" }
+        if val == 8i64 { return "8" }
+        if val == 16i64 { return "16" }
+        if val == 32i64 { return "32" }
+        if val == 64i64 { return "64" }
+        if val == 128i64 { return "128" }
+        if val == 256i64 { return "256" }
+        if val == 512i64 { return "512" }
+        if val == 1024i64 { return "1024" }
+        if val == 2048i64 { return "2048" }
+        if val == 4096i64 { return "4096" }
+        if val == 8192i64 { return "8192" }
+        if val == 16384i64 { return "16384" }
+        if val == 32768i64 { return "32768" }
+        if val == 65536i64 { return "65536" }
+        return ""
+    }
+
+    fn get_tile_label_len(val: i64) -> usize {
+        if val < 10i64 { return 1usize }
+        if val < 100i64 { return 2usize }
+        if val < 1000i64 { return 3usize }
+        if val < 10000i64 { return 4usize }
+        return 5usize
+    }
+
     fn render(self, var con: Console) {
         con.clear()
 
@@ -410,16 +438,16 @@ impl Game2048 {
                 let bg = Game2048.get_tile_bg(val)
 
                 if val == 0i64 {
-                    // Empty cell: visible light gray shade block with subtle center marker
+                    // Empty cell: visible light gray shade block with subtle ASCII dot marker
                     con.draw_rect(tx, ty, TILE_W, TILE_H, 32u8, Color.indexed(243u8), bg)
-                    con.print_str(tx + 4usize, ty + 1usize, "·", Color.indexed(243u8), bg)
+                    con.set_cell(tx + 4usize, ty + 1usize, 46u8, Color.indexed(243u8), bg)
                 } else {
                     // Solid tile
                     con.draw_rect(tx, ty, TILE_W, TILE_H, 32u8, fg, bg)
-                    let num_str = int_to_str(val)
-                    let n_len = num_str.len()
+                    let num_str = Game2048.get_tile_label(val)
+                    let n_len = Game2048.get_tile_label_len(val)
                     let pad_x = (TILE_W - n_len) / 2usize
-                    con.print_str(tx + pad_x, ty + 1usize, num_str.as_ptr() as str, fg, bg)
+                    con.print_str(tx + pad_x, ty + 1usize, num_str, fg, bg)
                 }
 
                 c = c + 1usize
@@ -452,10 +480,26 @@ impl Game2048 {
             free(self.grid as *raw u8)
             self.grid = 0usize as *raw var i64
         }
+        if (self.scratch_line as usize) != 0usize {
+            free(self.scratch_line as *raw u8)
+            self.scratch_line = 0usize as *raw var i64
+        }
+        if (self.scratch_comp as usize) != 0usize {
+            free(self.scratch_comp as *raw u8)
+            self.scratch_comp = 0usize as *raw var i64
+        }
+        if (self.scratch_merge as usize) != 0usize {
+            free(self.scratch_merge as *raw u8)
+            self.scratch_merge = 0usize as *raw var i64
+        }
+        if (self.scratch_indices as usize) != 0usize {
+            free(self.scratch_indices as *raw u8)
+            self.scratch_indices = 0usize as *raw var usize
+        }
     }
 }
 
-fn main() {
+fn main() -> i32 {
     var term = TerminalSession.new()
     term.enable_raw_mode()
     term.enter_alternate_screen()
@@ -464,7 +508,7 @@ fn main() {
     var kbd = KeyboardReader.new()
     var con = Console.new(54usize, 26usize)
     var timer = FrameTimer.new(60u32)
-    var game = Game2048.new()
+    var game: Game2048 = Game2048.new()
 
     var running = true
     while running {
@@ -507,4 +551,5 @@ fn main() {
     con.close_console()
     kbd.close_reader()
     term.close()
+    0
 }
