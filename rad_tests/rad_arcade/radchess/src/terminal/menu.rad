@@ -5,6 +5,7 @@
 
 import "./colors";
 import "../chess/constants";
+import "../multiplayer/discovery";
 
 pub fn draw_header() {
     print(FG_BRIGHT_CYAN());
@@ -407,6 +408,146 @@ pub fn render_settings_menu(
     print("Settings saved to ~/.config/radchess   ");
     print(FG_BRIGHT_CYAN());
     put_line(" ║");
+    put_line("╚══════════════════════════════════════════╝");
+    print(RESET());
+}
+
+// Render LAN Room Discovery Screen
+pub fn render_lan_discovery(selected_idx: i32, rooms: Vec<LanRoom>, anim_frame: i32) {
+    print("\r\n");
+    print(FG_BRIGHT_CYAN());
+    put_line("╔══════════════════════════════════════════╗");
+    print("║        ");
+    print(BOLD());
+    print(FG_BRIGHT_YELLOW());
+    print("♜ DISCOVER LAN GAMES ♜");
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("            ║");
+    put_line("╠══════════════════════════════════════════╣");
+
+    // Scanning animation bar
+    print("║  ");
+    print(FG_BRIGHT_WHITE());
+    print("Scanning nearby games... ");
+    print(FG_BRIGHT_GREEN());
+    if anim_frame == 0 {
+        print("[•       ]     ");
+    } else if anim_frame == 1 {
+        print("[• •     ]     ");
+    } else if anim_frame == 2 {
+        print("[• • •   ]     ");
+    } else {
+        print("[• • • • ]     ");
+    }
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line("║");
+    put_line("╠══════════════════════════════════════════╣");
+
+    if rooms.len == 0usize {
+        put_line("║                                          ║");
+        print("║       ");
+        print(DIM());
+        print("No LAN games found yet...");
+        print(RESET());
+        print(FG_BRIGHT_CYAN());
+        put_line("          ║");
+
+        print("║       ");
+        print(DIM());
+        print("(Waiting for a host beacon)");
+        print(RESET());
+        print(FG_BRIGHT_CYAN());
+        put_line("        ║");
+        put_line("║                                          ║");
+    } else {
+        var ri = 0usize;
+        var max_show = rooms.len;
+        if max_show > 4usize { max_show = 4usize; }
+        while ri < max_show {
+            let r = rooms.ptr[ri];
+            let is_sel = (selected_idx as usize) == ri;
+
+            // Line 1: Room name & IP
+            print("║ ");
+            if is_sel {
+                print(BG_SELECTED());
+                print(FG_BLACK());
+                print(BOLD());
+                print("> ");
+            } else {
+                print(FG_WHITE());
+                print("  ");
+            }
+            let num_s = chess_int_to_str((ri + 1usize) as i64);
+            print(num_s.as_ptr() as str);
+            print(". ");
+
+            var title_ip = String.new();
+            title_ip.push_str(r.room_name.as_ptr() as str);
+            title_ip.push_str(" (");
+            title_ip.push_str(r.room_ip.as_ptr() as str);
+            title_ip.push_str(")");
+            print_pad_str(title_ip.as_ptr() as str, 35usize);
+
+            print(RESET());
+            print(FG_BRIGHT_CYAN());
+            put_line(" ║");
+
+            // Line 2: Details (Color and Time Control)
+            print("║      ");
+            print(DIM());
+            var det = String.new();
+            det.push_str("Host: ");
+            if r.room_color == COLOR_WHITE {
+                det.push_str("White");
+            } else {
+                det.push_str("Black");
+            }
+            det.push_str(" · ");
+            if r.room_time_control == 1 {
+                det.push_str("3+2 Blitz");
+            } else if r.room_time_control == 2 {
+                det.push_str("5+3 Rapid");
+            } else if r.room_time_control == 3 {
+                det.push_str("10+0 Classic");
+            } else {
+                det.push_str("Unlimited");
+            }
+            print_pad_str(det.as_ptr() as str, 35usize);
+            print(RESET());
+            print(FG_BRIGHT_CYAN());
+            put_line(" ║");
+
+            ri = ri + 1usize;
+        }
+    }
+
+    put_line("╠══════════════════════════════════════════╣");
+
+    // Direct connect option (index = rooms.len)
+    let dc_sel = selected_idx == (rooms.len as i32);
+    print("║   ");
+    if dc_sel {
+        print(BG_SELECTED());
+        print(FG_BLACK());
+        print(BOLD());
+        print("> Direct Connect (127.0.0.1)          ");
+    } else {
+        print(FG_WHITE());
+        print("  Direct Connect (127.0.0.1)          ");
+    }
+    print(RESET());
+    print(FG_BRIGHT_CYAN());
+    put_line(" ║");
+
+    put_line("╠══════════════════════════════════════════╣");
+    print("║  ");
+    print(FG_BRIGHT_WHITE());
+    print("Enter: Connect · R: Rescan · Esc: Back  ");
+    print(FG_BRIGHT_CYAN());
+    put_line("║");
     put_line("╚══════════════════════════════════════════╝");
     print(RESET());
 }

@@ -58,3 +58,27 @@ pub fn put_line(s: str) {
     print(s);
     print("\r\n");
 }
+
+pub fn print_pad_str(s: str, target_len: usize) {
+    let p = s as *raw u8;
+    var len = 0usize;
+    while p[len] != 0u8 {
+        len = len + 1usize;
+    }
+    var i = 0usize;
+    var printed = 0usize;
+    while i < len && printed < target_len {
+        let ch = p[i];
+        if ch >= 32u8 && ch < 127u8 {
+            var buf = String.new();
+            buf.push_byte(ch);
+            print(buf.as_ptr() as str);
+            printed = printed + 1usize;
+        }
+        i = i + 1usize;
+    }
+    while printed < target_len {
+        print(" ");
+        printed = printed + 1usize;
+    }
+}

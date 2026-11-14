@@ -27,8 +27,9 @@ pub const APP_STATE_ONLINE_MENU: i32    = 2;
 pub const APP_STATE_SETTINGS: i32       = 3;
 pub const APP_STATE_PLAYING_AI: i32     = 4;
 pub const APP_STATE_PLAYING_ONLINE: i32 = 5;
-pub const APP_STATE_GAME_OVER: i32      = 6;
-pub const APP_STATE_EXIT: i32           = 7;
+pub const APP_STATE_LAN_DISCOVERY: i32  = 6;
+pub const APP_STATE_GAME_OVER: i32      = 7;
+pub const APP_STATE_EXIT: i32           = 8;
 
 pub fn get_monotonic_time_ms() -> i64 {
     let ts = malloc(16usize) as *raw var i64;
@@ -75,6 +76,9 @@ pub struct App {
     pub last_frame_time_ms: i64,
     pub needs_redraw: bool,
     pub last_clock_sec: i64,
+    pub discovery_idx: i32,
+    pub last_discovery_scan_ms: i64,
+    pub discovery_anim_frame: i32,
 }
 
 impl App {
@@ -115,6 +119,9 @@ impl App {
             last_frame_time_ms: get_monotonic_time_ms(),
             needs_redraw: true,
             last_clock_sec: 0i64,
+            discovery_idx: 0,
+            last_discovery_scan_ms: 0i64,
+            discovery_anim_frame: 0,
         }
     }
 
@@ -207,6 +214,14 @@ impl App {
         self.app_state = APP_STATE_PLAYING_ONLINE;
     }
 
+    pub fn start_lan_discovery(var self) {
+        self.discovery_idx = 0;
+        self.last_discovery_scan_ms = get_monotonic_time_ms();
+        self.discovery_anim_frame = 0;
+        let _ = self.beacon.poll_rooms(self.last_discovery_scan_ms);
+        self.switch_state(APP_STATE_LAN_DISCOVERY);
+    }
+
     pub fn start_online_joining(var self, host_ip: str) {
         print("\x1b[H\x1b[2J");
         self.needs_redraw = true;
@@ -215,16 +230,20 @@ impl App {
         self.last_from_sq = -1;
         self.last_to_sq = -1;
         self.match_history_sans = Vec.new();
-        self.match_over = false;
-        self.match_result_text = String.new();
-
-        self.net_sess.connect_to_host(host_ip, NET_TCP_DEFAULT_PORT);
         self.user_side = COLOR_BLACK;
 
         self.white_player_title = String.from_str("Host");
         self.black_player_title = self.cfg.player_name;
 
-        self.match_banner = String.from_str("Connecting to LAN host...");
+        if !self.net_sess.connect_to_host(host_ip, NET_TCP_DEFAULT_PORT) {
+            self.match_over = true;
+            self.match_result_text = String.from_str("Connection failed");
+            self.match_banner = String.from_str("Failed to connect to host! (Press Esc)");
+        } else {
+            self.match_over = false;
+            self.match_result_text = String.new();
+            self.match_banner = String.from_str("Connected! Waiting for host to start...");
+        }
         self.app_state = APP_STATE_PLAYING_ONLINE;
     }
 
@@ -378,22 +397,78 @@ impl App {
                     if self.online_idx == 0 {
                         self.start_online_hosting();
                     } else if self.online_idx == 1 {
-                        // Scan LAN rooms
-                        let rooms = self.beacon.poll_rooms(now_ms);
-                        if rooms.len > 0usize {
-                            let r0 = rooms.ptr[0usize];
-                            self.start_online_joining(r0.room_ip.as_ptr() as str);
-                        } else {
-                            // If no rooms discovered yet, default to localhost connect
-                            self.start_online_joining("127.0.0.1");
-                        }
+                        self.start_lan_discovery();
                     } else if self.online_idx == 2 {
                         self.start_online_joining("127.0.0.1");
                     } else if self.online_idx == 3 {
                         self.switch_state(APP_STATE_MAIN_MENU);
                     }
+                } else if ev.is_char(49u8) { // '1'
+                    self.online_idx = 0;
+                    self.start_online_hosting();
+                } else if ev.is_char(50u8) { // '2'
+                    self.online_idx = 1;
+                    self.start_lan_discovery();
+                } else if ev.is_char(51u8) { // '3'
+                    self.online_idx = 2;
+                    self.start_online_joining("127.0.0.1");
+                } else if ev.is_char(52u8) { // '4'
+                    self.switch_state(APP_STATE_MAIN_MENU);
                 } else if ev.code == KEY_ESC || ev.is_char(113u8) || ev.is_char(98u8) {
                     self.switch_state(APP_STATE_MAIN_MENU);
+                }
+            }
+            return;
+        }
+
+        // 3b. LAN Discovery Screen State
+        if self.app_state == APP_STATE_LAN_DISCOVERY {
+            if (now_ms - self.last_discovery_scan_ms) >= 400i64 {
+                self.last_discovery_scan_ms = now_ms;
+                self.discovery_anim_frame = (self.discovery_anim_frame + 1) % 4;
+                let _ = self.beacon.poll_rooms(now_ms);
+                self.needs_redraw = true;
+            }
+
+            let ev = self.inp.reader.read_key(0);
+            if ev.code == KEY_EOF {
+                self.online_idx = 1;
+                self.switch_state(APP_STATE_ONLINE_MENU);
+                return;
+            }
+            if ev.is_press() {
+                self.needs_redraw = true;
+                let max_opts = self.beacon.rooms.len as i32;
+                if ev.code == KEY_UP || ev.is_char(119u8) || ev.is_char(107u8) {
+                    if self.discovery_idx > 0 { self.discovery_idx = self.discovery_idx - 1; }
+                } else if ev.code == KEY_DOWN || ev.is_char(115u8) || ev.is_char(106u8) {
+                    if self.discovery_idx < max_opts { self.discovery_idx = self.discovery_idx + 1; }
+                } else if ev.code == KEY_ENTER || ev.is_char(32u8) {
+                    let u_idx = self.discovery_idx as usize;
+                    if u_idx < self.beacon.rooms.len {
+                        let r = self.beacon.rooms.ptr[u_idx];
+                        self.start_online_joining(r.room_ip.as_ptr() as str);
+                    } else {
+                        self.start_online_joining("127.0.0.1");
+                    }
+                } else if ev.is_char(49u8) && self.beacon.rooms.len >= 1usize {
+                    let r = self.beacon.rooms.ptr[0usize];
+                    self.start_online_joining(r.room_ip.as_ptr() as str);
+                } else if ev.is_char(50u8) && self.beacon.rooms.len >= 2usize {
+                    let r = self.beacon.rooms.ptr[1usize];
+                    self.start_online_joining(r.room_ip.as_ptr() as str);
+                } else if ev.is_char(51u8) && self.beacon.rooms.len >= 3usize {
+                    let r = self.beacon.rooms.ptr[2usize];
+                    self.start_online_joining(r.room_ip.as_ptr() as str);
+                } else if ev.is_char(52u8) && self.beacon.rooms.len >= 4usize {
+                    let r = self.beacon.rooms.ptr[3usize];
+                    self.start_online_joining(r.room_ip.as_ptr() as str);
+                } else if ev.is_char(114u8) || ev.is_char(82u8) { // 'r' / 'R'
+                    self.beacon.rooms = Vec.new();
+                    let _ = self.beacon.poll_rooms(now_ms);
+                } else if ev.code == KEY_ESC || ev.is_char(113u8) || ev.is_char(98u8) {
+                    self.online_idx = 1;
+                    self.switch_state(APP_STATE_ONLINE_MENU);
                 }
             }
             return;
@@ -533,6 +608,22 @@ impl App {
         if self.app_state == APP_STATE_PLAYING_ONLINE {
             self.net_sess.poll_events(now_ms);
 
+            // Sync status banner if set by network session
+            if self.net_sess.status_banner.len() > 0usize {
+                self.match_banner = self.net_sess.status_banner;
+                self.net_sess.status_banner = String.new();
+                self.needs_redraw = true;
+            }
+
+            // Sync remote player title if learned
+            if self.net_sess.remote_player_name.len() > 0usize {
+                if self.user_side == COLOR_WHITE {
+                    self.black_player_title = self.net_sess.remote_player_name;
+                } else {
+                    self.white_player_title = self.net_sess.remote_player_name;
+                }
+            }
+
             // If hosting, broadcast UDP beacon every 1 second
             if self.net_sess.net_role == NET_ROLE_HOST && self.net_sess.net_state == NET_STATE_LISTENING {
                 if (now_ms - self.beacon.last_beacon_sent_ms) > 1000i64 {
@@ -557,6 +648,24 @@ impl App {
                     if ev.code == KEY_ESC || ev.is_char(113u8) {
                         self.net_sess.close_session();
                         self.switch_state(APP_STATE_MAIN_MENU);
+                    }
+                }
+                return;
+            }
+
+            // While waiting for connection or opponent to connect, don't allow chess moves!
+            if self.net_sess.net_state != NET_STATE_PLAYING {
+                let ev = self.inp.reader.read_key(0);
+                if ev.code == KEY_EOF {
+                    self.net_sess.close_session();
+                    self.app_state = APP_STATE_EXIT;
+                    return;
+                }
+                if ev.is_press() {
+                    if ev.code == KEY_ESC || ev.is_char(113u8) {
+                        self.net_sess.close_session();
+                        self.switch_state(APP_STATE_ONLINE_MENU);
+                        return;
                     }
                 }
                 return;
@@ -634,6 +743,11 @@ impl App {
 
         if self.app_state == APP_STATE_ONLINE_MENU {
             render_online_menu(self.online_idx, self.user_side, self.match_tc_idx);
+            return;
+        }
+
+        if self.app_state == APP_STATE_LAN_DISCOVERY {
+            render_lan_discovery(self.discovery_idx, self.beacon.rooms, self.discovery_anim_frame);
             return;
         }
 
