@@ -1,0 +1,275 @@
+// Rad Standard Library: File System Operations
+
+pub struct File {
+    pub handle: *raw var u8,
+    pub is_open: bool,
+}
+
+impl File {
+    pub fn open(path: str, mode: str) -> Option<File> {
+        let fp = fopen(path, mode)
+        if (fp as usize) == 0usize {
+            Option.None
+        } else {
+            Option.Some(File {
+                handle: fp,
+                is_open: true,
+            })
+        }
+    }
+
+    pub fn create(path: str) -> Option<File> {
+        File.open(path, "w")
+    }
+
+    pub fn open_read(path: str) -> Option<File> {
+        File.open(path, "r")
+    }
+
+    pub fn open_write(path: str) -> Option<File> {
+        File.open(path, "w")
+    }
+
+    pub fn open_append(path: str) -> Option<File> {
+        File.open(path, "a")
+    }
+
+    pub fn write_str(var self, s: str) -> bool {
+        if !self.is_open {
+            return false
+        }
+        let p = s as *raw u8
+        var len = 0usize
+        while p[len] != 0u8 {
+            len = len + 1usize
+        }
+        let written = fwrite(p as *raw var u8, 1usize, len, self.handle) as usize
+        fflush(self.handle)
+        written == len
+    }
+
+    pub fn read_to_string(var self) -> String {
+        var result = String.new()
+        if !self.is_open {
+            return result
+        }
+        fseek(self.handle, 0i64, 2)
+        let file_size = ftell(self.handle) as usize
+        fseek(self.handle, 0i64, 0)
+        if file_size == 0usize {
+            return result
+        }
+
+        let raw = malloc(file_size + 1usize)
+        let n_read = fread(raw, 1usize, file_size, self.handle) as usize
+        var p = raw as *raw var u8
+        p[n_read] = 0u8
+        var i = 0usize
+        while i < n_read {
+            result.push_byte(p[i])
+            i = i + 1usize
+        }
+        free(raw)
+        result
+    }
+
+    pub fn flush(var self) {
+        if self.is_open {
+            fflush(self.handle)
+        }
+    }
+
+    pub fn close(var self) {
+        if self.is_open {
+            fclose(self.handle)
+            self.is_open = false
+        }
+    }
+
+    pub fn drop(var self) {
+        self.close()
+    }
+}
+
+pub fn read_file(path: str) -> Option<String> {
+    let fp = fopen(path, "rb")
+    if (fp as usize) == 0usize {
+        return Option.None
+    }
+    fseek(fp, 0i64, 2)
+    let file_size = ftell(fp) as usize
+    fseek(fp, 0i64, 0)
+    if file_size == 0usize {
+        fclose(fp)
+        return Option.Some(String.new())
+    }
+    let raw = malloc(file_size + 1usize)
+    let n_read = fread(raw, 1usize, file_size, fp) as usize
+    fclose(fp)
+    var p = raw as *raw var u8
+    p[n_read] = 0u8
+    var s = String.new()
+    var i = 0usize
+    while i < n_read {
+        s.push_byte(p[i])
+        i = i + 1usize
+    }
+    free(raw)
+    Option.Some(s)
+}
+
+pub fn write_file(path: str, contents: str) -> bool {
+    let fp = fopen(path, "wb")
+    if (fp as usize) == 0usize {
+        return false
+    }
+    let p = contents as *raw u8
+    var len = 0usize
+    while p[len] != 0u8 {
+        len = len + 1usize
+    }
+    let written = fwrite(p as *raw var u8, 1usize, len, fp) as usize
+    fclose(fp)
+    written == len
+}
+
+pub fn remove_file(path: str) -> bool {
+    let res = remove(path)
+    res == 0
+}
+
+extern "C" {
+    fn access(path: str, mode: i32) -> i32;
+    fn mkdir(path: str, mode: u32) -> i32;
+    fn rmdir(path: str) -> i32;
+    fn stat(path: str, buf: *raw var u8) -> i32;
+    fn fflush(fp: *raw var u8) -> i32;
+}
+
+pub struct Fs {}
+
+impl Fs {
+    pub fn exists(path: str) -> bool { exists(path) }
+    pub fn is_dir(path: str) -> bool { is_dir(path) }
+    pub fn is_file(path: str) -> bool { is_file(path) }
+    pub fn make_dir(path: str) -> bool { make_dir(path) }
+    pub fn make_dir_p(path: str) -> bool { make_dir_p(path) }
+    pub fn remove_file(path: str) -> bool { remove_file(path) }
+    pub fn remove_dir(path: str) -> bool { remove_dir(path) }
+    pub fn copy_file(src: str, dst: str) -> bool { copy_file(src, dst) }
+    pub fn read_file(path: str) -> Option<String> { read_file(path) }
+    pub fn write_file(path: str, content: str) -> bool { write_file(path, content) }
+    pub fn temp_dir() -> String { temp_dir() }
+}
+
+pub fn exists(path: str) -> bool {
+    access(path, 0) == 0
+}
+
+pub fn is_dir(path: str) -> bool {
+    let statbuf = malloc(144usize) as *raw var u8
+    let r = stat(path, statbuf)
+    if r != 0 {
+        free(statbuf)
+        return false
+    }
+    // st_mode at offset 24 (u32)
+    let b0 = statbuf[24usize] as u32
+    let b1 = statbuf[25usize] as u32
+    let mode = b0 + (b1 * 256u32)
+    free(statbuf)
+    // S_IFDIR is 0x4000 (16384)
+    return (mode & 61440u32) == 16384u32
+}
+
+pub fn is_file(path: str) -> bool {
+    let statbuf = malloc(144usize) as *raw var u8
+    let r = stat(path, statbuf)
+    if r != 0 {
+        free(statbuf)
+        return false
+    }
+    let b0 = statbuf[24usize] as u32
+    let b1 = statbuf[25usize] as u32
+    let mode = b0 + (b1 * 256u32)
+    free(statbuf)
+    // S_IFREG is 0x8000 (32768)
+    return (mode & 61440u32) == 32768u32
+}
+
+pub fn make_dir(path: str) -> bool {
+    mkdir(path, 511u32) == 0 // 0777
+}
+
+pub fn remove_dir(path: str) -> bool {
+    rmdir(path) == 0
+}
+
+pub fn make_dir_p(path: str) -> bool {
+    if exists(path) {
+        return true
+    }
+    let ptr = path as *raw u8
+    var len = 0usize
+    while ptr[len] != 0u8 {
+        len = len + 1usize
+    }
+    if len == 0usize {
+        return false
+    }
+
+    var sub = String.new()
+    var i = 0usize
+    while i < len {
+        let b = ptr[i]
+        sub.push_byte(b)
+        if b == 47u8 && sub.len() > 1usize { // '/'
+            let s_str = sub.as_ptr() as str
+            if !exists(s_str) {
+                let _ = make_dir(s_str)
+            }
+        }
+        i = i + 1usize
+    }
+    if !exists(path) {
+        return make_dir(path)
+    }
+    true
+}
+
+pub fn copy_file(src: str, dst: str) -> bool {
+    let fp_in = fopen(src, "rb")
+    if (fp_in as usize) == 0usize {
+        return false
+    }
+    let fp_out = fopen(dst, "wb")
+    if (fp_out as usize) == 0usize {
+        fclose(fp_in)
+        return false
+    }
+    let buf = malloc(4096usize) as *raw var u8
+    var ok = true
+    while true {
+        let n = fread(buf, 1usize, 4096usize, fp_in) as usize
+        if n == 0usize {
+            break
+        }
+        let w = fwrite(buf, 1usize, n, fp_out) as usize
+        if w != n {
+            ok = false
+            break
+        }
+    }
+    free(buf)
+    fclose(fp_in)
+    fclose(fp_out)
+    ok
+}
+
+pub fn temp_dir() -> String {
+    let env_tmp = getenv("TMPDIR")
+    if (env_tmp as usize) != 0usize {
+        return String.from_str(env_tmp as str)
+    }
+    String.from_str("/tmp")
+}

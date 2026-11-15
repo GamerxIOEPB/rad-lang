@@ -2,13 +2,13 @@
 # ==============================================================================
 # install.sh — Official Installer for the Rad Programming Language Toolchain
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/scripts/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/install.sh | sh
 # ==============================================================================
 
 set -eu
 
 # Default configuration
-DEFAULT_VERSION="0.2.3"
+DEFAULT_VERSION="0.2.4"
 DEFAULT_REPO="GamerxIOEPB/rad-lang"
 DEFAULT_RAD_HOME="$HOME/.rad"
 
@@ -87,7 +87,8 @@ list_versions() {
             fi
         done
     else
-        printf "  * ${GREEN}0.2.3${RESET} (latest)\n"
+        printf "  * ${GREEN}0.2.4${RESET} (latest)\n"
+        printf "  * 0.2.3\n"
         printf "  * 0.2.2\n"
         printf "  * 0.2.1\n"
         printf "  * 0.2.0\n"
@@ -95,7 +96,7 @@ list_versions() {
     fi
 
     printf "\nTo install a specific version, run:\n"
-    printf "  curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh -s -- --version <version>\n\n"
+    printf "  curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh -s -- --version <version>\n\n"
 }
 
 validate_version() {
@@ -103,7 +104,7 @@ validate_version() {
 
     # Known stable releases
     case "$REQ_VER" in
-        "0.2.3"|"0.2.2"|"0.2.1"|"0.2.0"|"0.1.0")
+        "0.2.4"|"0.2.3"|"0.2.2"|"0.2.1"|"0.2.0"|"0.1.0")
             return 0
             ;;
     esac
@@ -131,7 +132,8 @@ validate_version() {
     if [ "$EXISTS" -ne 1 ]; then
         log_error "Version '${REQ_VER}' is not a valid or published Rad release."
         printf "\n${BOLD}Available releases:${RESET}\n"
-        printf "  * 0.2.3 (latest)\n"
+        printf "  * 0.2.4 (latest)\n"
+        printf "  * 0.2.3\n"
         printf "  * 0.2.2\n"
         printf "  * 0.2.1\n"
         printf "  * 0.2.0\n"
@@ -167,13 +169,13 @@ Environment Variables:
 
 Examples:
     # Install the latest stable release (v0.2.1):
-    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/scripts/install.sh | sh
+    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh | sh
 
     # Install a specific version (e.g. v0.2.0):
-    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/scripts/install.sh | sh -s -- --version 0.2.0
+    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh | sh -s -- --version 0.2.0
 
     # List all available releases:
-    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/scripts/install.sh | sh -s -- --list
+    curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh | sh -s -- --list
 EOF
 }
 
@@ -294,8 +296,6 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
     log_step "Staging toolchain binaries..."
     cp "$LOCAL_REPO/bin/radc" "$STAGE_DIR/bin/radc"
     cp "$LOCAL_REPO/bin/rad" "$STAGE_DIR/bin/rad"
-    [ -f "$LOCAL_REPO/bin/rad-clang" ] && cp "$LOCAL_REPO/bin/rad-clang" "$STAGE_DIR/bin/rad-clang"
-    [ -f "$LOCAL_REPO/bin/rad-clang++" ] && cp "$LOCAL_REPO/bin/rad-clang++" "$STAGE_DIR/bin/rad-clang++"
     chmod 755 "$STAGE_DIR/bin"/*
 
     log_step "Staging Rad standard library..."
@@ -308,38 +308,23 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         cp -r "$LOCAL_REPO/lib/targets"/* "$STAGE_DIR/lib/targets/"
     fi
 
-    log_step "Staging runtime libraries and compiler assets..."
-    # Preserve LLVM runtime libraries from existing install or system
-    if [ -d "$RAD_HOME/lib/llvm" ]; then
-        mkdir -p "$STAGE_DIR/lib"
-        cp -r "$RAD_HOME/lib/llvm" "$STAGE_DIR/lib/"
-    elif [ -d "/usr/lib/llvm" ] || [ -f "/usr/bin/llc" ]; then
-        mkdir -p "$STAGE_DIR/lib/llvm"
-        cp /usr/bin/llc "$STAGE_DIR/lib/llvm/llc_real" 2>/dev/null || true
-        cp /usr/bin/ld.lld "$STAGE_DIR/lib/llvm/ld.lld_real" 2>/dev/null || true
-        ln -sf ld.lld_real "$STAGE_DIR/lib/llvm/ld.lld" 2>/dev/null || true
-        cp -L /usr/bin/clang "$STAGE_DIR/lib/llvm/clang" 2>/dev/null || true
-        ln -sf clang "$STAGE_DIR/lib/llvm/clang++" 2>/dev/null || true
-        cp -P /usr/lib/libLLVM*.so* "$STAGE_DIR/lib/llvm/" 2>/dev/null || true
-        cp -P /usr/lib/liblld*.so* "$STAGE_DIR/lib/llvm/" 2>/dev/null || true
-        cp -P /usr/lib/libclang-cpp*.so* "$STAGE_DIR/lib/llvm/" 2>/dev/null || true
+    log_step "Staging Rad ecosystem packages..."
+    mkdir -p "$STAGE_DIR/packages"
+    RAD_LIB_DIR=""
+    if [ -d "$LOCAL_REPO/../rad-lib/packages" ]; then
+        RAD_LIB_DIR="$LOCAL_REPO/../rad-lib/packages"
+    elif [ -d "$HOME/Projects/rad-lib/packages" ]; then
+        RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
     fi
-
-    # Preserve clang resources
-    if [ -d "$RAD_HOME/lib/clang" ]; then
-        mkdir -p "$STAGE_DIR/lib"
-        cp -r "$RAD_HOME/lib/clang" "$STAGE_DIR/lib/"
-        ln -sf . "$STAGE_DIR/lib/lib" 2>/dev/null || true
-    elif [ -d "/usr/lib/clang" ]; then
-        mkdir -p "$STAGE_DIR/lib"
-        cp -r /usr/lib/clang "$STAGE_DIR/lib/"
-        ln -sf . "$STAGE_DIR/lib/lib" 2>/dev/null || true
-    fi
-
-    # Preserve C++ headers/libraries
-    if [ -d "$RAD_HOME/lib/cxx" ]; then
-        mkdir -p "$STAGE_DIR/lib"
-        cp -r "$RAD_HOME/lib/cxx" "$STAGE_DIR/lib/"
+    if [ -n "$RAD_LIB_DIR" ]; then
+        if [ -d "$RAD_LIB_DIR/rad-tui/0.1.0" ]; then
+            cp -rf "$RAD_LIB_DIR/rad-tui/0.1.0" "$STAGE_DIR/packages/rad-tui"
+            ln -sfn rad-tui "$STAGE_DIR/packages/tui" 2>/dev/null || true
+        fi
+        if [ -d "$RAD_LIB_DIR/rad-json/0.1.0" ]; then
+            cp -rf "$RAD_LIB_DIR/rad-json/0.1.0" "$STAGE_DIR/packages/rad-json"
+            ln -sfn rad-json "$STAGE_DIR/packages/json" 2>/dev/null || true
+        fi
     fi
 
     # Preserve metadata & licenses
@@ -471,9 +456,6 @@ for bin in rad radc; do
     fi
     chmod 755 "$STAGE_DIR/bin/$bin"
 done
-if [ -f "$STAGE_DIR/bin/rad-clang" ]; then
-    chmod 755 "$STAGE_DIR/bin/rad-clang"* 2>/dev/null || true
-fi
 
 # Basic executable functionality tests on staged binaries before replacing RAD_HOME
 STAGE_RAD_VER="$("$STAGE_DIR/bin/rad" --version 2>/dev/null || true)"

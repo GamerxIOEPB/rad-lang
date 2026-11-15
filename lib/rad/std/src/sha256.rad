@@ -1,0 +1,279 @@
+// ==============================================================================
+// Rad Standard Library: FIPS 180-4 Standard SHA-256
+// Pure-Rad implementation for cryptographic digest and package verification.
+// ==============================================================================
+
+import fs;
+
+fn rotr32(x: u32, n: u32) -> u32 {
+    let ux = (x as u64) & 4294967295u64
+    let r1 = ux >> (n as u64)
+    let r2 = (ux << ((32u32 - n) as u64)) & 4294967295u64
+    return (((r1 | r2) & 4294967295u64) as u32)
+}
+
+fn sha_ch(x: u32, y: u32, z: u32) -> u32 {
+    let ux = (x as u64) & 4294967295u64
+    let uy = (y as u64) & 4294967295u64
+    let uz = (z as u64) & 4294967295u64
+    let not_x = ux ^ 4294967295u64
+    return ((((ux & uy) ^ (not_x & uz)) & 4294967295u64) as u32)
+}
+
+fn sha_maj(x: u32, y: u32, z: u32) -> u32 {
+    let ux = (x as u64) & 4294967295u64
+    let uy = (y as u64) & 4294967295u64
+    let uz = (z as u64) & 4294967295u64
+    return ((((ux & uy) ^ (ux & uz) ^ (uy & uz)) & 4294967295u64) as u32)
+}
+
+fn sha_sigma0(x: u32) -> u32 {
+    return (rotr32(x, 2u32) ^ rotr32(x, 13u32) ^ rotr32(x, 22u32))
+}
+
+fn sha_sigma1(x: u32) -> u32 {
+    return (rotr32(x, 6u32) ^ rotr32(x, 11u32) ^ rotr32(x, 25u32))
+}
+
+fn sha_small_sigma0(x: u32) -> u32 {
+    let ux = (x as u64) & 4294967295u64
+    return (rotr32(x, 7u32) ^ rotr32(x, 18u32) ^ (((ux >> 3u64) & 4294967295u64) as u32))
+}
+
+fn sha_small_sigma1(x: u32) -> u32 {
+    let ux = (x as u64) & 4294967295u64
+    return (rotr32(x, 17u32) ^ rotr32(x, 19u32) ^ (((ux >> 10u64) & 4294967295u64) as u32))
+}
+
+fn sha256_k_constant(i: usize) -> u32 {
+    let k_table = [
+        1116352408u32, 1899447441u32, 3049323471u32, 3921009573u32,
+        961987163u32, 1508970993u32, 2453635748u32, 2870763221u32,
+        3624381080u32, 310598401u32, 607225278u32, 1426881987u32,
+        1925078388u32, 2162078206u32, 2614888103u32, 3248222580u32,
+        3835390401u32, 4022224774u32, 264347078u32, 604807628u32,
+        770255983u32, 1249150122u32, 1555081692u32, 1996064986u32,
+        2554220882u32, 2821834349u32, 2952996808u32, 3210313671u32,
+        3336571891u32, 3584528711u32, 113926993u32, 338241895u32,
+        666307205u32, 773529912u32, 1294757372u32, 1396182291u32,
+        1695183700u32, 1986661051u32, 2177026350u32, 2456956037u32,
+        2730485921u32, 2820302411u32, 3259730800u32, 3345764771u32,
+        3516065817u32, 3600352804u32, 4094571909u32, 275423344u32,
+        430227734u32, 506948616u32, 659060556u32, 883997877u32,
+        958139571u32, 1322822218u32, 1537002063u32, 1747873779u32,
+        1955562222u32, 2024104815u32, 2227730452u32, 2361852424u32,
+        2428436474u32, 2756734187u32, 3204031479u32, 3329325298u32
+    ]
+    if i < 64usize {
+        return k_table[i]
+    } else {
+        return 0u32
+    }
+}
+
+pub struct Sha256 {
+    pub h0: u32,
+    pub h1: u32,
+    pub h2: u32,
+    pub h3: u32,
+    pub h4: u32,
+    pub h5: u32,
+    pub h6: u32,
+    pub h7: u32,
+    pub buffer: *raw var u8,
+    pub buf_len: usize,
+    pub total_len: u64,
+}
+
+impl Sha256 {
+    pub fn new() -> Sha256 {
+        let buf = malloc(64usize) as *raw var u8
+        Sha256 {
+            h0: 1779033703u32,
+            h1: 3144134277u32,
+            h2: 1013904242u32,
+            h3: 2773480762u32,
+            h4: 1359893119u32,
+            h5: 2600822924u32,
+            h6: 528734635u32,
+            h7: 1541459225u32,
+            buffer: buf,
+            buf_len: 0usize,
+            total_len: 0u64,
+        }
+    }
+
+    fn process_block(var self, block: *raw u8) {
+        var w = malloc(64usize * 8usize) as *raw var u32
+
+        // First 16 words from big-endian bytes
+        var t = 0usize
+        while t < 16usize {
+            let off = t * 4usize
+            let b0 = (block[off] as u64) & 255u64
+            let b1 = (block[off + 1usize] as u64) & 255u64
+            let b2 = (block[off + 2usize] as u64) & 255u64
+            let b3 = (block[off + 3usize] as u64) & 255u64
+            let word = ((b0 << 24u64) | (b1 << 16u64) | (b2 << 8u64) | b3) & 4294967295u64
+            w[t] = word as u32
+            t = t + 1usize
+        }
+
+        // Remaining 48 words
+        while t < 64usize {
+            let s1 = (sha_small_sigma1(w[t - 2usize]) as u64) & 4294967295u64
+            let s0 = (sha_small_sigma0(w[t - 15usize]) as u64) & 4294967295u64
+            let w7 = (w[t - 7usize] as u64) & 4294967295u64
+            let w16 = (w[t - 16usize] as u64) & 4294967295u64
+            let total = (s1 + w7 + s0 + w16) & 4294967295u64
+            w[t] = total as u32
+            t = t + 1usize
+        }
+
+        var a = (self.h0 as u64) & 4294967295u64
+        var b = (self.h1 as u64) & 4294967295u64
+        var c = (self.h2 as u64) & 4294967295u64
+        var d = (self.h3 as u64) & 4294967295u64
+        var e = (self.h4 as u64) & 4294967295u64
+        var f = (self.h5 as u64) & 4294967295u64
+        var g = (self.h6 as u64) & 4294967295u64
+        var h = (self.h7 as u64) & 4294967295u64
+
+        var i = 0usize
+        while i < 64usize {
+            let s1 = (sha_sigma1(e as u32) as u64) & 4294967295u64
+            let ch = (sha_ch(e as u32, f as u32, g as u32) as u64) & 4294967295u64
+            let k = (sha256_k_constant(i) as u64) & 4294967295u64
+            let wi = (w[i] as u64) & 4294967295u64
+            let temp1 = (h + s1 + ch + k + wi) & 4294967295u64
+
+            let s0 = (sha_sigma0(a as u32) as u64) & 4294967295u64
+            let maj = (sha_maj(a as u32, b as u32, c as u32) as u64) & 4294967295u64
+            let temp2 = (s0 + maj) & 4294967295u64
+
+            h = g
+            g = f
+            f = e
+            e = (d + temp1) & 4294967295u64
+            d = c
+            c = b
+            b = a
+            a = (temp1 + temp2) & 4294967295u64
+            i = i + 1usize
+        }
+
+        self.h0 = (((self.h0 as u64) + a) & 4294967295u64) as u32
+        self.h1 = (((self.h1 as u64) + b) & 4294967295u64) as u32
+        self.h2 = (((self.h2 as u64) + c) & 4294967295u64) as u32
+        self.h3 = (((self.h3 as u64) + d) & 4294967295u64) as u32
+        self.h4 = (((self.h4 as u64) + e) & 4294967295u64) as u32
+        self.h5 = (((self.h5 as u64) + f) & 4294967295u64) as u32
+        self.h6 = (((self.h6 as u64) + g) & 4294967295u64) as u32
+        self.h7 = (((self.h7 as u64) + h) & 4294967295u64) as u32
+
+        free(w as *raw var u8)
+    }
+
+    pub fn update(var self, data: *raw u8, len: usize) {
+        self.total_len = self.total_len + (len as u64)
+        var i = 0usize
+        while i < len {
+            self.buffer[self.buf_len] = data[i]
+            self.buf_len = self.buf_len + 1usize
+            if self.buf_len == 64usize {
+                self.process_block(self.buffer as *raw u8)
+                self.buf_len = 0usize
+            }
+            i = i + 1usize
+        }
+    }
+
+    pub fn update_str(var self, s: str) {
+        if (s as usize) == 0usize {
+            return
+        }
+        let p = s as *raw u8
+        var len = 0usize
+        while p[len] != 0u8 {
+            len = len + 1usize
+        }
+        self.update(p, len)
+    }
+
+    pub fn finalize(var self) -> String {
+        // Append 128 (0x80) bit
+        self.buffer[self.buf_len] = 128u8
+        self.buf_len = self.buf_len + 1usize
+
+        if self.buf_len > 56usize {
+            while self.buf_len < 64usize {
+                self.buffer[self.buf_len] = 0u8
+                self.buf_len = self.buf_len + 1usize
+            }
+            self.process_block(self.buffer as *raw u8)
+            self.buf_len = 0usize
+        }
+
+        while self.buf_len < 56usize {
+            self.buffer[self.buf_len] = 0u8
+            self.buf_len = self.buf_len + 1usize
+        }
+
+        let total_bits = self.total_len * 8u64
+        self.buffer[56usize] = ((total_bits >> 56u64) & 255u64) as u8
+        self.buffer[57usize] = ((total_bits >> 48u64) & 255u64) as u8
+        self.buffer[58usize] = ((total_bits >> 40u64) & 255u64) as u8
+        self.buffer[59usize] = ((total_bits >> 32u64) & 255u64) as u8
+        self.buffer[60usize] = ((total_bits >> 24u64) & 255u64) as u8
+        self.buffer[61usize] = ((total_bits >> 16u64) & 255u64) as u8
+        self.buffer[62usize] = ((total_bits >> 8u64) & 255u64) as u8
+        self.buffer[63usize] = (total_bits & 255u64) as u8
+
+        self.process_block(self.buffer as *raw u8)
+
+        var res = String.new()
+        let words = [self.h0, self.h1, self.h2, self.h3, self.h4, self.h5, self.h6, self.h7]
+        let hex_chars = "0123456789abcdef"
+        let hex_p = hex_chars as *raw u8
+
+        var wi = 0usize
+        while wi < 8usize {
+            let w = words[wi]
+            var shift = 28i32
+            while shift >= 0 {
+                let nibble = ((w >> (shift as u32)) & 15u32) as usize
+                res.push_byte(hex_p[nibble])
+                shift = shift - 4
+            }
+            wi = wi + 1usize
+        }
+
+        free(self.buffer as *raw var u8)
+        self.buffer = 0usize as *raw var u8
+        res
+    }
+}
+
+pub fn sha256_str(s: str) -> String {
+    var hasher = Sha256.new()
+    hasher.update_str(s)
+    hasher.finalize()
+}
+
+pub fn sha256_bytes(bytes: *raw u8, len: usize) -> String {
+    var hasher = Sha256.new()
+    hasher.update(bytes, len)
+    hasher.finalize()
+}
+
+pub fn sha256_file(path: str) -> Option<String> {
+    let content_opt = read_file(path)
+    match content_opt {
+        Option.Some(content) => {
+            let s = sha256_str(content.as_ptr() as str)
+            Option.Some(s)
+        },
+        Option.None => Option.None,
+        _ => Option.None,
+    }
+}

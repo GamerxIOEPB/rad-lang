@@ -163,7 +163,7 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
         }
 
         var cxx_lib_dir = String.new()
-        if sysroot.len() > 0usize {
+        if sysroot.len() > 0usize && (!needs_cxx || cxx_lib_dir.len() > 0usize) {
             var cxx_chk1 = String.new()
             cxx_chk1.push_str(sysroot.as_ptr() as str)
             cxx_chk1.push_str("/../../cxx/x86_64-unknown-linux-musl/lib/libstdc++.a")
@@ -188,7 +188,7 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
             }
         }
 
-        if sysroot.len() > 0usize {
+        if sysroot.len() > 0usize && (!needs_cxx || cxx_lib_dir.len() > 0usize) {
             var ld_cmd = String.new()
             ld_cmd.push_str("rad-lld -flavor gnu -m elf_x86_64 -static -pie --no-dynamic-linker --eh-frame-hdr -z text -z noexecstack -o ")
             ld_cmd.push_str(out)
@@ -265,10 +265,15 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
         }
     }
 
-    // Tier 3: Default System Clang (Fallback)
+    // Tier 3: Default System Clang / Clang++ (Fallback)
     var clang_cmd = String.new()
-    clang_cmd.push_str("clang -x ir ")
+    if needs_cxx {
+        clang_cmd.push_str("clang++ -x ir ")
+    } else {
+        clang_cmd.push_str("clang -x ir ")
+    }
     clang_cmd.push_str(ir)
+    clang_cmd.push_str(" -x none ")
     clang_cmd.push_str(extra_str.as_ptr() as str)
     clang_cmd.push_str(" -o ")
     clang_cmd.push_str(out)
@@ -283,14 +288,16 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
     if clang_status == 0 {
         return 0
     }
-    if clang_status == 0 {
-        return 0
-    }
 
-    // Tier 4: GCC Fallback
+    // Tier 4: GCC / G++ Fallback
     var gcc_cmd = String.new()
-    gcc_cmd.push_str("gcc -x ir ")
+    if needs_cxx {
+        gcc_cmd.push_str("g++ -x ir ")
+    } else {
+        gcc_cmd.push_str("gcc -x ir ")
+    }
     gcc_cmd.push_str(ir)
+    gcc_cmd.push_str(" -x none ")
     gcc_cmd.push_str(extra_str.as_ptr() as str)
     gcc_cmd.push_str(" -o ")
     gcc_cmd.push_str(out)

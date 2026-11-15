@@ -1,0 +1,318 @@
+// Rad Alloc Library: HashMap, HashSet, and StringHashMap
+// High-performance flat open-addressing hash collections with linear probing
+
+pub struct HashMap<K, V> {
+    pub keys: *raw var K,
+    pub values: *raw var V,
+    pub occupied: *raw var bool,
+    pub cap: usize,
+    pub count: usize,
+}
+
+impl<K, V> HashMap<K, V> {
+    pub fn new() -> HashMap<K, V> {
+        let init_cap = 16usize
+        let k_buf = malloc(init_cap * 8usize) as *raw var K
+        let v_buf = malloc(init_cap * 8usize) as *raw var V
+        let occ = malloc(init_cap * 8usize) as *raw var bool
+        var i = 0usize
+        while i < init_cap {
+            occ[i] = false
+            i = i + 1usize
+        }
+        HashMap {
+            keys: k_buf,
+            values: v_buf,
+            occupied: occ,
+            cap: init_cap,
+            count: 0usize,
+        }
+    }
+
+    pub fn insert_entry(var self, key: K, val: V) -> Option<V> {
+        if self.count * 2usize >= self.cap {
+            let new_cap = self.cap * 2usize
+            let new_k = malloc(new_cap * 8usize) as *raw var K
+            let new_v = malloc(new_cap * 8usize) as *raw var V
+            let new_occ = malloc(new_cap * 8usize) as *raw var bool
+            var ni = 0usize
+            while ni < new_cap {
+                new_occ[ni] = false
+                ni = ni + 1usize
+            }
+
+            var oi = 0usize
+            while oi < self.cap {
+                if self.occupied[oi] {
+                    let old_k = self.keys[oi]
+                    var n_idx = ((old_k as usize) & 2147483647usize) % new_cap
+                    while new_occ[n_idx] {
+                        n_idx = (n_idx + 1usize) % new_cap
+                    }
+                    new_k[n_idx] = old_k
+                    new_v[n_idx] = self.values[oi]
+                    new_occ[n_idx] = true
+                }
+                oi = oi + 1usize
+            }
+            free(self.keys as *raw var u8)
+            free(self.values as *raw var u8)
+            free(self.occupied as *raw var u8)
+            self.keys = new_k
+            self.values = new_v
+            self.occupied = new_occ
+            self.cap = new_cap
+        }
+
+        var idx = ((key as usize) & 2147483647usize) % self.cap
+        var attempts = 0usize
+        while attempts < self.cap {
+            if !self.occupied[idx] {
+                self.keys[idx] = key
+                self.values[idx] = val
+                self.occupied[idx] = true
+                self.count = self.count + 1usize
+                return Option.None
+            }
+            if (self.keys[idx] as usize) == (key as usize) {
+                let old = self.values[idx]
+                self.values[idx] = val
+                return Option.Some(old)
+            }
+            idx = (idx + 1usize) % self.cap
+            attempts = attempts + 1usize
+        }
+        Option.None
+    }
+
+    pub fn get_val(self, key: K) -> Option<V> {
+        if self.count == 0usize || self.cap == 0usize {
+            return Option.None
+        }
+        var idx = ((key as usize) & 2147483647usize) % self.cap
+        var attempts = 0usize
+        while attempts < self.cap {
+            if !self.occupied[idx] {
+                return Option.None
+            }
+            if (self.keys[idx] as usize) == (key as usize) {
+                return Option.Some(self.values[idx])
+            }
+            idx = (idx + 1usize) % self.cap
+            attempts = attempts + 1usize
+        }
+        Option.None
+    }
+
+    pub fn contains_key(self, key: K) -> bool {
+        let opt = self.get_val(key)
+        match opt {
+            Option.Some(v) => return true,
+            Option.None => return false,
+            _ => return false,
+        }
+        false
+    }
+
+    pub fn free_hashmap(var self) {
+        if (self.keys as usize) != 0usize {
+            free(self.keys as *raw var u8)
+            self.keys = 0 as *raw var K
+        }
+        if (self.values as usize) != 0usize {
+            free(self.values as *raw var u8)
+            self.values = 0 as *raw var V
+        }
+        if (self.occupied as usize) != 0usize {
+            free(self.occupied as *raw var u8)
+            self.occupied = 0 as *raw var bool
+        }
+        self.cap = 0usize
+        self.count = 0usize
+    }
+}
+
+pub struct HashSet<T> {
+    pub map: HashMap<T, bool>,
+}
+
+impl<T> HashSet<T> {
+    pub fn new() -> HashSet<T> {
+        HashSet {
+            map: HashMap.new(),
+        }
+    }
+
+    pub fn insert_item(var self, item: T) -> bool {
+        let opt = self.map.insert_entry(item, true)
+        match opt {
+            Option.Some(v) => return false,
+            Option.None => return true,
+            _ => return false,
+        }
+        false
+    }
+
+    pub fn contains(self, item: T) -> bool {
+        self.map.contains_key(item)
+    }
+
+    pub fn free_hashset(var self) {
+        self.map.free_hashmap()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// FNV-1a String Hashing and StringHashMap<V>
+// ------------------------------------------------------------------------------
+
+pub fn str_hash_fnv1a(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p = s as *raw u8
+    var h = 5381usize
+    var i = 0usize
+    while p[i] != 0u8 {
+        h = ((h << 5usize) + h) + (p[i] as usize)
+        h = h & 2147483647usize
+        i = i + 1usize
+    }
+    h
+}
+
+fn internal_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    pa[i] == pb[i]
+}
+
+pub struct StringHashMap<V> {
+    pub keys: *raw var str,
+    pub values: *raw var V,
+    pub cap: usize,
+    pub count: usize,
+}
+
+impl<V> StringHashMap<V> {
+    pub fn new() -> StringHashMap<V> {
+        let init_cap = 16usize
+        let k_buf = malloc(init_cap * 8usize) as *raw var str
+        let v_buf = malloc(init_cap * 8usize) as *raw var V
+        var i = 0usize
+        while i < init_cap {
+            k_buf[i] = 0 as str
+            i = i + 1usize
+        }
+        StringHashMap {
+            keys: k_buf,
+            values: v_buf,
+            cap: init_cap,
+            count: 0usize,
+        }
+    }
+
+    pub fn put(var self, key: str, val: V) -> Option<V> {
+        if self.count * 2usize >= self.cap {
+            let new_cap = self.cap * 2usize
+            let new_k = malloc(new_cap * 8usize) as *raw var str
+            let new_v = malloc(new_cap * 8usize) as *raw var V
+            var ni = 0usize
+            while ni < new_cap {
+                new_k[ni] = 0 as str
+                ni = ni + 1usize
+            }
+
+            var oi = 0usize
+            while oi < self.cap {
+                let old_k = self.keys[oi]
+                if (old_k as usize) != 0usize {
+                    var n_idx = (str_hash_fnv1a(old_k) as usize) % new_cap
+                    while (new_k[n_idx] as usize) != 0usize {
+                        n_idx = (n_idx + 1usize) % new_cap
+                    }
+                    new_k[n_idx] = old_k
+                    new_v[n_idx] = self.values[oi]
+                }
+                oi = oi + 1usize
+            }
+            free(self.keys as *raw var u8)
+            free(self.values as *raw var u8)
+            self.keys = new_k
+            self.values = new_v
+            self.cap = new_cap
+        }
+
+        let h = str_hash_fnv1a(key)
+        var idx = (h as usize) % self.cap
+        var attempts = 0usize
+        while attempts < self.cap {
+            let cur_k = self.keys[idx]
+            if (cur_k as usize) == 0usize {
+                self.keys[idx] = key
+                self.values[idx] = val
+                self.count = self.count + 1usize
+                return Option.None
+            }
+            if internal_str_eq(cur_k, key) {
+                let old = self.values[idx]
+                self.values[idx] = val
+                return Option.Some(old)
+            }
+            idx = (idx + 1usize) % self.cap
+            attempts = attempts + 1usize
+        }
+        Option.None
+    }
+
+    pub fn lookup(self, key: str) -> Option<V> {
+        if self.count == 0usize || self.cap == 0usize {
+            return Option.None
+        }
+        let h = str_hash_fnv1a(key)
+        var idx = (h as usize) % self.cap
+        var attempts = 0usize
+        while attempts < self.cap {
+            let cur_k = self.keys[idx]
+            if (cur_k as usize) == 0usize {
+                return Option.None
+            }
+            if internal_str_eq(cur_k, key) {
+                return Option.Some(self.values[idx])
+            }
+            idx = (idx + 1usize) % self.cap
+            attempts = attempts + 1usize
+        }
+        Option.None
+    }
+
+    pub fn has_key(self, key: str) -> bool {
+        let opt = self.lookup(key)
+        match opt {
+            Option.Some(v) => return true,
+            Option.None => return false,
+            _ => return false,
+        }
+        false
+    }
+
+    pub fn free_strmap(var self) {
+        if (self.keys as usize) != 0usize {
+            free(self.keys as *raw var u8)
+            self.keys = 0 as *raw var str
+        }
+        if (self.values as usize) != 0usize {
+            free(self.values as *raw var u8)
+            self.values = 0 as *raw var V
+        }
+        self.cap = 0usize
+        self.count = 0usize
+    }
+}

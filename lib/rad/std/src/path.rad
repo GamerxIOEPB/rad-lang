@@ -1,0 +1,208 @@
+// ==============================================================================
+// Rad Standard Library: Path Utilities
+// Path joining, normalization, components, and extensions.
+// ==============================================================================
+
+fn path_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    i
+}
+
+pub struct Path {}
+
+impl Path {
+    pub fn is_absolute(p: str) -> bool {
+        if path_len(p) == 0usize {
+            return false
+        }
+        let ptr = p as *raw u8
+        ptr[0usize] == 47u8 // '/'
+    }
+
+    pub fn join(a: str, b: str) -> String {
+        let la = path_len(a)
+        let lb = path_len(b)
+        if la == 0usize {
+            return String.from_str(b)
+        }
+        if lb == 0usize {
+            return String.from_str(a)
+        }
+        if Path.is_absolute(b) {
+            return String.from_str(b)
+        }
+
+        var res = String.new()
+        res.push_str(a)
+        let pa = a as *raw u8
+        if pa[la - 1usize] != 47u8 {
+            res.push_byte(47u8) // '/'
+        }
+        res.push_str(b)
+        res
+    }
+
+    pub fn basename(p: str) -> String {
+        let len = path_len(p)
+        if len == 0usize {
+            return String.from_str("")
+        }
+        let ptr = p as *raw u8
+        var last_slash = 0usize
+        var has_slash = false
+        var i = 0usize
+        while i < len {
+            if ptr[i] == 47u8 {
+                last_slash = i + 1usize
+                has_slash = true
+            }
+            i = i + 1usize
+        }
+        if !has_slash || last_slash >= len {
+            return String.from_str(p)
+        }
+        var res = String.new()
+        i = last_slash
+        while i < len {
+            res.push_byte(ptr[i])
+            i = i + 1usize
+        }
+        res
+    }
+
+    pub fn dirname(p: str) -> String {
+        let len = path_len(p)
+        if len == 0usize {
+            return String.from_str(".")
+        }
+        let ptr = p as *raw u8
+        var last_slash = 0usize
+        var has_slash = false
+        var i = 0usize
+        while i < len {
+            if ptr[i] == 47u8 {
+                last_slash = i
+                has_slash = true
+            }
+            i = i + 1usize
+        }
+        if !has_slash {
+            return String.from_str(".")
+        }
+        if last_slash == 0usize {
+            return String.from_str("/")
+        }
+        var res = String.new()
+        i = 0usize
+        while i < last_slash {
+            res.push_byte(ptr[i])
+            i = i + 1usize
+        }
+        res
+    }
+
+    pub fn extension(p: str) -> String {
+        let base = Path.basename(p)
+        let blen = base.len()
+        let bptr = base.as_ptr() as *raw u8
+        var dot_idx = 0usize
+        var has_dot = false
+        var i = 0usize
+        while i < blen {
+            if bptr[i] == 46u8 { // '.'
+                dot_idx = i + 1usize
+                has_dot = true
+            }
+            i = i + 1usize
+        }
+        if !has_dot || dot_idx >= blen {
+            return String.from_str("")
+        }
+        var res = String.new()
+        i = dot_idx
+        while i < blen {
+            res.push_byte(bptr[i])
+            i = i + 1usize
+        }
+        res
+    }
+
+    pub fn normalize(p: str) -> String {
+        let len = path_len(p)
+        if len == 0usize {
+            return String.from_str(".")
+        }
+        let ptr = p as *raw u8
+        var is_abs = ptr[0usize] == 47u8
+
+        // Split by '/'
+        var parts = Vec.new()
+        var cur = String.new()
+        var i = 0usize
+        while i < len {
+            let b = ptr[i]
+            if b == 47u8 {
+                if cur.len() > 0usize {
+                    parts.push(cur)
+                    cur = String.new()
+                }
+            } else {
+                cur.push_byte(b)
+            }
+            i = i + 1usize
+        }
+        if cur.len() > 0usize {
+            parts.push(cur)
+        }
+
+        // Process '.' and '..'
+        var resolved = Vec.new()
+        var pi = 0usize
+        while pi < parts.len {
+            let part_str = parts.ptr[pi].as_ptr() as str
+            let p_len = path_len(part_str)
+            let p_ptr = part_str as *raw u8
+            if p_len == 1usize && p_ptr[0usize] == 46u8 { // "."
+                // skip
+            } else if p_len == 2usize && p_ptr[0usize] == 46u8 && p_ptr[1usize] == 46u8 { // ".."
+                if resolved.len > 0usize {
+                    let _ = resolved.pop()
+                } else if !is_abs {
+                    resolved.push(parts.ptr[pi])
+                }
+            } else {
+                resolved.push(parts.ptr[pi])
+            }
+            pi = pi + 1usize
+        }
+
+        if resolved.len == 0usize {
+            if is_abs {
+                return String.from_str("/")
+            } else {
+                return String.from_str(".")
+            }
+        }
+
+        var res = String.new()
+        if is_abs {
+            res.push_byte(47u8)
+        }
+        var ri = 0usize
+        while ri < resolved.len {
+            if ri > 0usize {
+                res.push_byte(47u8)
+            }
+            res.push_str(resolved.ptr[ri].as_ptr() as str)
+            ri = ri + 1usize
+        }
+        res
+    }
+}

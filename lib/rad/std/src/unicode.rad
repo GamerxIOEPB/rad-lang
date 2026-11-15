@@ -1,0 +1,128 @@
+// ==============================================================================
+// Rad Standard Library: Unicode & Terminal Display Width
+// UTF-8 decoding, codepoint width calculation, and terminal column metrics.
+// ==============================================================================
+
+pub fn utf8_char_len(b0: u8) -> usize {
+    if b0 == 0u8 {
+        return 0usize
+    }
+    if (b0 & 128u8) == 0u8 {
+        return 1usize
+    }
+    if (b0 & 224u8) == 192u8 {
+        return 2usize
+    }
+    if (b0 & 240u8) == 224u8 {
+        return 3usize
+    }
+    if (b0 & 248u8) == 240u8 {
+        return 4usize
+    }
+    return 1usize
+}
+
+pub fn utf8_codepoint(s: str, offset: usize) -> u32 {
+    let p = s as *raw u8
+    let b0 = p[offset]
+    if b0 == 0u8 {
+        return 0u32
+    }
+    if (b0 & 128u8) == 0u8 {
+        return b0 as u32
+    }
+    if (b0 & 224u8) == 192u8 {
+        let b1 = p[offset + 1usize]
+        if (b1 & 192u8) == 128u8 {
+            return (((b0 & 31u8) as u32) << 6u32) | ((b1 & 63u8) as u32)
+        }
+    }
+    if (b0 & 240u8) == 224u8 {
+        let b1 = p[offset + 1usize]
+        let b2 = p[offset + 2usize]
+        if ((b1 & 192u8) == 128u8) && ((b2 & 192u8) == 128u8) {
+            return (((b0 & 15u8) as u32) << 12u32) | (((b1 & 63u8) as u32) << 6u32) | ((b2 & 63u8) as u32)
+        }
+    }
+    if (b0 & 248u8) == 240u8 {
+        let b1 = p[offset + 1usize]
+        let b2 = p[offset + 2usize]
+        let b3 = p[offset + 3usize]
+        if ((b1 & 192u8) == 128u8) && ((b2 & 192u8) == 128u8) && ((b3 & 192u8) == 128u8) {
+            return (((b0 & 7u8) as u32) << 18u32) | (((b1 & 63u8) as u32) << 12u32) | (((b2 & 63u8) as u32) << 6u32) | ((b3 & 63u8) as u32)
+        }
+    }
+    return b0 as u32
+}
+
+pub fn utf8_next_codepoint(s: str, offset: usize, out_bytes: *raw var usize) -> u32 {
+    let p = s as *raw u8
+    let b0 = p[offset]
+    let len = utf8_char_len(b0)
+    if (out_bytes as usize) != 0usize {
+        out_bytes[0usize] = len
+    }
+    return utf8_codepoint(s, offset)
+}
+
+pub fn codepoint_width(cp: u32) -> usize {
+    // Null / non-printable controls
+    if cp == 0u32 || (cp < 32u32) || (cp >= 127u32 && cp < 160u32) {
+        return 0usize
+    }
+
+    // Standard ASCII
+    if cp >= 32u32 && cp < 127u32 {
+        return 1usize
+    }
+
+    // Combining characters (zero width)
+    if (cp >= 768u32 && cp <= 879u32) || (cp >= 6832u32 && cp <= 6911u32) || (cp >= 7616u32 && cp <= 7679u32) || (cp >= 8400u32 && cp <= 8447u32) || (cp >= 65056u32 && cp <= 65071u32) {
+        return 0usize
+    }
+
+    // Wide / Fullwidth characters (width 2)
+    // Hangul Jamo (0x1100..0x115F)
+    if cp >= 4352u32 && cp <= 4447u32 { return 2usize }
+    // CJK Radicals, Ideographs, Hangul Syllables (0x2E80..0xA4CF, 0xAC00..0xD7A3)
+    if cp >= 11904u32 && cp <= 42191u32 { return 2usize }
+    if cp >= 44032u32 && cp <= 55203u32 { return 2usize }
+    // CJK Compatibility, Fullwidth forms (0xF900..0xFAFF, 0xFF01..0xFF60, 0xFFE0..0xFFE6)
+    if cp >= 63744u32 && cp <= 64255u32 { return 2usize }
+    if cp >= 65281u32 && cp <= 65376u32 { return 2usize }
+    if cp >= 65504u32 && cp <= 65510u32 { return 2usize }
+    // Emojis and Supplementary Ideographic Planes (0x1F300..0x1FAFF, 0x20000..0x3FFFD)
+    if cp >= 127744u32 && cp <= 129791u32 { return 2usize }
+    if cp >= 131072u32 && cp <= 262141u32 { return 2usize }
+
+    // Box drawing (0x2500..0x257F), Chess (0x2654..0x265F), Misc Symbols: width 1
+    1usize
+}
+
+pub fn str_display_width(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p = s as *raw u8
+    var total_width = 0usize
+    var offset = 0usize
+
+    while p[offset] != 0u8 {
+        let b = p[offset]
+        if b >= 32u8 && b < 127u8 {
+            total_width = total_width + 1usize
+            offset = offset + 1usize
+        } else if b < 32u8 {
+            // Control char
+            offset = offset + 1usize
+        } else {
+            let cp = utf8_codepoint(s, offset)
+            let len = utf8_char_len(b)
+            let w = codepoint_width(cp)
+            total_width = total_width + w
+            offset = offset + len
+        }
+    }
+
+    return total_width
+}

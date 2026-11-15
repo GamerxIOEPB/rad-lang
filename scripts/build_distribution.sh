@@ -18,13 +18,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VERSION="0.2.3"
+VERSION="0.2.4"
 TARGET_TRIPLE="x86_64-unknown-linux-musl"
 HOST_TRIPLE="x86_64-unknown-linux-musl"
 REPO="GamerxIOEPB/rad-lang"
 
-DIST_OUT="$ROOT_DIR/target/dist"
-BUILD_TMP="$ROOT_DIR/target/dist_build"
+DIST_OUT="$ROOT_DIR/bin/dist"
+BUILD_TMP="/tmp/rad_dist_build_$$"
 
 DIST_NAME="rad-${VERSION}-linux-x86_64"
 DIST_ROOT="$BUILD_TMP/$DIST_NAME"
@@ -33,7 +33,7 @@ DO_UPLOAD=0
 AUTO_CONFIRM=0
 RELEASE_TITLE=""
 RELEASE_DESC=""
-RELEASE_TAG="0.2.3"
+RELEASE_TAG="0.2.4"
 
 # Parse command line options
 while [ $# -gt 0 ]; do
@@ -155,9 +155,8 @@ cp -r "$SYSROOT_DIR/crt"/* "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/crt/"
 cp -r "$SYSROOT_DIR/lib"/* "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/lib/"
 
 # Standard library sources
-cp -r "$ROOT_DIR/library/core" "$DIST_ROOT/lib/rad/"
-cp -r "$ROOT_DIR/library/alloc" "$DIST_ROOT/lib/rad/"
-cp -r "$ROOT_DIR/library/std" "$DIST_ROOT/lib/rad/"
+mkdir -p "$DIST_ROOT/lib/rad"
+cp -r "$ROOT_DIR/lib/rad"/* "$DIST_ROOT/lib/rad/"
 
 # Documentation & top-level files
 cp -f "$ROOT_DIR/README.md" "$DIST_ROOT/" 2>/dev/null || true
@@ -236,8 +235,8 @@ sha256sum "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}' > "$DIST_OUT/${DIST
 echo "  [✓] Created ${DIST_NAME}.tar.gz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}'))"
 
 # Copy VS Code extension if available
-if [ -f "$ROOT_DIR/editors/vscode-rad/rad-utils-${VERSION}.vsix" ]; then
-    cp "$ROOT_DIR/editors/vscode-rad/rad-utils-${VERSION}.vsix" "$DIST_OUT/"
+if [ -f "$ROOT_DIR/extensions/vscode-rad/rad-utils-${VERSION}.vsix" ]; then
+    cp "$ROOT_DIR/extensions/vscode-rad/rad-utils-${VERSION}.vsix" "$DIST_OUT/"
     echo "  [✓] Bundled rad-utils-${VERSION}.vsix ($(du -h "$DIST_OUT/rad-utils-${VERSION}.vsix" | awk '{print $1}'))"
 fi
 

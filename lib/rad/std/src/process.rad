@@ -1,0 +1,267 @@
+// ==============================================================================
+// Rad Standard Library: Process Spawning and Environment
+// Safe, shell-injection-free argument vector execution, pipe capture, and signals.
+// Pure Linux syscalls: SYS_fork (57), SYS_execve (59), SYS_wait4 (61), SYS_pipe (22).
+// ==============================================================================
+
+extern "C" {
+    fn getenv(name: str) -> *raw u8;
+    fn setenv(name: str, val: str, overwrite: i32) -> i32;
+    fn system(cmd: str) -> i32;
+}
+
+pub struct Child {
+    pub pid: i32,
+    pub stdout_fd: i32,
+}
+
+impl Child {
+    pub fn wait(self) -> i32 {
+        let status_buf = malloc(8usize) as *raw var u8
+        status_buf[0usize] = 0u8
+        status_buf[1usize] = 0u8
+        status_buf[2usize] = 0u8
+        status_buf[3usize] = 0u8
+        // SYS_wait4 = 61: wait4(pid, status, options, rusage)
+        let r = syscall4(61i64, self.pid as i64, status_buf, 0i64, 0usize as *raw u8)
+        if r < 0i64 {
+            free(status_buf)
+            return -1
+        }
+        let b0 = status_buf[0usize] as i32
+        let b1 = status_buf[1usize] as i32
+        let b2 = status_buf[2usize] as i32
+        let b3 = status_buf[3usize] as i32
+        let status = (b0 & 255) | ((b1 & 255) << 8) | ((b2 & 255) << 16) | ((b3 & 255) << 24)
+        free(status_buf)
+        return ((status >> 8) & 255)
+    }
+
+    pub fn kill(self, sig: i32) -> bool {
+        // SYS_kill = 62
+        let r = syscall2(62i64, self.pid as i64, sig as i64)
+        return (r == 0i64)
+    }
+}
+
+pub struct Output {
+    pub status: i32,
+    pub stdout: String,
+}
+
+pub struct Command {
+    pub program: String,
+    pub args: Vec<String>,
+    pub env_vars: Vec<String>,
+    pub current_dir: String,
+    pub capture_stdout: bool,
+}
+
+impl Command {
+    pub fn new(program: str) -> Command {
+        var args = Vec.new()
+        args.push(String.from_str(program))
+        Command {
+            program: String.from_str(program),
+            args: args,
+            env_vars: Vec.new(),
+            current_dir: String.new(),
+            capture_stdout: false,
+        }
+    }
+
+    pub fn arg(var self, a: str) {
+        self.args.push(String.from_str(a))
+    }
+
+    pub fn args(var self, list: []str) {
+        var i = 0usize
+        while i < list.len {
+            self.args.push(String.from_str(list[i]))
+            i = i + 1usize
+        }
+    }
+
+    pub fn current_dir(var self, dir: str) {
+        self.current_dir = String.from_str(dir)
+    }
+
+    pub fn env(var self, key: str, val: str) {
+        var entry = String.new()
+        entry.push_str(key)
+        entry.push_byte(61u8) // '='
+        entry.push_str(val)
+        entry.push_byte(0u8)
+        self.env_vars.push(entry)
+    }
+
+    pub fn spawn(self) -> Option<Child> {
+        var r_fd = -1
+        var w_fd = -1
+        if self.capture_stdout {
+            let pipe_buf = malloc(16usize) as *raw var u8
+            // SYS_pipe = 22
+            let pr = syscall1(22i64, pipe_buf)
+            if pr != 0i64 {
+                free(pipe_buf)
+                return Option.None
+            }
+            let r0 = pipe_buf[0usize] as i32
+            let r1 = pipe_buf[1usize] as i32
+            let r2 = pipe_buf[2usize] as i32
+            let r3 = pipe_buf[3usize] as i32
+            r_fd = (r0 & 255) | ((r1 & 255) << 8) | ((r2 & 255) << 16) | ((r3 & 255) << 24)
+
+            let w0 = pipe_buf[4usize] as i32
+            let w1 = pipe_buf[5usize] as i32
+            let w2 = pipe_buf[6usize] as i32
+            let w3 = pipe_buf[7usize] as i32
+            w_fd = (w0 & 255) | ((w1 & 255) << 8) | ((w2 & 255) << 16) | ((w3 & 255) << 24)
+            free(pipe_buf)
+        }
+
+        // SYS_fork = 57
+        let pid = syscall0(57i64) as i32
+        if pid < 0 {
+            if self.capture_stdout {
+                let _ = syscall1(3i64, r_fd as i64)
+                let _ = syscall1(3i64, w_fd as i64)
+            }
+            return Option.None
+        }
+
+        if pid == 0 {
+            // Child process
+            if self.current_dir.len() > 0usize {
+                // SYS_chdir = 80
+                let _ = syscall1(80i64, self.current_dir.as_ptr() as *raw u8)
+            }
+
+            if self.capture_stdout {
+                let _ = syscall1(3i64, r_fd as i64) // close read end
+                let _ = syscall2(33i64, w_fd as i64, 1i64) // dup2 stdout
+                let _ = syscall1(3i64, w_fd as i64)
+            }
+
+            // Construct argv pointer array
+            let argc = self.args.len
+            let argv_raw = malloc((argc + 1usize) * 8usize) as *raw var usize
+            var i = 0usize
+            while i < argc {
+                argv_raw[i] = self.args.ptr[i].as_ptr() as usize
+                i = i + 1usize
+            }
+            argv_raw[argc] = 0usize
+
+            // Construct envp pointer array if specified
+            var envp_raw = 0usize as *raw var usize
+            if self.env_vars.len > 0usize {
+                let envc = self.env_vars.len
+                envp_raw = malloc((envc + 1usize) * 8usize) as *raw var usize
+                i = 0usize
+                while i < envc {
+                    envp_raw[i] = self.env_vars.ptr[i].as_ptr() as usize
+                    i = i + 1usize
+                }
+                envp_raw[envc] = 0usize
+            }
+
+            // SYS_execve = 59
+            let _ = syscall3(59i64, self.program.as_ptr() as *raw u8, argv_raw as *raw u8, envp_raw as *raw u8)
+            // SYS_exit = 60
+            let _ = syscall1(60i64, 127i64)
+        }
+
+        // Parent process
+        var out_fd = -1
+        if self.capture_stdout {
+            let _ = syscall1(3i64, w_fd as i64) // close write end
+            out_fd = r_fd
+        }
+
+        return Option.Some(Child {
+            pid: pid,
+            stdout_fd: out_fd,
+        })
+    }
+
+    pub fn status(self) -> i32 {
+        let spawn_res = self.spawn()
+        match spawn_res {
+            Option.Some(c) => return c.wait(),
+            Option.None => return -1,
+            _ => return -1,
+        }
+    }
+
+    pub fn output(var self) -> Option<Output> {
+        self.capture_stdout = true
+        let spawn_res = self.spawn()
+        match spawn_res {
+            Option.Some(c) => {
+                var res_str = String.new()
+                if c.stdout_fd >= 0 {
+                    let buf = malloc(4096usize) as *raw var u8
+                    // SYS_read = 0
+                    var n = syscall3(0i64, c.stdout_fd as i64, buf, 4096i64)
+                    while n > 0i64 {
+                        var i = 0usize
+                        let count = n as usize
+                        while i < count {
+                            res_str.push_byte(buf[i])
+                            i = i + 1usize
+                        }
+                        n = syscall3(0i64, c.stdout_fd as i64, buf, 4096i64)
+                    }
+                    free(buf)
+                    // SYS_close = 3
+                    let _ = syscall1(3i64, c.stdout_fd as i64)
+                }
+                let st = c.wait()
+                res_str.push_byte(0u8)
+                return Option.Some(Output {
+                    status: st,
+                    stdout: res_str,
+                })
+            },
+            Option.None => return Option.None,
+            _ => return Option.None,
+        }
+    }
+}
+
+pub struct Process {}
+
+impl Process {
+    pub fn id() -> i32 {
+        // SYS_getpid = 39
+        syscall0(39i64) as i32
+    }
+
+    pub fn exit_process(code: i32) {
+        // SYS_exit_group = 231
+        let _ = syscall1(231i64, code as i64)
+        let _ = syscall1(60i64, code as i64)
+    }
+
+    pub fn run_command(cmd: str) -> i32 {
+        system(cmd)
+    }
+}
+
+pub fn get_env(name: str) -> Option<String> {
+    let val_ptr = getenv(name)
+    if (val_ptr as usize) == 0usize {
+        Option.None
+    } else {
+        Option.Some(String.from_str(val_ptr as str))
+    }
+}
+
+pub fn set_env(name: str, val: str) -> bool {
+    setenv(name, val, 1) == 0
+}
+
+pub fn process_exit(code: i32) {
+    Process.exit_process(code)
+}

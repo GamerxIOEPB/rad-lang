@@ -15,7 +15,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.23}"
 TEST_IMAGE_TAG="rad-alpine-test:3.23"
-DIST_DIR="$ROOT_DIR/target/dist"
+DIST_DIR="$ROOT_DIR/bin/dist"
 ARCHIVE_NAME="rad-0.2.3-linux-x86_64.tar.gz"
 
 BOLD="\033[1m"
@@ -88,10 +88,10 @@ docker run --rm \
         export HOME=/tmp/rad-test-home
         mkdir -p "$HOME"
         export RAD_HOME="$HOME/.rad-alpine-test"
-        export RAD_DIST_DIR=/workspace/target/dist
+        export RAD_DIST_DIR=/workspace/bin/dist
 
         # Run installer
-        sh /workspace/scripts/install.sh \
+        sh /workspace/install.sh \
             -v 0.2.3 \
             -y \
             --no-modify-path
@@ -399,9 +399,9 @@ docker run --rm \
         export HOME=/tmp/rad-test-b
         mkdir -p "$HOME"
         export RAD_HOME="$HOME/.rad"
-        export RAD_DIST_DIR=/workspace/target/dist
+        export RAD_DIST_DIR=/workspace/bin/dist
 
-        sh /workspace/scripts/install.sh -v 0.2.3 -y --no-modify-path
+        sh /workspace/install.sh -v 0.2.3 -y --no-modify-path
         export PATH="$RAD_HOME/bin:$PATH"
 
         echo "Running rad doctor with external GCC installed:"
@@ -436,9 +436,9 @@ docker run --rm \
         export HOME=/tmp/rad-test-c
         mkdir -p "$HOME"
         export RAD_HOME="$HOME/.rad"
-        export RAD_DIST_DIR=/workspace/target/dist
+        export RAD_DIST_DIR=/workspace/bin/dist
 
-        sh /workspace/scripts/install.sh -v 0.2.3 -y --no-modify-path
+        sh /workspace/install.sh -v 0.2.3 -y --no-modify-path
         export PATH="$RAD_HOME/bin:$PATH"
 
         echo "Running rad doctor with external G++ installed:"
@@ -470,7 +470,7 @@ docker run --rm \
         export HOME=/tmp/rad-test-d
         mkdir -p "$HOME/fake_bin"
         export RAD_HOME="$HOME/.rad"
-        export RAD_DIST_DIR=/workspace/target/dist
+        export RAD_DIST_DIR=/workspace/bin/dist
 
         # Create mock glibc compiler stub
         cat << "EOF" > "$HOME/fake_bin/fake-glibc-gcc"
@@ -484,7 +484,7 @@ exit 0
 EOF
         chmod 755 "$HOME/fake_bin/fake-glibc-gcc"
 
-        sh /workspace/scripts/install.sh -v 0.2.3 -y --no-modify-path
+        sh /workspace/install.sh -v 0.2.3 -y --no-modify-path
         export PATH="$RAD_HOME/bin:$PATH"
         export CC="$HOME/fake_bin/fake-glibc-gcc"
 
@@ -514,9 +514,9 @@ docker run --rm \
         export HOME=/tmp/glibc-home
         mkdir -p "$HOME"
         export RAD_HOME="$HOME/.rad-glibc"
-        export RAD_DIST_DIR=/workspace/target/dist
+        export RAD_DIST_DIR=/workspace/bin/dist
 
-        ARCH=$(ls /workspace/target/dist/rad-0.2.3-*.tar.gz | head -n 1)
+        ARCH=$(ls /workspace/bin/dist/rad-0.2.3-*.tar.gz | head -n 1)
         tar -xzf "$ARCH" -C "$HOME"
         mv "$HOME"/rad-0.2.3-* "$RAD_HOME"
         export PATH="$RAD_HOME/bin:$PATH"

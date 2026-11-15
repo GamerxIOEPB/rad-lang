@@ -296,7 +296,7 @@ fn handle_initialize(id: i64) {
     res.push_str("\"definitionProvider\":true,")
     res.push_str("\"documentSymbolProvider\":true,")
     res.push_str("\"documentFormattingProvider\":true")
-    res.push_str("},\"serverInfo\":{\"name\":\"rad-lsp\",\"version\":\"0.2.3\"}}")
+    res.push_str("},\"serverInfo\":{\"name\":\"rad-lsp\",\"version\":\"0.2.4\"}}")
     lsp_send_result(id, res.as_ptr() as str)
 }
 

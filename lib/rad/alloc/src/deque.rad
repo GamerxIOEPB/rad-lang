@@ -1,0 +1,176 @@
+// Rad Alloc Library: Deque<T> (Double-ended Queue / Ring Buffer) and Stack/Queue adapters
+
+pub struct Deque<T> {
+    pub ptr: *raw var T,
+    pub cap: usize,
+    pub head: usize,
+    pub count: usize,
+}
+
+impl<T> Deque<T> {
+    pub fn new() -> Deque<T> {
+        Deque {
+            ptr: 0 as *raw var T,
+            cap: 0usize,
+            head: 0usize,
+            count: 0usize,
+        }
+    }
+
+    pub fn capacity(self) -> usize {
+        self.cap
+    }
+
+    fn grow(var self, item: T) {
+        let item_size = 8usize
+        let old_cap = self.cap
+        var new_cap = 8usize
+        if old_cap > 0usize {
+            new_cap = old_cap * 2usize
+        }
+        let raw = malloc(new_cap * item_size)
+        let new_ptr = raw as *raw var T
+
+        if self.count > 0usize {
+            var i = 0usize
+            while i < self.count {
+                let old_idx = (self.head + i) % old_cap
+                new_ptr[i] = self.ptr[old_idx]
+                i = i + 1usize
+            }
+        }
+
+        if (self.ptr as usize) != 0usize {
+            free(self.ptr as *raw var u8)
+        }
+
+        self.ptr = new_ptr
+        self.cap = new_cap
+        self.head = 0usize
+    }
+
+    pub fn push_back(var self, item: T) {
+        if self.count == self.cap {
+            self.grow(item)
+        }
+        let tail = (self.head + self.count) % self.cap
+        self.ptr[tail] = item
+        self.count = self.count + 1usize
+    }
+
+    pub fn push_front(var self, item: T) {
+        if self.count == self.cap {
+            self.grow(item)
+        }
+        if self.head == 0usize {
+            self.head = self.cap - 1usize
+        } else {
+            self.head = self.head - 1usize
+        }
+        self.ptr[self.head] = item
+        self.count = self.count + 1usize
+    }
+
+    pub fn pop_front(var self) -> Option<T> {
+        if self.count == 0usize {
+            return Option.None
+        }
+        let val = self.ptr[self.head]
+        self.head = (self.head + 1usize) % self.cap
+        self.count = self.count - 1usize
+        Option.Some(val)
+    }
+
+    pub fn pop_back(var self) -> Option<T> {
+        if self.count == 0usize {
+            return Option.None
+        }
+        let tail = (self.head + self.count - 1usize) % self.cap
+        let val = self.ptr[tail]
+        self.count = self.count - 1usize
+        Option.Some(val)
+    }
+
+    pub fn get_at(self, idx: usize) -> Option<T> {
+        if idx >= self.count {
+            return Option.None
+        }
+        let real_idx = (self.head + idx) % self.cap
+        Option.Some(self.ptr[real_idx])
+    }
+
+    pub fn clear(var self) {
+        self.head = 0usize
+        self.count = 0usize
+    }
+
+    pub fn free_deque(var self) {
+        if (self.ptr as usize) != 0usize {
+            free(self.ptr as *raw var u8)
+            self.ptr = 0 as *raw var T
+            self.cap = 0usize
+            self.head = 0usize
+            self.count = 0usize
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Stack<T> LIFO adapter
+// ------------------------------------------------------------------------------
+
+pub struct Stack<T> {
+    pub inner: Deque<T>,
+}
+
+impl<T> Stack<T> {
+    pub fn new() -> Stack<T> {
+        Stack { inner: Deque.new() }
+    }
+
+    pub fn push_val(var self, item: T) {
+        self.inner.push_back(item)
+    }
+
+    pub fn pop_val(var self) -> Option<T> {
+        self.inner.pop_back()
+    }
+
+    pub fn peek_top(self) -> Option<T> {
+        if self.inner.count == 0usize {
+            Option.None
+        } else {
+            self.inner.get_at(self.inner.count - 1usize)
+        }
+    }
+
+    pub fn free_stack(var self) {
+        self.inner.free_deque()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Queue<T> FIFO adapter
+// ------------------------------------------------------------------------------
+
+pub struct Queue<T> {
+    pub inner: Deque<T>,
+}
+
+impl<T> Queue<T> {
+    pub fn new() -> Queue<T> {
+        Queue { inner: Deque.new() }
+    }
+
+    pub fn enqueue(var self, item: T) {
+        self.inner.push_back(item)
+    }
+
+    pub fn dequeue(var self) -> Option<T> {
+        self.inner.pop_front()
+    }
+
+    pub fn peek_front(self) -> Option<T> {
+        self.inner.get_at(0usize)
+    }
+}
