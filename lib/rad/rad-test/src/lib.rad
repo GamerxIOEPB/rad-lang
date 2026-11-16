@@ -34,7 +34,7 @@ impl TestSuite {
             self.failed = self.failed + 1usize;
             print("\x1b[31m  [FAIL]\x1b[0m ");
             print(test_name);
-            if str_len(failure_detail) > 0usize {
+            if rad_test_str_len(failure_detail) > 0usize {
                 print(" — \x1b[33m");
                 print(failure_detail);
                 print("\x1b[0m");
@@ -59,9 +59,9 @@ impl TestSuite {
             print("\x1b[31m  [FAIL]\x1b[0m ");
             print(test_name);
             print(" — expected ");
-            print_num(expected);
+            rad_test_print_num(expected);
             print(", got ");
-            print_num(actual);
+            rad_test_print_num(actual);
             println("");
             self.total = self.total + 1usize;
             self.failed = self.failed + 1usize;
@@ -69,7 +69,7 @@ impl TestSuite {
     }
 
     pub fn check_eq_str(var self, test_name: str, actual: str, expected: str) {
-        let ok = str_eq(actual, expected);
+        let ok = rad_test_str_eq(actual, expected);
         if ok {
             self.check(test_name, true, "");
         } else {
@@ -91,7 +91,7 @@ impl TestSuite {
     }
 
     pub fn check_ne_str(var self, test_name: str, actual: str, unexpected: str) {
-        let ok = !str_eq(actual, unexpected);
+        let ok = !rad_test_str_eq(actual, unexpected);
         self.check(test_name, ok, "strings were unexpectedly equal");
     }
 
@@ -102,13 +102,13 @@ impl TestSuite {
         println(" ===");
 
         print("Total:  ");
-        print_num(self.total as i64);
+        rad_test_print_num(self.total as i64);
         print(" | Passed: \x1b[32m");
-        print_num(self.passed as i64);
+        rad_test_print_num(self.passed as i64);
         print("\x1b[0m | Failed: ");
         if self.failed > 0usize {
             print("\x1b[31m");
-            print_num(self.failed as i64);
+            rad_test_print_num(self.failed as i64);
             print("\x1b[0m");
         } else {
             print("0");
@@ -136,9 +136,9 @@ pub fn assert(cond: bool) {
 pub fn assert_eq(a: i64, b: i64) {
     if a != b {
         print("\x1b[31massertion failed: ");
-        print_num(a);
+        rad_test_print_num(a);
         print(" != ");
-        print_num(b);
+        rad_test_print_num(b);
         println("\x1b[0m");
         exit(101);
     }
@@ -147,14 +147,14 @@ pub fn assert_eq(a: i64, b: i64) {
 pub fn assert_ne(a: i64, b: i64) {
     if a == b {
         print("\x1b[31massertion failed: ");
-        print_num(a);
+        rad_test_print_num(a);
         println(" == unexpected value\x1b[0m");
         exit(101);
     }
 }
 
 pub fn assert_streq(a: str, b: str) {
-    if !str_eq(a, b) {
+    if !rad_test_str_eq(a, b) {
         print("\x1b[31massertion failed: '");
         print(a);
         print("' != '");
@@ -165,7 +165,7 @@ pub fn assert_streq(a: str, b: str) {
 }
 
 pub fn assert_strne(a: str, b: str) {
-    if str_eq(a, b) {
+    if rad_test_str_eq(a, b) {
         print("\x1b[31massertion failed: '");
         print(a);
         print("' == '");
@@ -197,9 +197,9 @@ pub fn assert_false(cond: bool, msg: str) -> bool {
 pub fn assert_eq_i64(a: i64, b: i64, msg: str) -> bool {
     if a != b {
         print("\x1b[31mAssertion failed (");
-        print_num(a);
+        rad_test_print_num(a);
         print(" != ");
-        print_num(b);
+        rad_test_print_num(b);
         print("): \x1b[0m");
         println(msg);
         return false;
@@ -208,7 +208,7 @@ pub fn assert_eq_i64(a: i64, b: i64, msg: str) -> bool {
 }
 
 pub fn assert_eq_str(a: str, b: str, msg: str) -> bool {
-    if !str_eq(a, b) {
+    if !rad_test_str_eq(a, b) {
         print("\x1b[31mAssertion failed ('");
         print(a);
         print("' != '");
@@ -220,8 +220,8 @@ pub fn assert_eq_str(a: str, b: str, msg: str) -> bool {
     return true;
 }
 
-// Helper utilities
-fn str_len(s: str) -> usize {
+// Internal helper utilities (prefixed to avoid collisions)
+fn rad_test_str_len(s: str) -> usize {
     if (s as usize) == 0usize { return 0usize; }
     let p = s as *raw u8;
     var i = 0usize;
@@ -229,7 +229,7 @@ fn str_len(s: str) -> usize {
     return i;
 }
 
-fn str_eq(a: str, b: str) -> bool {
+fn rad_test_str_eq(a: str, b: str) -> bool {
     if (a as usize) == 0usize || (b as usize) == 0usize {
         return (a as usize) == (b as usize);
     }
@@ -243,12 +243,12 @@ fn str_eq(a: str, b: str) -> bool {
     return pa[i] == pb[i];
 }
 
-fn print_num(n: i64) {
-    let s = int_to_string(n);
+fn rad_test_print_num(n: i64) {
+    let s = rad_test_int_to_string(n);
     print(s.as_ptr() as str);
 }
 
-fn int_to_string(val: i64) -> String {
+fn rad_test_int_to_string(val: i64) -> String {
     if val == 0i64 {
         return String.from_str("0");
     }
