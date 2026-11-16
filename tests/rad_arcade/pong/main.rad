@@ -390,5 +390,5 @@ fn main() {
 
     con.close_console()
     kbd.close_reader()
-    term.close()
+    term.end_session()
 }

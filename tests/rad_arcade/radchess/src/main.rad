@@ -40,7 +40,7 @@ fn main() -> i32 {
     }
 
     app.close_app();
-    term.close();
+    term.end_session();
 
     println("Thank you for playing RadChess!");
     0

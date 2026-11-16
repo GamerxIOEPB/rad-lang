@@ -1,0 +1,514 @@
+// ==============================================================================
+// Rad Arcade: Unified Retro Gaming Hub
+// Interactive TUI launcher for all 9 built-in Rad Arcade games.
+// Zero C, zero libc, zero external dependencies — pure native Rad!
+// ==============================================================================
+
+import terminal;
+import keyboard;
+import console;
+import time;
+import process;
+
+fn file_exists(path: str) -> bool {
+    // SYS_access = 21, F_OK = 0
+    let r = syscall2(21i64, path as *raw u8, 0i64)
+    r == 0i64
+}
+
+fn draw_hline(var con: Console, x: usize, y: usize, len: usize, fg: Color, bg: Color) {
+    con.draw_rect(x, y, len, 1usize, 45u8, fg, bg) // '-'
+}
+
+fn draw_vline(var con: Console, x: usize, y: usize, len: usize, fg: Color, bg: Color) {
+    con.draw_rect(x, y, 1usize, len, 124u8, fg, bg) // '|'
+}
+
+fn to_c_str(s: String) -> str {
+    let len = s.len()
+    let mem = malloc(len + 1usize) as *raw var u8
+    let src = s.as_ptr()
+    var i = 0usize
+    while i < len {
+        mem[i] = src[i]
+        i = i + 1usize
+    }
+    mem[len] = 0u8
+    mem as str
+}
+
+fn string_pop(s: String) -> String {
+    let len = s.len()
+    if len <= 1usize {
+        return String.new()
+    }
+    let p = s.as_ptr()
+    var res = String.new()
+    var i = 0usize
+    while i < (len - 1usize) {
+        res.push_byte(p[i])
+        i = i + 1usize
+    }
+    return res
+}
+
+fn clean_path(s: String) -> String {
+    let len = s.len()
+    if len <= 1usize {
+        return s
+    }
+    let p = s.as_ptr()
+    if p[len - 1usize] == 47u8 { // '/'
+        var res = String.new()
+        var i = 0usize
+        while i < (len - 1usize) {
+            res.push_byte(p[i])
+            i = i + 1usize
+        }
+        return res
+    }
+    return s
+}
+
+fn resolve_game_path(games_dir: String, game_id: str) -> String {
+    var path = String.new()
+    let dlen = games_dir.len()
+    if dlen > 0usize {
+        path.push_str(games_dir.as_ptr() as str)
+        let last_ch = games_dir.as_ptr()[dlen - 1usize]
+        if last_ch != 47u8 { // '/'
+            path.push_byte(47u8)
+        }
+    } else {
+        path.push_str("./")
+    }
+    path.push_str(game_id)
+    return path
+}
+
+fn detect_initial_games_dir() -> String {
+    // 1. Check local bin/arcade
+    if file_exists("bin/arcade/tetris") {
+        return String.from_str("bin/arcade")
+    }
+    // 2. Check current working directory
+    if file_exists("./tetris") {
+        return String.from_str(".")
+    }
+    // 3. Check ~/.rad/bin/arcade
+    let home = get_env("HOME")
+    match home {
+        Option.Some(h) => {
+            var rad_arcade = String.new()
+            rad_arcade.push_str(h.as_ptr() as str)
+            rad_arcade.push_str("/.rad/bin/arcade")
+            var check_p = String.new()
+            check_p.push_str(rad_arcade.as_ptr() as str)
+            check_p.push_str("/tetris")
+            if file_exists(to_c_str(check_p)) {
+                return rad_arcade
+            }
+        },
+        Option.None => {}
+    }
+    // 4. Check absolute path in repository
+    if file_exists("/home/abhinav/Projects/rad/bin/arcade/tetris") {
+        return String.from_str("/home/abhinav/Projects/rad/bin/arcade")
+    }
+    // Fallback default
+    return String.from_str("bin/arcade")
+}
+
+struct GameInfo {
+    name: str,
+    id: str,
+    genre: str,
+    tagline: str,
+    description: str,
+    controls: str,
+    features: str,
+}
+
+fn get_game(idx: usize) -> GameInfo {
+    if idx == 0usize {
+        return GameInfo {
+            name: "Tetris",
+            id: "tetris",
+            genre: "PUZZLE",
+            tagline: "Classic falling tetromino puzzle with wall kicks",
+            description: "Strategically arrange falling polyomino blocks to form complete horizontal lines. Features ghost piece projection, SRS-style wall kick rotation, scoring multiplier, and progressive fall acceleration.",
+            controls: "Left/Right: Move | Up: Rotate | Down: Soft Drop | Space: Hard Drop | Q: Quit",
+            features: "Ghost piece • Wall kicks • 4-line Tetris bonus • Score tracking",
+        }
+    }
+    if idx == 1usize {
+        return GameInfo {
+            name: "Dungeon Crawler",
+            id: "dungeon",
+            genre: "ROGUE-LIKE",
+            tagline: "Procedural ASCII dungeon rogue-like with combat",
+            description: "Descend into dark procedurally generated subterranean chambers. Battle goblins, skeleton warriors, and dungeon bosses. Collect health potions, enchanted swords, and search for the mythical Amulet of Rad.",
+            controls: "WASD / Arrows: Move & Attack | I: Inventory | Space: Wait/Rest | Q: Quit",
+            features: "Procedural BSP dungeon gen • Turn-based combat • Monster AI • Inventory",
+        }
+    }
+    if idx == 2usize {
+        return GameInfo {
+            name: "Space Invaders",
+            id: "invaders",
+            genre: "ARCADE SHOOTER",
+            tagline: "Retro alien invasion defense with destructible bunkers",
+            description: "Defend Earth from descending waves of alien invaders! Take tactical cover behind destructible energy shields, lead your shots, dodge enemy plasma bombs, and snipe high-value mystery motherships across the skyline.",
+            controls: "Left/Right: Move Cannon | Space: Fire Laser Cannon | Q: Quit",
+            features: "Destructible shield bunkers • Alien wave animations • Mystery ship bonuses",
+        }
+    }
+    if idx == 3usize {
+        return GameInfo {
+            name: "Raycaster 3D",
+            id: "raycaster",
+            genre: "3D FIRST-PERSON",
+            tagline: "Wolfenstein 3D DDA pseudo-3D engine in pure terminal",
+            description: "A full real-time DDA raycasting engine rendered in pure ASCII! Features smooth 60 FPS floating-point camera rotation, depth-shaded textured walls, real-time minimap radar with field-of-view cone.",
+            controls: "W/S: Step Forward/Back | A/D: Strafe Left/Right | Left/Right: Look | Q: Quit",
+            features: "DDA raycast algorithm • Sub-cell camera physics • Live radar minimap",
+        }
+    }
+    if idx == 4usize {
+        return GameInfo {
+            name: "Snake",
+            id: "snake",
+            genre: "ARCADE CLASSIC",
+            tagline: "Smooth retro snake with adaptive speed curve",
+            description: "Guide the growing serpent through the arena, gobbling nutrient apples while avoiding perimeter wall impacts and self-collision. Pacing dynamically accelerates with length to test twitch reflexes.",
+            controls: "Arrows / WASD: Steer Direction | P: Pause | Q: Quit",
+            features: "Double-buffered collision • Tail growth buffer • High score saving",
+        }
+    }
+    if idx == 5usize {
+        return GameInfo {
+            name: "Pong",
+            id: "pong",
+            genre: "SPORTS / PHYSICS",
+            tagline: "Paddle rally physics with speed acceleration",
+            description: "The timeless table tennis simulator with authentic physics! Play against the reactive AI opponent. Ball bounce angles dynamically adjust based on paddle point-of-impact, with speed escalating per rally.",
+            controls: "W/S: Player 1 (Left) | Up/Down: Player 2 / Adjust AI | Space: Serve | Q: Quit",
+            features: "Angle reflection physics • Escalating rally speed • Reactive CPU bot",
+        }
+    }
+    if idx == 6usize {
+        return GameInfo {
+            name: "Breakout",
+            id: "breakout",
+            genre: "ARCADE ACTION",
+            tagline: "Brick demolition with multi-hit shields & paddle deflection",
+            description: "Demolish colorful multi-tiered brick walls using high-velocity steel balls. Different colored bricks require multiple strikes. Angle your returns off paddle edges to breach the ceiling for maximum carnage.",
+            controls: "Left/Right / A/D: Move Paddle | Space: Launch Ball | Q: Quit",
+            features: "Multi-hit brick resilience • Precision angle deflection • Life counter",
+        }
+    }
+    if idx == 7usize {
+        return GameInfo {
+            name: "2048",
+            id: "2048",
+            genre: "PUZZLE / MATH",
+            tagline: "Sliding tile puzzle with exponential merges",
+            description: "Slide numbered tiles across a 4x4 grid. When two tiles with matching numbers collide, they merge into their sum! Plan your moves carefully to construct the legendary 2048 tile without running out of open grid cells.",
+            controls: "Arrows / WASD: Slide Tiles | R: Restart Board | Q: Quit",
+            features: "Double-merge prevention • ANSI color tiers • Dynamic tile animation",
+        }
+    }
+    return GameInfo {
+        name: "RadChess",
+        id: "radchess",
+        genre: "STRATEGY / LAN",
+        tagline: "Full chess engine with Stockfish-style AI & LAN multiplayer",
+        description: "Tournament-grade chess implementation in pure Rad! Features complete move generation (castling, en passant, promotions), minimax AI with alpha-beta pruning and evaluation, plus real-time LAN socket multiplayer.",
+        controls: "Type coordinate move (e.g. e2e4) | Menu navigation | Q: Quit",
+        features: "Full chess rules • Alpha-beta minimax AI • LAN discovery & online play",
+    }
+}
+
+fn run_arcade_launcher() {
+    var term = TerminalSession.new()
+    if !term.enable_raw_mode() {
+        println("error: Failed to initialize raw terminal mode.")
+        return
+    }
+
+    term.enter_alternate_screen()
+    term.hide_cursor()
+
+    var keyboard = KeyboardReader.new()
+    var selected_idx = 0usize
+    let total_games = 9usize
+
+    var games_dir = detect_initial_games_dir()
+    var editing_dir = false
+    var dir_input_buf = String.new()
+
+    var status_msg = String.from_str("Press Enter to Play, E to Edit Games Directory, Q to Exit")
+    var status_color = Color.cyan()
+
+    var running = true
+
+    while running {
+        let size = term.size()
+        var cols = size.cols
+        var rows = size.rows
+        if cols < 80usize { cols = 80usize }
+        if rows < 24usize { rows = 24usize }
+
+        var con = Console.new(cols, rows)
+        con.clear()
+
+        // 1. Draw Outer Frame Box
+        con.draw_box(0usize, 0usize, cols, rows, Color.indexed(240u8), Color.default())
+
+        // 2. Draw Top Marquee Banner
+        con.print_str(2usize, 1usize, ":: RAD ARCADE HUB ::", Color.bright_yellow(), Color.default())
+        
+        // Show current directory in top banner
+        con.print_str(cols - 38usize, 1usize, "Dir: ", Color.indexed(244u8), Color.default())
+        var dir_display = String.new()
+        if games_dir.len() > 22usize {
+            dir_display.push_str("...")
+            let d_p = games_dir.as_ptr()
+            let d_len = games_dir.len()
+            var di = d_len - 19usize
+            while di < d_len {
+                dir_display.push_byte(d_p[di])
+                di = di + 1usize
+            }
+        } else {
+            dir_display.push_str(games_dir.as_ptr() as str)
+        }
+        con.print_str(cols - 33usize, 1usize, to_c_str(dir_display), Color.bright_cyan(), Color.default())
+        con.print_str(cols - 10usize, 1usize, " [E:Edit]", Color.indexed(245u8), Color.default())
+
+        draw_hline(con, 1usize, 2usize, cols - 2usize, Color.indexed(240u8), Color.default())
+
+        // 3. Draw Left Panel: Game List
+        let list_w = 30usize
+        con.print_str(3usize, 3usize, "ARCADE CLASSICS", Color.bright_cyan(), Color.default())
+        draw_hline(con, 2usize, 4usize, list_w - 2usize, Color.indexed(238u8), Color.default())
+
+        var g_i = 0usize
+        while g_i < total_games {
+            let g = get_game(g_i)
+            let y_pos = 5usize + (g_i * 2usize)
+
+            if g_i == selected_idx {
+                // Highlighted Row
+                con.draw_rect(2usize, y_pos, list_w - 3usize, 1usize, 32u8, Color.default(), Color.indexed(236u8))
+                con.print_str(3usize, y_pos, "▶ ", Color.bright_yellow(), Color.indexed(236u8))
+                con.print_str(5usize, y_pos, g.name, Color.bright_white(), Color.indexed(236u8))
+                con.print_str(list_w - 9usize, y_pos, g.genre, Color.yellow(), Color.indexed(236u8))
+            } else {
+                con.print_str(3usize, y_pos, "  ", Color.indexed(242u8), Color.default())
+                con.print_str(5usize, y_pos, g.name, Color.indexed(250u8), Color.default())
+                con.print_str(list_w - 9usize, y_pos, g.genre, Color.indexed(242u8), Color.default())
+            }
+            g_i = g_i + 1usize
+        }
+
+        // Vertical divider between list and detail panel
+        draw_vline(con, list_w, 3usize, rows - 5usize, Color.indexed(240u8), Color.default())
+
+        // 4. Draw Right Panel: Selected Game Detail
+        let detail_x = list_w + 3usize
+        let detail_w = cols - detail_x - 3usize
+        let sel_game = get_game(selected_idx)
+
+        // Title and genre tag
+        con.print_str(detail_x, 3usize, sel_game.name, Color.bright_yellow(), Color.default())
+        con.print_str(detail_x + con_str_len(sel_game.name) + 2usize, 3usize, "[", Color.indexed(240u8), Color.default())
+        con.print_str(detail_x + con_str_len(sel_game.name) + 3usize, 3usize, sel_game.genre, Color.bright_green(), Color.default())
+        con.print_str(detail_x + con_str_len(sel_game.name) + 3usize + con_str_len(sel_game.genre), 3usize, "]", Color.indexed(240u8), Color.default())
+
+        con.print_str(detail_x, 4usize, sel_game.tagline, Color.bright_cyan(), Color.default())
+        draw_hline(con, detail_x, 5usize, detail_w, Color.indexed(238u8), Color.default())
+
+        // Description header & body
+        con.print_str(detail_x, 7usize, "OVERVIEW", Color.bright_white(), Color.default())
+        let desc = sel_game.description
+        if con_str_len(desc) <= detail_w {
+            con.print_str(detail_x, 8usize, desc, Color.indexed(251u8), Color.default())
+        } else {
+            var cut = detail_w
+            if cut > 65usize { cut = 65usize }
+            let p_desc = desc as *raw u8
+            while cut > 0usize && p_desc[cut] != 32u8 {
+                cut = cut - 1usize
+            }
+            var line1 = String.new()
+            var c_i = 0usize
+            while c_i < cut {
+                line1.push_byte(p_desc[c_i])
+                c_i = c_i + 1usize
+            }
+            con.print_str(detail_x, 8usize, to_c_str(line1), Color.indexed(251u8), Color.default())
+
+            var line2 = String.new()
+            c_i = cut + 1usize
+            let dlen = con_str_len(desc)
+            while c_i < dlen {
+                line2.push_byte(p_desc[c_i])
+                c_i = c_i + 1usize
+            }
+            con.print_str(detail_x, 9usize, to_c_str(line2), Color.indexed(251u8), Color.default())
+        }
+
+        // Key Features
+        con.print_str(detail_x, 11usize, "HIGHLIGHTS", Color.bright_white(), Color.default())
+        con.print_str(detail_x, 12usize, sel_game.features, Color.bright_magenta(), Color.default())
+
+        // Controls Map Box
+        con.print_str(detail_x, 14usize, "GAME CONTROLS", Color.bright_white(), Color.default())
+        con.draw_box(detail_x, 15usize, detail_w, 3usize, Color.indexed(237u8), Color.default())
+        con.print_str(detail_x + 2usize, 16usize, sel_game.controls, Color.bright_cyan(), Color.default())
+
+        // Execution Path & Availability Status
+        con.print_str(detail_x, 19usize, "GAMES DIRECTORY & STATUS", Color.bright_white(), Color.default())
+        let target_bin = resolve_game_path(games_dir, sel_game.id)
+        let is_ready = file_exists(to_c_str(target_bin))
+
+        con.print_str(detail_x, 20usize, "Target: ", Color.indexed(244u8), Color.default())
+        con.print_str(detail_x + 8usize, 20usize, to_c_str(target_bin), Color.indexed(248u8), Color.default())
+
+        if is_ready {
+            con.print_str(detail_x, 21usize, "Status: [READY TO PLAY]", Color.bright_green(), Color.default())
+        } else {
+            con.print_str(detail_x, 21usize, "Status: [NOT FOUND in directory — Press E to change path]", Color.bright_red(), Color.default())
+        }
+
+        // 5. Bottom Status / Help Bar
+        draw_hline(con, 1usize, rows - 3usize, cols - 2usize, Color.indexed(240u8), Color.default())
+        con.print_str(3usize, rows - 2usize, to_c_str(status_msg), status_color, Color.default())
+
+        // Launch prompt badge on bottom right
+        con.print_str(cols - 36usize, rows - 2usize, "[E] Edit Dir  [Enter] Play  [Q] Exit", Color.bright_yellow(), Color.default())
+
+        // 6. Draw Modal Dialog when Editing Directory
+        if editing_dir {
+            let modal_w = 66usize
+            let modal_h = 7usize
+            var modal_x = 7usize
+            if cols > modal_w { modal_x = (cols - modal_w) / 2usize }
+            var modal_y = 8usize
+            if rows > modal_h { modal_y = (rows - modal_h) / 2usize }
+
+            con.draw_rect(modal_x, modal_y, modal_w, modal_h, 32u8, Color.bright_white(), Color.indexed(235u8))
+            con.draw_box(modal_x, modal_y, modal_w, modal_h, Color.bright_yellow(), Color.indexed(235u8))
+
+            con.print_str(modal_x + 2usize, modal_y + 1usize, "[ EDIT GAMES DIRECTORY ]", Color.bright_yellow(), Color.indexed(235u8))
+            con.print_str(modal_x + 2usize, modal_y + 2usize, "Enter path (e.g. /PATH/TO/DIR or ./PATH/TO/DIR):", Color.bright_white(), Color.indexed(235u8))
+
+            con.draw_rect(modal_x + 2usize, modal_y + 3usize, modal_w - 4usize, 1usize, 32u8, Color.bright_white(), Color.indexed(233u8))
+            con.print_str(modal_x + 3usize, modal_y + 3usize, "> ", Color.bright_cyan(), Color.indexed(233u8))
+            con.print_str(modal_x + 5usize, modal_y + 3usize, to_c_str(dir_input_buf), Color.bright_green(), Color.indexed(233u8))
+            con.print_str(modal_x + 5usize + dir_input_buf.len(), modal_y + 3usize, "_", Color.bright_yellow(), Color.indexed(233u8))
+
+            con.print_str(modal_x + 2usize, modal_y + 5usize, "[ ENTER ] Save   [ ESC ] Cancel   [ Backspace ] Erase   [ Ctrl+U ] Clear", Color.indexed(246u8), Color.indexed(235u8))
+        }
+
+        // Present Frame to Terminal
+        con.present()
+
+        // Handle User Keystrokes
+        let ev = keyboard.read_key(100)
+        if ev.is_press() {
+            if editing_dir {
+                // Input handling inside Directory Edit Modal
+                if ev.is_key(KEY_ENTER) || ev.char_val == 10u8 || ev.char_val == 13u8 {
+                    if dir_input_buf.len() > 0usize {
+                        games_dir = clean_path(dir_input_buf)
+                    } else {
+                        games_dir = String.from_str(".")
+                    }
+                    editing_dir = false
+                    status_msg = String.from_str("Games directory updated.")
+                    status_color = Color.bright_green()
+                } else if ev.is_key(KEY_ESC) || ev.char_val == 27u8 || ev.code == 27 {
+                    editing_dir = false
+                    status_msg = String.from_str("Directory edit cancelled.")
+                    status_color = Color.cyan()
+                } else if ev.char_val == 21u8 { // Ctrl+U: Clear entire line
+                    dir_input_buf = String.new()
+                } else if ev.is_key(KEY_BACKSPACE) || ev.code == KEY_BACKSPACE || ev.char_val == 127u8 || ev.char_val == 8u8 {
+                    dir_input_buf = string_pop(dir_input_buf)
+                } else if ev.char_val >= 32u8 && ev.char_val <= 126u8 {
+                    if dir_input_buf.len() < 55usize {
+                        dir_input_buf.push_byte(ev.char_val)
+                    }
+                }
+            } else {
+                // Navigation handling in Main Menu
+                if ev.is_key(KEY_UP) || ev.is_char(107u8) || ev.is_char(119u8) { // Up or 'k' or 'w'
+                    if selected_idx == 0usize {
+                        selected_idx = total_games - 1usize
+                    } else {
+                        selected_idx = selected_idx - 1usize
+                    }
+                    status_msg = String.from_str("Navigated to game.")
+                    status_color = Color.cyan()
+                } else if ev.is_key(KEY_DOWN) || ev.is_char(106u8) || ev.is_char(115u8) { // Down or 'j' or 's'
+                    selected_idx = (selected_idx + 1usize) % total_games
+                    status_msg = String.from_str("Navigated to game.")
+                    status_color = Color.cyan()
+                } else if ev.char_val >= 49u8 && ev.char_val <= 57u8 { // Keys '1' to '9'
+                    selected_idx = (ev.char_val - 49u8) as usize
+                    status_msg = String.from_str("Selected game directly.")
+                    status_color = Color.cyan()
+                } else if ev.is_char(101u8) || ev.is_char(69u8) || ev.char_val == 101u8 || ev.char_val == 69u8 { // 'e' or 'E' (Edit directory)
+                    editing_dir = true
+                    dir_input_buf = String.from_str(games_dir.as_ptr() as str)
+                    status_msg = String.from_str("Enter games directory (e.g. /path/to/bin/arcade or ./bin/arcade).")
+                    status_color = Color.bright_cyan()
+                } else if ev.is_key(KEY_ENTER) || ev.char_val == 10u8 || ev.char_val == 13u8 || ev.is_char(32u8) { // Enter or Space (Play)
+                    let game = get_game(selected_idx)
+                    let target_bin = resolve_game_path(games_dir, game.id)
+
+                    if !file_exists(to_c_str(target_bin)) {
+                        // Binary does not exist: stay in UI and show clear diagnostic
+                        status_msg = String.from_str("Game binary not found in directory! Press E to change directory path.")
+                        status_color = Color.bright_red()
+                        continue
+                    }
+
+                    // Suspend launcher, restore normal terminal, launch game process
+                    term.leave_alternate_screen()
+                    term.show_cursor()
+                    let _ = term.restore_mode()
+
+                    println("\x1b[2J\x1b[H\x1b[1;36m[Rad Arcade]\x1b[0m Starting ");
+                    print(game.name);
+                    println("...");
+
+                    let _ = Process.run_command(to_c_str(target_bin))
+
+                    // When game exits, restore raw mode and return to hub
+                    term.enable_raw_mode()
+                    term.enter_alternate_screen()
+                    term.hide_cursor()
+
+                    status_msg = String.from_str("Returned from game session. Welcome back to Rad Arcade!")
+                    status_color = Color.bright_yellow()
+                } else if ev.is_key(KEY_ESC) || ev.is_char(113u8) || ev.is_char(81u8) || ev.char_val == 113u8 || ev.char_val == 81u8 { // Esc or 'q' or 'Q'
+                    running = false
+                }
+            }
+        }
+    }
+
+    // Clean exit
+    term.leave_alternate_screen()
+    term.show_cursor()
+    let _ = term.restore_mode()
+    println("\x1b[1;33m[Rad Arcade]\x1b[0m Thanks for playing! See you next time.")
+}
+
+fn main() -> i32 {
+    run_arcade_launcher()
+    return 0
+}

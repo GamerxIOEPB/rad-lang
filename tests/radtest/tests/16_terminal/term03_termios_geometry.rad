@@ -14,7 +14,7 @@ fn main() {
         println("term_buffers: false")
     }
 
-    term.close()
+    term.end_session()
     if (term.orig_termios as usize) == 0usize {
         println("term_cleanup: true")
     } else {

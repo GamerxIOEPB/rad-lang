@@ -807,3 +807,153 @@ body {
         text-align: center;
     }
 }
+
+/* ==============================================================================
+   Rad Arcade Showcase Section
+============================================================================== */
+.arcade-section {
+    padding: 80px 0;
+    position: relative;
+    background: radial-gradient(circle at 50% 30%, rgba(255, 193, 7, 0.05) 0%, transparent 70%);
+}
+
+.arcade-command-card {
+    max-width: 640px;
+    margin: 0 auto 48px auto;
+    background: #0d1117;
+    border: 1px solid rgba(255, 209, 102, 0.35);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(255, 209, 102, 0.1);
+    overflow: hidden;
+}
+
+.arcade-command-header {
+    background: #161b22;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.arcade-terminal-title {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    margin-left: 8px;
+}
+
+.arcade-command-body {
+    padding: 16px 20px;
+    font-family: var(--font-mono);
+    font-size: 1.15rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.arcade-command-body .prompt {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.arcade-command-body .cmd-text {
+    color: #ffd166;
+    font-weight: 600;
+}
+
+.arcade-command-hint {
+    font-size: 0.85rem;
+    color: #6e7681;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.arcade-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 24px;
+}
+
+.arcade-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.arcade-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(255, 209, 102, 0.4);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 15px rgba(255, 209, 102, 0.08);
+}
+
+.arcade-card.featured-arcade {
+    border-color: rgba(88, 166, 255, 0.35);
+    background: linear-gradient(180deg, rgba(22, 27, 34, 0.95) 0%, rgba(13, 17, 23, 0.95) 100%);
+}
+
+.arcade-card.featured-arcade:hover {
+    border-color: var(--accent);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 20px var(--accent-glow);
+}
+
+.arcade-card-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 12px;
+}
+
+.arcade-icon {
+    font-size: 2rem;
+    line-height: 1;
+}
+
+.arcade-card h3 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.arcade-genre {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.arcade-genre.highlight {
+    color: var(--accent);
+}
+
+.arcade-card p {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 20px;
+    flex-grow: 1;
+}
+
+.arcade-footer {
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.arcade-footer code {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    background: rgba(0, 0, 0, 0.3);
+    color: #ffd166;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 209, 102, 0.2);
+    display: inline-block;
+}

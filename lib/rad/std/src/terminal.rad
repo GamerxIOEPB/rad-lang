@@ -227,7 +227,7 @@ impl TerminalSession {
         TerminalSize { cols: 80usize, rows: 24usize }
     }
 
-    pub fn close(var self) {
+    pub fn end_session(var self) {
         let cmd = "\x1b[<u"
         let _w = syscall3(1i64, 1i64, cmd as *raw u8, 4i64)
         self.show_cursor()
@@ -353,7 +353,7 @@ impl TerminalGuard {
 
     pub fn restore(var self) {
         if self.is_active {
-            self.session.close()
+            self.session.end_session()
             self.is_active = false
         }
     }

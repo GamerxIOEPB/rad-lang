@@ -550,6 +550,6 @@ fn main() -> i32 {
     game.destroy()
     con.close_console()
     kbd.close_reader()
-    term.close()
+    term.end_session()
     0
 }

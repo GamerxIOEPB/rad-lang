@@ -909,8 +909,11 @@ fn cmd_info(pkg_name: str) -> i32 {
     while i < lines.len {
         let line = lines.ptr[i].as_ptr() as str
         let f_name = extract_json_field(line, "name")
-        if f_name.len() > 0usize && cur_name.len() == 0usize {
+        if f_name.len() > 0usize {
             cur_name = f_name
+            cur_desc = String.new()
+            cur_ver = String.new()
+            cur_lic = String.new()
         }
         let f_desc = extract_json_field(line, "description")
         if f_desc.len() > 0usize && cur_desc.len() == 0usize {
@@ -961,11 +964,6 @@ fn cmd_info(pkg_name: str) -> i32 {
                 println(add_hint.as_ptr() as str)
                 return 0
             }
-        } else if cur_name.len() > 0usize && !str_eq(cur_name.as_ptr() as str, pkg_name) && cur_ver.len() > 0usize {
-            cur_name = String.new()
-            cur_desc = String.new()
-            cur_ver = String.new()
-            cur_lic = String.new()
         }
         i = i + 1usize
     }
@@ -1846,12 +1844,6 @@ fn cmd_run(is_release: bool, target_triple: str, run_args: str, argv0: str) -> i
     return system(run_cmd.as_ptr() as str)
 }
 
-fn cmd_test() -> i32 {
-    println("Running Rad test runner...")
-    println("test result: ok. 0 failed.")
-    return 0
-}
-
 fn cmd_check(argv0: str) -> i32 {
     println("Checking Rad package syntax and types...")
     let toml = read_file_str("rad.toml")
@@ -2420,6 +2412,62 @@ fn cmd_fmt(argc: i32, argv: *raw *raw u8) -> i32 {
     return any_diff
 }
 
+fn cmd_arcade(argc: i32, argv: *raw *raw u8) -> i32 {
+    if argc > 2 {
+        let game = argv[2] as str
+        var p1 = String.from_str("bin/arcade/")
+        p1.push_str(game)
+        if access(p1.as_ptr() as str, 0) == 0 {
+            return system(p1.as_ptr() as str)
+        }
+
+        let env_home = getenv("HOME")
+        if (env_home as usize) != 0usize {
+            var p2 = String.new()
+            p2.push_str(env_home as str)
+            p2.push_str("/.rad/bin/arcade/")
+            p2.push_str(game)
+            if access(p2.as_ptr() as str, 0) == 0 {
+                return system(p2.as_ptr() as str)
+            }
+        }
+
+        var p3 = String.from_str("/home/abhinav/Projects/rad/bin/arcade/")
+        p3.push_str(game)
+        if access(p3.as_ptr() as str, 0) == 0 {
+            return system(p3.as_ptr() as str)
+        }
+    }
+
+    // Launch Arcade Hub
+    if access("bin/arcade/arcade", 0) == 0 {
+        return system("bin/arcade/arcade")
+    }
+
+    let env_home = getenv("HOME")
+    if (env_home as usize) != 0usize {
+        var hp = String.new()
+        hp.push_str(env_home as str)
+        hp.push_str("/.rad/bin/arcade/arcade")
+        if access(hp.as_ptr() as str, 0) == 0 {
+            return system(hp.as_ptr() as str)
+        }
+        var hp2 = String.new()
+        hp2.push_str(env_home as str)
+        hp2.push_str("/.rad/bin/rad-arcade")
+        if access(hp2.as_ptr() as str, 0) == 0 {
+            return system(hp2.as_ptr() as str)
+        }
+    }
+
+    if access("/home/abhinav/Projects/rad/bin/arcade/arcade", 0) == 0 {
+        return system("/home/abhinav/Projects/rad/bin/arcade/arcade")
+    }
+
+    println("error: Rad Arcade hub binary not found. Run 'make arcade' in Rad repository.")
+    return 1
+}
+
 // ------------------------------------------------------------------------------
 // Main CLI Driver
 // ------------------------------------------------------------------------------
@@ -2436,7 +2484,6 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  init             Initialize a new Rad package in the current directory")
         println("  build            Compile the current package")
         println("  run              Build and execute the current package")
-        println("  test             Run tests for the package")
         println("  check            Analyze package for errors without compiling")
         println("  clean            Remove target build directory")
         println("")
@@ -2454,6 +2501,9 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  lsp              Run Language Server Protocol server over stdio")
         println("  doctor           Inspect and verify bundled toolchain and target sysroot")
         println("  toolchain        Manage Rad toolchain versions and updates")
+        println("")
+        println("Entertainment & Showcase:")
+        println("  arcade [game]    Launch the interactive retro Rad Arcade Hub (9 built-in games)")
         return 0
     }
 
@@ -2462,8 +2512,32 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     if str_eq(cmd, "--help") || str_eq(cmd, "-h") || str_eq(cmd, "help") {
         println("Rad Package Manager (rad) v0.2.4")
         println("Usage: rad <command> [options]")
-        println("Commands: new, init, build, run, test, check, add, remove, update, package,")
-        println("          cache, publish, fmt, lsp, clean, doctor, toolchain")
+        println("")
+        println("Project Commands:")
+        println("  new <name>       Create a new Rad package: `rad new <name> [--lib]`")
+        println("  init             Initialize a new Rad package in the current directory")
+        println("  build            Compile the current package")
+        println("  run              Build and execute the current package")
+        println("  check            Analyze package for errors without compiling")
+        println("  clean            Remove target build directory")
+        println("")
+        println("Dependency Commands:")
+        println("  add <pkg>        Add a library dependency to rad.toml and install it")
+        println("  remove <pkg>     Remove a dependency from rad.toml")
+        println("  update [pkg]     Update library dependencies to latest compatible versions")
+        println("  package <cmd>    Manage packages and registry: `rad package <cmd>`")
+        println("                   Subcommands: install, search, info, list, tree, outdated")
+        println("  cache [cmd]      Manage package download cache: `rad cache [list|clean]`")
+        println("  publish          Validate and publish package to the registry")
+        println("")
+        println("Tooling & Diagnostics:")
+        println("  fmt              Format Rad source files in-place or check formatting")
+        println("  lsp              Run Language Server Protocol server over stdio")
+        println("  doctor           Inspect and verify bundled toolchain and target sysroot")
+        println("  toolchain        Manage Rad toolchain versions and updates")
+        println("")
+        println("Entertainment & Showcase:")
+        println("  arcade [game]    Launch the interactive retro Rad Arcade Hub (9 built-in games)")
         return 0
     }
 
@@ -2544,10 +2618,6 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
             i = i + 1
         }
         return cmd_run(is_release, target_triple, run_args, argv0)
-    }
-
-    if str_eq(cmd, "test") {
-        return cmd_test()
     }
 
     if str_eq(cmd, "check") {
@@ -2641,6 +2711,10 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
 
     if str_eq(cmd, "toolchain") {
         return cmd_toolchain(argc, argv, argv0)
+    }
+
+    if str_eq(cmd, "arcade") {
+        return cmd_arcade(argc, argv)
     }
 
     println("error: unrecognized command. Run `rad --help` for usage.")

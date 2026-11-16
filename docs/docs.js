@@ -41,7 +41,8 @@ const DOCS_NAV = [
         group: "Ecosystem & Tooling",
         items: [
             { id: "14_standard_library.md", title: "Standard Library (core/alloc/std)", num: "14" },
-            { id: "15_editor_support.md", title: "VS Code & Tree-Sitter", num: "15" }
+            { id: "15_editor_support.md", title: "VS Code & Tree-Sitter", num: "15" },
+            { id: "16_package_management.md", title: "Package Registry & rad-lib", num: "16" }
         ]
     }
 ];

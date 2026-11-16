@@ -20,14 +20,15 @@
             <a href="#" class="brand">
                 <span class="brand-logo">⚡</span>
                 <span class="brand-name">Rad</span>
-                <span class="brand-badge">v0.2.3</span>
+                <span class="brand-badge">v0.2.4</span>
             </a>
             <nav class="nav-links">
                 <a href="#features">Features</a>
+                <a href="#code">Examples</a>
+                <a href="#arcade">Arcade</a>
                 <a href="docs.html" style="color:var(--accent); font-weight:600;">Documentation</a>
                 <a href="releases.html">Releases</a>
                 <a href="#install">Install</a>
-                <a href="#code">Examples</a>
                 <a href="https://github.com/GamerxIOEPB/rad-lang" target="_blank" rel="noopener" class="github-link">
                     <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor">
                         <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
@@ -203,6 +204,160 @@
     <span class="function">println</span>(<span class="string">"Process finished successfully."</span>)
     <span class="keyword">return</span> <span class="number">0</span>
 }</code></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Rad Arcade Showcase -->
+    <section class="arcade-section" id="arcade">
+        <div class="container">
+            <div class="section-header">
+                <div class="badge-tag" style="background: rgba(255, 193, 7, 0.15); color: #ffd166; border: 1px solid rgba(255, 209, 102, 0.3); padding: 4px 14px; border-radius: 999px; display: inline-block; font-size: 0.85rem; font-weight: 600; margin-bottom: 12px; letter-spacing: 0.05em;">🕹️ 100% PURE RAD RETRO GAMING</div>
+                <h2>Rad Arcade Showcase</h2>
+                <p>9 complete retro games written purely in Rad with zero external C libraries, demonstrating the power of native double-buffered console rendering, non-blocking keyboard input, and high-performance physics.</p>
+            </div>
+
+            <!-- Arcade Hub Launch Command Box -->
+            <div class="arcade-command-card">
+                <div class="arcade-command-header">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                    <span class="arcade-terminal-title">Unified Hub Launcher</span>
+                </div>
+                <div class="arcade-command-body">
+                    <span class="prompt">$</span> <span class="cmd-text">rad arcade</span>
+                    <span class="arcade-command-hint"># Launches the full-screen interactive retro game selector</span>
+                </div>
+            </div>
+
+            <!-- Games Grid -->
+            <div class="arcade-grid">
+                <div class="arcade-card">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">🧱</span>
+                        <div>
+                            <h3>Tetris</h3>
+                            <span class="arcade-genre">PUZZLE</span>
+                        </div>
+                    </div>
+                    <p>SRS-style wall kicks, ghost piece drop projection, line clearing combo multiplier, and progressive fall speeds.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade tetris</code>
+                    </div>
+                </div>
+
+                <div class="arcade-card">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">⚔️</span>
+                        <div>
+                            <h3>Dungeon Crawler</h3>
+                            <span class="arcade-genre">ROGUE-LIKE</span>
+                        </div>
+                    </div>
+                    <p>Procedural BSP dungeon generation, fog of war, turn-based monster combat, potion inventory, and boss room encounters.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade dungeon</code>
+                    </div>
+                </div>
+
+                <div class="arcade-card">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">👾</span>
+                        <div>
+                            <h3>Space Invaders</h3>
+                            <span class="arcade-genre">ARCADE SHOOTER</span>
+                        </div>
+                    </div>
+                    <p>Alien formation waves, destructible shield bunkers with pixel erosion, plasma bombs, and mystery mothership bonus runs.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade invaders</code>
+                    </div>
+                </div>
+
+                <div class="arcade-card featured-arcade">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">🕶️</span>
+                        <div>
+                            <h3>Raycaster 3D</h3>
+                            <span class="arcade-genre highlight">3D FIRST-PERSON</span>
+                        </div>
+                    </div>
+                    <p>Wolfenstein 3D DDA pseudo-3D engine running at a smooth 60 FPS in terminal text! Sub-cell camera physics, depth shading, and live radar minimap.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade raycaster</code>
+                    </div>
+                </div>
+
+                <div class="arcade-card">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">🐍</span>
+                        <div>
+                            <h3>Snake</h3>
+                            <span class="arcade-genre">ARCADE CLASSIC</span>
+                        </div>
+                    </div>
+                    <p>Sub-millisecond latency terminal snake with collision buffers, score tracking, dynamic speed curves, and high score persistence.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade snake</code>
+                    </div>
+                </div>
+
+                <div class="arcade-card">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">🏓</span>
+                        <div>
+                            <h3>Pong</h3>
+                            <span class="arcade-genre">PHYSICS / AI</span>
+                        </div>
+                    </div>
+                    <p>True angle deflection physics based on paddle point-of-impact, escalating rally speeds, and a reactive single-player CPU bot.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade pong</code>
+                    </div>
+                </div>
+
+                <div class="arcade-card">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">🏏</span>
+                        <div>
+                            <h3>Breakout</h3>
+                            <span class="arcade-genre">ARCADE ACTION</span>
+                        </div>
+                    </div>
+                    <p>Multi-hit colored brick walls, paddle angle deflection, ball speed scaling, and high-energy ceiling demolition mechanics.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade breakout</code>
+                    </div>
+                </div>
+
+                <div class="arcade-card">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">🔢</span>
+                        <div>
+                            <h3>2048</h3>
+                            <span class="arcade-genre">PUZZLE / MATH</span>
+                        </div>
+                    </div>
+                    <p>Mathematical tile sliding puzzle on a 4x4 matrix. Color-coded ANSI number tiers, double-merge prevention, and high-score saving.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade 2048</code>
+                    </div>
+                </div>
+
+                <div class="arcade-card featured-arcade">
+                    <div class="arcade-card-header">
+                        <span class="arcade-icon">♟️</span>
+                        <div>
+                            <h3>RadChess</h3>
+                            <span class="arcade-genre highlight">STRATEGY & LAN</span>
+                        </div>
+                    </div>
+                    <p>Tournament-grade chess engine with alpha-beta minimax AI evaluation, castling, en passant, and real-time LAN socket discovery & multiplayer.</p>
+                    <div class="arcade-footer">
+                        <code>rad arcade radchess</code>
+                    </div>
                 </div>
             </div>
         </div>

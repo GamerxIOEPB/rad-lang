@@ -111,7 +111,9 @@ arcade: $(BIN_RADC)
 	$(BIN_RADC) tests/rad_arcade/breakout/main.rad -o bin/arcade/breakout
 	$(BIN_RADC) tests/rad_arcade/2048/main.rad -o bin/arcade/2048
 	$(BIN_RADC) tests/rad_arcade/radchess/src/main.rad -o bin/arcade/radchess
-	@echo "[✓] Rad Arcade games built in bin/arcade/"
+	$(BIN_RADC) tests/rad_arcade/launcher.rad -o bin/arcade/arcade
+	@cp -f bin/arcade/arcade bin/rad-arcade
+	@echo "[✓] Rad Arcade games & unified hub built in bin/arcade/"
 
 dist:
 	@bash scripts/build_distribution.sh
@@ -120,21 +122,28 @@ install: all
 	@echo "==> Installing Rad toolchain to $(PREFIX)..."
 	@mkdir -p $(PREFIX)/bin $(PREFIX)/lib/targets/$(TARGET_TRIPLE) $(PREFIX)/lib/rad $(PREFIX)/share/rad $(PREFIX)/packages
 	@find $(BIN_DIR) -maxdepth 1 -type f -exec cp -f {} $(PREFIX)/bin/ \;
+	@if [ -d "$(BIN_DIR)/arcade" ]; then \
+		mkdir -p $(PREFIX)/bin/arcade; \
+		cp -rf $(BIN_DIR)/arcade/* $(PREFIX)/bin/arcade/; \
+		cp -f $(BIN_DIR)/arcade/arcade $(PREFIX)/bin/rad-arcade; \
+	fi
 	cp -rf lib/rad/core lib/rad/alloc lib/rad/std $(PREFIX)/lib/rad/
 	cp -rf $(SYSROOT)/* $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/
 	@if [ -d "../rad-lib/packages" ]; then \
 		echo "==> Pre-installing Rad ecosystem libraries to $(PREFIX)/packages..."; \
-		if [ -d "../rad-lib/packages/rad-tui/0.1.0" ]; then \
-			rm -rf $(PREFIX)/packages/rad-tui; \
-			cp -rf ../rad-lib/packages/rad-tui/0.1.0 $(PREFIX)/packages/rad-tui; \
-			ln -sfn rad-tui $(PREFIX)/packages/tui; \
-		fi; \
-		if [ -d "../rad-lib/packages/rad-json/0.1.0" ]; then \
-			rm -rf $(PREFIX)/packages/rad-json; \
-			cp -rf ../rad-lib/packages/rad-json/0.1.0 $(PREFIX)/packages/rad-json; \
-			ln -sfn rad-json $(PREFIX)/packages/json; \
-		fi; \
-		echo "    [✓] rad-tui and rad-json available in $(PREFIX)/packages"; \
+		for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math; do \
+			if [ -d "../rad-lib/packages/$$pkg/0.1.0" ]; then \
+				rm -rf $(PREFIX)/packages/$$pkg; \
+				cp -rf ../rad-lib/packages/$$pkg/0.1.0 $(PREFIX)/packages/$$pkg; \
+			fi; \
+		done; \
+		ln -sfn rad-tui $(PREFIX)/packages/tui; \
+		ln -sfn rad-json $(PREFIX)/packages/json; \
+		ln -sfn rad-http $(PREFIX)/packages/http; \
+		ln -sfn rad-args $(PREFIX)/packages/args; \
+		ln -sfn rad-test $(PREFIX)/packages/test; \
+		ln -sfn rad-math $(PREFIX)/packages/math; \
+		echo "    [✓] Ecosystem libraries installed to $(PREFIX)/packages"; \
 	fi
 	@echo "[✓] Rad installed successfully to $(PREFIX)/bin"
 
