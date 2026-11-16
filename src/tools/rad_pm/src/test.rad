@@ -1,0 +1,811 @@
+// ==============================================================================
+// rad test — Native Test Runner for Rad
+// Discovers and runs unit tests, integration tests, and doc-tests.
+// Automatically bundles rad-test assertions without manual imports.
+// ==============================================================================
+
+fn write_test_core(out_path: str) -> bool {
+    var s = String.new()
+    s.push_str("extern \"C\" {\n")
+    s.push_str("    fn exit(status: i32);\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub struct TestSuite {\n")
+    s.push_str("    pub name: String,\n")
+    s.push_str("    pub passed: usize,\n")
+    s.push_str("    pub failed: usize,\n")
+    s.push_str("    pub total: usize,\n")
+    s.push_str("}\n\n")
+
+    s.push_str("impl TestSuite {\n")
+    s.push_str("    pub fn new(name: str) -> TestSuite {\n")
+    s.push_str("        TestSuite {\n")
+    s.push_str("            name: String.from_str(name),\n")
+    s.push_str("            passed: 0usize,\n")
+    s.push_str("            failed: 0usize,\n")
+    s.push_str("            total: 0usize,\n")
+    s.push_str("        }\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    pub fn check(var self, test_name: str, passed: bool, failure_detail: str) {\n")
+    s.push_str("        self.total = self.total + 1usize;\n")
+    s.push_str("        if passed {\n")
+    s.push_str("            self.passed = self.passed + 1usize;\n")
+    s.push_str("            print(\"\\x1b[32m  [PASS]\\x1b[0m \");\n")
+    s.push_str("            println(test_name);\n")
+    s.push_str("        } else {\n")
+    s.push_str("            self.failed = self.failed + 1usize;\n")
+    s.push_str("            print(\"\\x1b[31m  [FAIL]\\x1b[0m \");\n")
+    s.push_str("            print(test_name);\n")
+    s.push_str("            if rad_str_len(failure_detail) > 0usize {\n")
+    s.push_str("                print(\" — \\x1b[33m\");\n")
+    s.push_str("                print(failure_detail);\n")
+    s.push_str("                print(\"\\x1b[0m\");\n")
+    s.push_str("            }\n")
+    s.push_str("            println(\"\");\n")
+    s.push_str("        }\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    pub fn check_true(var self, test_name: str, cond: bool) {\n")
+    s.push_str("        self.check(test_name, cond, \"expected condition to be true\");\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    pub fn check_false(var self, test_name: str, cond: bool) {\n")
+    s.push_str("        self.check(test_name, !cond, \"expected condition to be false\");\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    pub fn check_eq_i64(var self, test_name: str, actual: i64, expected: i64) {\n")
+    s.push_str("        let ok = actual == expected;\n")
+    s.push_str("        if ok {\n")
+    s.push_str("            self.check(test_name, true, \"\");\n")
+    s.push_str("        } else {\n")
+    s.push_str("            print(\"\\x1b[31m  [FAIL]\\x1b[0m \");\n")
+    s.push_str("            print(test_name);\n")
+    s.push_str("            print(\" — expected \");\n")
+    s.push_str("            print_num(expected);\n")
+    s.push_str("            print(\", got \");\n")
+    s.push_str("            print_num(actual);\n")
+    s.push_str("            println(\"\");\n")
+    s.push_str("            self.total = self.total + 1usize;\n")
+    s.push_str("            self.failed = self.failed + 1usize;\n")
+    s.push_str("        }\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    pub fn check_eq_str(var self, test_name: str, actual: str, expected: str) {\n")
+    s.push_str("        let ok = rad_str_eq(actual, expected);\n")
+    s.push_str("        if ok {\n")
+    s.push_str("            self.check(test_name, true, \"\");\n")
+    s.push_str("        } else {\n")
+    s.push_str("            print(\"\\x1b[31m  [FAIL]\\x1b[0m \");\n")
+    s.push_str("            print(test_name);\n")
+    s.push_str("            print(\" — expected '\");\n")
+    s.push_str("            print(expected);\n")
+    s.push_str("            print(\"', got '\");\n")
+    s.push_str("            print(actual);\n")
+    s.push_str("            println(\"'\");\n")
+    s.push_str("            self.total = self.total + 1usize;\n")
+    s.push_str("            self.failed = self.failed + 1usize;\n")
+    s.push_str("        }\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    pub fn check_ne_i64(var self, test_name: str, actual: i64, unexpected: i64) {\n")
+    s.push_str("        let ok = actual != unexpected;\n")
+    s.push_str("        self.check(test_name, ok, \"values were unexpectedly equal\");\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    pub fn check_ne_str(var self, test_name: str, actual: str, unexpected: str) {\n")
+    s.push_str("        let ok = !rad_str_eq(actual, unexpected);\n")
+    s.push_str("        self.check(test_name, ok, \"strings were unexpectedly equal\");\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    pub fn print_summary(self) -> i32 {\n")
+    s.push_str("        println(\"\");\n")
+    s.push_str("        print(\"=== Test Suite: \");\n")
+    s.push_str("        print(self.name.as_ptr() as str);\n")
+    s.push_str("        println(\" ===\");\n")
+    s.push_str("        print(\"Total:  \");\n")
+    s.push_str("        print_num(self.total as i64);\n")
+    s.push_str("        print(\" | Passed: \\x1b[32m\");\n")
+    s.push_str("        print_num(self.passed as i64);\n")
+    s.push_str("        print(\"\\x1b[0m | Failed: \");\n")
+    s.push_str("        if self.failed > 0usize {\n")
+    s.push_str("            print(\"\\x1b[31m\");\n")
+    s.push_str("            print_num(self.failed as i64);\n")
+    s.push_str("            print(\"\\x1b[0m\");\n")
+    s.push_str("        } else {\n")
+    s.push_str("            print(\"0\");\n")
+    s.push_str("        }\n")
+    s.push_str("        println(\"\");\n")
+    s.push_str("        if self.failed == 0usize {\n")
+    s.push_str("            println(\"\\x1b[32m[ALL TESTS PASSED]\\x1b[0m\");\n")
+    s.push_str("            return 0;\n")
+    s.push_str("        } else {\n")
+    s.push_str("            println(\"\\x1b[31m[SOME TESTS FAILED]\\x1b[0m\");\n")
+    s.push_str("            return 1;\n")
+    s.push_str("        }\n")
+    s.push_str("    }\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert(cond: bool) {\n")
+    s.push_str("    if !cond {\n")
+    s.push_str("        println(\"\\x1b[31massertion failed: condition was false\\x1b[0m\");\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert_eq(a: i64, b: i64) {\n")
+    s.push_str("    if a != b {\n")
+    s.push_str("        print(\"\\x1b[31massertion failed: \");\n")
+    s.push_str("        print_num(a);\n")
+    s.push_str("        print(\" != \");\n")
+    s.push_str("        print_num(b);\n")
+    s.push_str("        println(\"\\x1b[0m\");\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert_ne(a: i64, b: i64) {\n")
+    s.push_str("    if a == b {\n")
+    s.push_str("        print(\"\\x1b[31massertion failed: \");\n")
+    s.push_str("        print_num(a);\n")
+    s.push_str("        println(\" == unexpected value\\x1b[0m\");\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert_streq(a: str, b: str) {\n")
+    s.push_str("    if !rad_str_eq(a, b) {\n")
+    s.push_str("        print(\"\\x1b[31massertion failed: '\");\n")
+    s.push_str("        print(a);\n")
+    s.push_str("        print(\"' != '\");\n")
+    s.push_str("        print(b);\n")
+    s.push_str("        println(\"'\\x1b[0m\");\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert_strne(a: str, b: str) {\n")
+    s.push_str("    if rad_str_eq(a, b) {\n")
+    s.push_str("        print(\"\\x1b[31massertion failed: '\");\n")
+    s.push_str("        print(a);\n")
+    s.push_str("        print(\"' == '\");\n")
+    s.push_str("        print(b);\n")
+    s.push_str("        println(\"'\\x1b[0m\");\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert_true(cond: bool, msg: str) -> bool {\n")
+    s.push_str("    if !cond {\n")
+    s.push_str("        print(\"\\x1b[31mAssertion failed: \\x1b[0m\");\n")
+    s.push_str("        println(msg);\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("    return true;\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert_false(cond: bool, msg: str) -> bool {\n")
+    s.push_str("    if cond {\n")
+    s.push_str("        print(\"\\x1b[31mAssertion failed (expected false): \\x1b[0m\");\n")
+    s.push_str("        println(msg);\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("    return true;\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert_eq_i64(a: i64, b: i64, msg: str) -> bool {\n")
+    s.push_str("    if a != b {\n")
+    s.push_str("        print(\"\\x1b[31mAssertion failed (\");\n")
+    s.push_str("        print_num(a);\n")
+    s.push_str("        print(\" != \");\n")
+    s.push_str("        print_num(b);\n")
+    s.push_str("        print(\"): \\x1b[0m\");\n")
+    s.push_str("        println(msg);\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("    return true;\n")
+    s.push_str("}\n\n")
+
+    s.push_str("pub fn assert_eq_str(a: str, b: str, msg: str) -> bool {\n")
+    s.push_str("    if !rad_str_eq(a, b) {\n")
+    s.push_str("        print(\"\\x1b[31mAssertion failed ('\");\n")
+    s.push_str("        print(a);\n")
+    s.push_str("        print(\"' != '\");\n")
+    s.push_str("        print(b);\n")
+    s.push_str("        print(\"'): \\x1b[0m\");\n")
+    s.push_str("        println(msg);\n")
+    s.push_str("        exit(101);\n")
+    s.push_str("    }\n")
+    s.push_str("    return true;\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_str_len(s: str) -> usize {\n")
+    s.push_str("    if (s as usize) == 0usize { return 0usize; }\n")
+    s.push_str("    let p = s as *raw u8;\n")
+    s.push_str("    var i = 0usize;\n")
+    s.push_str("    while p[i] != 0u8 { i = i + 1usize; }\n")
+    s.push_str("    return i;\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_str_eq(a: str, b: str) -> bool {\n")
+    s.push_str("    if (a as usize) == 0usize || (b as usize) == 0usize {\n")
+    s.push_str("        return (a as usize) == (b as usize);\n")
+    s.push_str("    }\n")
+    s.push_str("    let pa = a as *raw u8;\n")
+    s.push_str("    let pb = b as *raw u8;\n")
+    s.push_str("    var i = 0usize;\n")
+    s.push_str("    while pa[i] != 0u8 && pb[i] != 0u8 {\n")
+    s.push_str("        if pa[i] != pb[i] { return false; }\n")
+    s.push_str("        i = i + 1usize;\n")
+    s.push_str("    }\n")
+    s.push_str("    return pa[i] == pb[i];\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn print_num(n: i64) {\n")
+    s.push_str("    let s = rad_int_to_str(n);\n")
+    s.push_str("    print(s.as_ptr() as str);\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_int_to_str(val: i64) -> String {\n")
+    s.push_str("    if val == 0i64 {\n")
+    s.push_str("        return String.from_str(\"0\");\n")
+    s.push_str("    }\n")
+    s.push_str("    var v = val;\n")
+    s.push_str("    var is_neg = false;\n")
+    s.push_str("    if v < 0i64 {\n")
+    s.push_str("        is_neg = true;\n")
+    s.push_str("        v = -v;\n")
+    s.push_str("    }\n")
+    s.push_str("    var rev = String.new();\n")
+    s.push_str("    while v > 0i64 {\n")
+    s.push_str("        let digit = (v % 10i64) as u8;\n")
+    s.push_str("        rev.push_byte(48u8 + digit);\n")
+    s.push_str("        v = v / 10i64;\n")
+    s.push_str("    }\n")
+    s.push_str("    if is_neg {\n")
+    s.push_str("        rev.push_byte(45u8);\n")
+    s.push_str("    }\n")
+    s.push_str("    var res = String.new();\n")
+    s.push_str("    var len = rev.len();\n")
+    s.push_str("    let p = rev.as_ptr();\n")
+    s.push_str("    while len > 0usize {\n")
+    s.push_str("        len = len - 1usize;\n")
+    s.push_str("        res.push_byte(p[len]);\n")
+    s.push_str("    }\n")
+    s.push_str("    return res;\n")
+    s.push_str("}\n")
+
+    return write_file_str(out_path, s.as_ptr() as str)
+}
+
+fn extract_fn_name_from_line(line: str) -> String {
+    let p = line as *raw u8
+    let len = str_len(line)
+    var i = 0usize
+    // Find "fn "
+    while i + 3usize <= len {
+        if p[i] == 102u8 && p[i + 1usize] == 110u8 && p[i + 2usize] == 32u8 {
+            i = i + 3usize
+            break
+        }
+        i = i + 1usize
+    }
+    // Skip spaces
+    while i < len && p[i] == 32u8 {
+        i = i + 1usize
+    }
+    // Read identifier
+    var name = String.new()
+    while i < len {
+        let c = p[i]
+        if (c >= 97u8 && c <= 122u8) || (c >= 65u8 && c <= 90u8) || (c >= 48u8 && c <= 57u8) || c == 95u8 {
+            name.push_byte(c)
+        } else {
+            break
+        }
+        i = i + 1usize
+    }
+    return name
+}
+
+fn extract_mod_name_from_line(line: str) -> String {
+    let p = line as *raw u8
+    let len = str_len(line)
+    var i = 0usize
+    // Find "mod "
+    while i + 4usize <= len {
+        if p[i] == 109u8 && p[i + 1usize] == 111u8 && p[i + 2usize] == 100u8 && p[i + 3usize] == 32u8 {
+            i = i + 4usize
+            break
+        }
+        i = i + 1usize
+    }
+    // Skip spaces
+    while i < len && p[i] == 32u8 {
+        i = i + 1usize
+    }
+    // Read module identifier
+    var name = String.new()
+    while i < len {
+        let c = p[i]
+        if (c >= 97u8 && c <= 122u8) || (c >= 65u8 && c <= 90u8) || (c >= 48u8 && c <= 57u8) || c == 95u8 {
+            name.push_byte(c)
+        } else {
+            break
+        }
+        i = i + 1usize
+    }
+    return name
+}
+
+fn parse_unit_tests_in_file(fpath: str, var symbols: Vec<String>, var displays: Vec<String>) {
+    let content = read_file_str(fpath)
+    if content.len() == 0usize {
+        return
+    }
+    let lines = split_source_lines(content)
+    var cur_mod = String.new()
+    var mod_depth = 0
+    var next_is_test = false
+
+    var li = 0usize
+    while li < lines.len {
+        let line = lines.ptr[li].as_ptr() as str
+        if str_contains(line, "mod ") && str_contains(line, "{") {
+            cur_mod = extract_mod_name_from_line(line)
+            mod_depth = 1
+        } else if mod_depth > 0 {
+            let p = line as *raw u8
+            let llen = str_len(line)
+            var idx = 0usize
+            while idx < llen {
+                if p[idx] == 123u8 { // '{'
+                    mod_depth = mod_depth + 1
+                } else if p[idx] == 125u8 { // '}'
+                    mod_depth = mod_depth - 1
+                    if mod_depth == 0 {
+                        cur_mod = String.new()
+                    }
+                }
+                idx = idx + 1usize
+            }
+        }
+
+        if str_contains(line, "#[test]") {
+            next_is_test = true
+        } else if next_is_test {
+            if str_contains(line, "fn ") {
+                let fname = extract_fn_name_from_line(line)
+                if fname.len() > 0usize {
+                    var sym = String.new()
+                    var disp = String.new()
+                    if cur_mod.len() > 0usize {
+                        sym.push_str(cur_mod.as_ptr() as str)
+                        sym.push_str("__")
+                        sym.push_str(fname.as_ptr() as str)
+
+                        disp.push_str(cur_mod.as_ptr() as str)
+                        disp.push_str("::")
+                        disp.push_str(fname.as_ptr() as str)
+                    } else {
+                        sym.push_str(fname.as_ptr() as str)
+                        disp.push_str(fname.as_ptr() as str)
+                    }
+                    symbols.push(sym)
+                    displays.push(disp)
+                }
+                next_is_test = false
+            } else if !str_contains(line, "//") && str_len(line) > 0usize {
+                // Non-comment, non-empty line without 'fn' cancels test tag
+                next_is_test = false
+            }
+        }
+        li = li + 1usize
+    }
+}
+
+fn test_int_to_str(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0")
+    }
+    var v = val
+    var is_neg = false
+    if v < 0i64 {
+        is_neg = true
+        v = -v
+    }
+    var rev = String.new()
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8
+        rev.push_byte(48u8 + digit)
+        v = v / 10i64
+    }
+    if is_neg {
+        rev.push_byte(45u8)
+    }
+    var res = String.new()
+    var len = rev.len()
+    let p = rev.as_ptr()
+    while len > 0usize {
+        len = len - 1usize
+        res.push_byte(p[len])
+    }
+    return res
+}
+
+fn test_print_num(n: i64) {
+    let s = test_int_to_str(n)
+    print(s.as_ptr() as str)
+}
+
+fn write_unit_runner(out_path: str, symbols: Vec<String>, displays: Vec<String>) -> bool {
+    var s = String.new()
+    s.push_str("extern \"C\" {\n")
+    s.push_str("    fn fork() -> i32;\n")
+    s.push_str("    fn waitpid(pid: i32, status: *raw var i32, options: i32) -> i32;\n")
+    s.push_str("    fn exit(code: i32);\n")
+    s.push_str("    fn malloc(size: usize) -> *raw var i32;\n")
+    s.push_str("    fn free(p: *raw var i32);\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_test_run_one(name: str, id: i32) -> bool {\n")
+    s.push_str("    print(\"test \");\n")
+    s.push_str("    print(name);\n")
+    s.push_str("    print(\" ... \");\n\n")
+    s.push_str("    let pid = fork();\n")
+    s.push_str("    if pid == 0 {\n")
+
+    var i = 0usize
+    while i < symbols.len {
+        s.push_str("        if id == ")
+        s.push_str(test_int_to_str(i as i64).as_ptr() as str)
+        s.push_str(" { ")
+        s.push_str(symbols.ptr[i].as_ptr() as str)
+        s.push_str("(); }\n")
+        i = i + 1usize
+    }
+
+    s.push_str("        exit(0);\n")
+    s.push_str("    }\n\n")
+    s.push_str("    let p_status = malloc(4usize);\n")
+    s.push_str("    p_status[0] = 0;\n")
+    s.push_str("    waitpid(pid, p_status, 0);\n")
+    s.push_str("    let status = p_status[0];\n")
+    s.push_str("    free(p_status);\n\n")
+    s.push_str("    let exit_code = (status >> 8) & 255;\n")
+    s.push_str("    if exit_code == 0 && (status & 127) == 0 {\n")
+    s.push_str("        println(\"\\x1b[32mok\\x1b[0m\");\n")
+    s.push_str("        return true;\n")
+    s.push_str("    } else {\n")
+    s.push_str("        println(\"\\x1b[31mFAILED\\x1b[0m\");\n")
+    s.push_str("        return false;\n")
+    s.push_str("    }\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_test_main() -> i32 {\n")
+    s.push_str("    println(\"\");\n")
+    s.push_str("    print(\"running \");\n")
+    s.push_str("    print_num(")
+    s.push_str(test_int_to_str(symbols.len as i64).as_ptr() as str)
+    s.push_str("i64);\n")
+    s.push_str("    println(\" tests\");\n")
+    s.push_str("    var passed = 0;\n")
+    s.push_str("    var failed = 0;\n")
+
+    i = 0usize
+    while i < symbols.len {
+        s.push_str("    if rad_test_run_one(\"")
+        s.push_str(displays.ptr[i].as_ptr() as str)
+        s.push_str("\", ")
+        s.push_str(test_int_to_str(i as i64).as_ptr() as str)
+        s.push_str(") { passed = passed + 1; } else { failed = failed + 1; }\n")
+        i = i + 1usize
+    }
+
+    s.push_str("    println(\"\");\n")
+    s.push_str("    if failed == 0 {\n")
+    s.push_str("        print(\"test result: \\x1b[32mok\\x1b[0m. \");\n")
+    s.push_str("        print_num(passed as i64);\n")
+    s.push_str("        println(\" passed; 0 failed\");\n")
+    s.push_str("        return 0;\n")
+    s.push_str("    } else {\n")
+    s.push_str("        print(\"test result: \\x1b[31mFAILED\\x1b[0m. \");\n")
+    s.push_str("        print_num(failed as i64);\n")
+    s.push_str("        print(\" failed; \");\n")
+    s.push_str("        print_num(passed as i64);\n")
+    s.push_str("        println(\" passed\");\n")
+    s.push_str("        return 1;\n")
+    s.push_str("    }\n")
+    s.push_str("}\n")
+
+    return write_file_str(out_path, s.as_ptr() as str)
+}
+
+pub fn cmd_test(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
+    let has_toml = file_exists("rad.toml")
+    let has_src = file_exists("src")
+    if !has_toml && !has_src {
+        println("error: could not find 'rad.toml' or 'src/' in current directory.")
+        return 1
+    }
+
+    var filter_str = ""
+    var i = 2
+    while i < argc {
+        let arg = argv[i] as str
+        if !str_starts_with(arg, "-") {
+            filter_str = arg
+        }
+        i = i + 1
+    }
+
+    let _d = system("mkdir -p target target/doctests")
+    let core_path = "target/.rad_test_core.rad"
+    write_test_core(core_path)
+
+    let radc_bin = find_radc_compiler(argv0)
+    if !is_executable_radc(radc_bin.as_ptr() as str) {
+        println("error: radc compiler not found or not executable.")
+        return 1
+    }
+
+    var total_suites_passed = 0
+    var total_suites_failed = 0
+
+    // =========================================================================
+    // 1. UNIT TESTS in src/
+    // =========================================================================
+    var unit_symbols = Vec.new()
+    var unit_displays = Vec.new()
+
+    if file_exists("src") {
+        let _f = system("find src -type f -name '*.rad' > /tmp/rad_src_test_list.txt 2>/dev/null")
+        let src_flist = read_file_str("/tmp/rad_src_test_list.txt")
+        let _rm = remove("/tmp/rad_src_test_list.txt")
+        let src_lines = split_source_lines(src_flist)
+
+        var fi = 0usize
+        while fi < src_lines.len {
+            let fpath = src_lines.ptr[fi].as_ptr() as str
+            if str_len(fpath) > 0usize {
+                parse_unit_tests_in_file(fpath, unit_symbols, unit_displays)
+            }
+            fi = fi + 1usize
+        }
+    }
+
+    // Apply test name filter if provided
+    var filtered_symbols = Vec.new()
+    var filtered_displays = Vec.new()
+    if str_len(filter_str) > 0usize {
+        var ui = 0usize
+        while ui < unit_displays.len {
+            if str_contains(unit_displays.ptr[ui].as_ptr() as str, filter_str) {
+                filtered_symbols.push(unit_symbols.ptr[ui])
+                filtered_displays.push(unit_displays.ptr[ui])
+            }
+            ui = ui + 1usize
+        }
+    } else {
+        filtered_symbols = unit_symbols
+        filtered_displays = unit_displays
+    }
+
+    if filtered_symbols.len > 0usize {
+        println("   Compiling unit tests...")
+        let unit_runner_path = "target/.rad_unit_runner.rad"
+        write_unit_runner(unit_runner_path, filtered_symbols, filtered_displays)
+
+        // Build list of all src/*.rad files
+        var compile_cmd = String.new()
+        compile_cmd.push_str(radc_bin.as_ptr() as str)
+        compile_cmd.push_str(" src/*.rad target/.rad_test_core.rad target/.rad_unit_runner.rad --test -o target/unit_tests_bin")
+
+        let build_status = system(compile_cmd.as_ptr() as str)
+        if build_status != 0 {
+            println("\x1b[31merror: failed to compile unit tests\x1b[0m")
+            total_suites_failed = total_suites_failed + 1
+        } else {
+            let run_status = system("target/unit_tests_bin")
+            if run_status == 0 {
+                total_suites_passed = total_suites_passed + 1
+            } else {
+                total_suites_failed = total_suites_failed + 1
+            }
+        }
+    }
+
+    // =========================================================================
+    // 2. INTEGRATION TESTS in tests/
+    // =========================================================================
+    if file_exists("tests") {
+        let _tf = system("find tests -maxdepth 2 -type f -name '*.rad' > /tmp/rad_integ_test_list.txt 2>/dev/null")
+        let integ_flist = read_file_str("/tmp/rad_integ_test_list.txt")
+        let _rm2 = remove("/tmp/rad_integ_test_list.txt")
+        let integ_lines = split_source_lines(integ_flist)
+
+        var ti = 0usize
+        while ti < integ_lines.len {
+            let tpath = integ_lines.ptr[ti].as_ptr() as str
+            if str_len(tpath) > 0usize && !str_contains(tpath, "rad_arcade") && !str_contains(tpath, "radtest") && !str_contains(tpath, "docker") && !str_contains(tpath, "launcher") {
+                if str_len(filter_str) == 0usize || str_contains(tpath, filter_str) {
+                    var out_bin = String.new()
+                    out_bin.push_str("target/integ_")
+                    out_bin.push_str(test_int_to_str(ti as i64).as_ptr() as str)
+
+                    var comp_integ = String.new()
+                    comp_integ.push_str(radc_bin.as_ptr() as str)
+                    comp_integ.push_str(" ")
+                    comp_integ.push_str(tpath)
+                    comp_integ.push_str(" target/.rad_test_core.rad")
+
+                    // Include library files if src/lib.rad exists
+                    if file_exists("src/lib.rad") {
+                        comp_integ.push_str(" src/lib.rad")
+                    }
+
+                    comp_integ.push_str(" -o ")
+                    comp_integ.push_str(out_bin.as_ptr() as str)
+
+                    let c_st = system(comp_integ.as_ptr() as str)
+                    if c_st != 0 {
+                        print("test ");
+                        print(tpath);
+                        println(" ... \x1b[31m[COMPILE FAILED]\x1b[0m");
+                        total_suites_failed = total_suites_failed + 1
+                    } else {
+                        print("Running ");
+                        println(tpath);
+                        let r_st = system(out_bin.as_ptr() as str)
+                        if r_st == 0 {
+                            total_suites_passed = total_suites_passed + 1
+                        } else {
+                            total_suites_failed = total_suites_failed + 1
+                        }
+                    }
+                }
+            }
+            ti = ti + 1usize
+        }
+    }
+
+    // =========================================================================
+    // 3. DOCUMENTATION TESTS in doc comments (///)
+    // =========================================================================
+    if file_exists("src") {
+        let _df = system("find src -type f -name '*.rad' > /tmp/rad_doc_test_list.txt 2>/dev/null")
+        let doc_flist = read_file_str("/tmp/rad_doc_test_list.txt")
+        let _rm3 = remove("/tmp/rad_doc_test_list.txt")
+        let doc_files = split_source_lines(doc_flist)
+
+        var doctest_count = 0
+        var doctest_passed = 0
+        var doctest_failed = 0
+
+        var dfi = 0usize
+        while dfi < doc_files.len {
+            let dfpath = doc_files.ptr[dfi].as_ptr() as str
+            if str_len(dfpath) > 0usize {
+                let doc_content = read_file_str(dfpath)
+                let doc_lines = split_source_lines(doc_content)
+
+                var in_code_block = false
+                var code_snippet = String.new()
+                var start_line = 0usize
+
+                var dli = 0usize
+                while dli < doc_lines.len {
+                    let dline = doc_lines.ptr[dli].as_ptr() as str
+                    if str_contains(dline, "/// ```") || str_contains(dline, "///```") {
+                        if !in_code_block {
+                            in_code_block = true
+                            start_line = dli + 1usize
+                            code_snippet = String.new()
+                        } else {
+                            in_code_block = false
+                            if code_snippet.len() > 0usize {
+                                doctest_count = doctest_count + 1
+
+                                var dt_file = String.new()
+                                dt_file.push_str("target/doctests/dt_")
+                                dt_file.push_str(test_int_to_str(doctest_count as i64).as_ptr() as str)
+                                dt_file.push_str(".rad")
+
+                                var dt_src = String.new()
+                                if !str_contains(code_snippet.as_ptr() as str, "fn main") {
+                                    dt_src.push_str("fn main() -> i32 {\n")
+                                    dt_src.push_str(code_snippet.as_ptr() as str)
+                                    dt_src.push_str("\n    return 0;\n}\n")
+                                } else {
+                                    dt_src.push_str(code_snippet.as_ptr() as str)
+                                }
+                                write_file_str(dt_file.as_ptr() as str, dt_src.as_ptr() as str)
+
+                                var dt_bin = String.new()
+                                dt_bin.push_str("target/doctests/bin_")
+                                dt_bin.push_str(test_int_to_str(doctest_count as i64).as_ptr() as str)
+
+                                var dt_cmd = String.new()
+                                dt_cmd.push_str(radc_bin.as_ptr() as str)
+                                dt_cmd.push_str(" ")
+                                dt_cmd.push_str(dt_file.as_ptr() as str)
+                                dt_cmd.push_str(" target/.rad_test_core.rad")
+                                if file_exists("src/lib.rad") {
+                                    dt_cmd.push_str(" src/lib.rad")
+                                }
+                                dt_cmd.push_str(" -o ")
+                                dt_cmd.push_str(dt_bin.as_ptr() as str)
+
+                                print("   Doc-test ");
+                                print(dfpath);
+                                print(" (line ");
+                                test_print_num(start_line as i64);
+                                print(") ... ");
+
+                                let dc_st = system(dt_cmd.as_ptr() as str)
+                                if dc_st != 0 {
+                                    println("\x1b[31mFAILED (compilation error)\x1b[0m");
+                                    doctest_failed = doctest_failed + 1
+                                } else {
+                                    let dr_st = system(dt_bin.as_ptr() as str)
+                                    if dr_st == 0 {
+                                        println("\x1b[32mok\x1b[0m");
+                                        doctest_passed = doctest_passed + 1
+                                    } else {
+                                        println("\x1b[31mFAILED (runtime error)\x1b[0m");
+                                        doctest_failed = doctest_failed + 1
+                                    }
+                                }
+                            }
+                        }
+                    } else if in_code_block {
+                        // Extract line stripped of leading '/// ' or '///'
+                        let dp = dline as *raw u8
+                        let dlen = str_len(dline)
+                        var idx = 0usize
+                        // Skip leading whitespace
+                        while idx < dlen && dp[idx] == 32u8 { idx = idx + 1usize; }
+                        // Skip '///'
+                        if idx + 3usize <= dlen && dp[idx] == 47u8 && dp[idx + 1usize] == 47u8 && dp[idx + 2usize] == 47u8 {
+                            idx = idx + 3usize
+                            if idx < dlen && dp[idx] == 32u8 { idx = idx + 1usize; }
+                        }
+                        var sub = String.new()
+                        while idx < dlen {
+                            sub.push_byte(dp[idx])
+                            idx = idx + 1usize
+                        }
+                        code_snippet.push_str(sub.as_ptr() as str)
+                        code_snippet.push_str("\n")
+                    }
+                    dli = dli + 1usize
+                }
+            }
+            dfi = dfi + 1usize
+        }
+
+        if doctest_count > 0 {
+            if doctest_failed > 0 {
+                total_suites_failed = total_suites_failed + 1
+            } else {
+                total_suites_passed = total_suites_passed + 1
+            }
+        }
+    }
+
+    if total_suites_passed == 0 && total_suites_failed == 0 {
+        println("No tests found. Add functions marked #[test] to src/, or integration tests to tests/.")
+        return 0
+    }
+
+    println("")
+    if total_suites_failed == 0 {
+        println("\x1b[32m[✓] All test suites passed successfully.\x1b[0m")
+        return 0
+    } else {
+        print("\x1b[31m[x] Test execution failed: ");
+        test_print_num(total_suites_failed as i64);
+        println(" suite(s) failed.\x1b[0m");
+        return 1
+    }
+}

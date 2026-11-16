@@ -1,0 +1,88 @@
+// ==============================================================================
+// tests/test_functions.rad — Native Rad Integration Test Suite for Functions
+// Tests parameters, recursion, mutual recursion, and early return.
+// ==============================================================================
+
+fn factorial(n: i64) -> i64 {
+    if n <= 1 {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+fn fibonacci(n: i64) -> i64 {
+    if n <= 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+fn is_even(n: i64) -> bool {
+    if n == 0 {
+        return true;
+    }
+    return is_odd(n - 1);
+}
+
+fn is_odd(n: i64) -> bool {
+    if n == 0 {
+        return false;
+    }
+    return is_even(n - 1);
+}
+
+fn early_return_search(target: i64) -> i64 {
+    var i = 0;
+    while i < 1000 {
+        if i == target {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn ackermann(m: i64, n: i64) -> i64 {
+    if m == 0 {
+        return n + 1;
+    }
+    if m > 0 && n == 0 {
+        return ackermann(m - 1, 1);
+    }
+    return ackermann(m - 1, ackermann(m, n - 1));
+}
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Functions & Recursion");
+
+    // 1. Factorial
+    suite.check_eq_i64("Factorial 0", factorial(0), 1);
+    suite.check_eq_i64("Factorial 1", factorial(1), 1);
+    suite.check_eq_i64("Factorial 5", factorial(5), 120);
+    suite.check_eq_i64("Factorial 10", factorial(10), 3628800);
+
+    // 2. Fibonacci
+    suite.check_eq_i64("Fibonacci 0", fibonacci(0), 0);
+    suite.check_eq_i64("Fibonacci 1", fibonacci(1), 1);
+    suite.check_eq_i64("Fibonacci 7", fibonacci(7), 13);
+    suite.check_eq_i64("Fibonacci 10", fibonacci(10), 55);
+
+    // 3. Mutual Recursion
+    suite.check_true("is_even(10)", is_even(10));
+    suite.check_false("is_even(11)", is_even(11));
+    suite.check_true("is_odd(11)", is_odd(11));
+    suite.check_false("is_odd(10)", is_odd(10));
+
+    // 4. Early return
+    suite.check_eq_i64("Early return found", early_return_search(42), 42);
+    suite.check_eq_i64("Early return not found", early_return_search(5000), -1);
+
+    // 5. Ackermann function
+    suite.check_eq_i64("Ackermann(2, 3)", ackermann(2, 3), 9);
+    suite.check_eq_i64("Ackermann(3, 2)", ackermann(3, 2), 29);
+
+    return suite.print_summary();
+}

@@ -1,0 +1,55 @@
+// ==============================================================================
+// tests/test_collections.rad — Native Rad Integration Test Suite for Collections
+// Tests Vec<T> operations (push, pop, indexing, len) and String operations.
+// ==============================================================================
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Collections (Vec and String)");
+
+    // 1. Vector pushing, indexing, len
+    var v: Vec<i64> = Vec.new();
+    suite.check_eq_i64("Empty vector len", v.len() as i64, 0);
+
+    v.push(10);
+    v.push(20);
+    v.push(30);
+    suite.check_eq_i64("Vector len after 3 pushes", v.len() as i64, 3);
+    suite.check_eq_i64("v[0]", v[0], 10);
+    suite.check_eq_i64("v[1]", v[1], 20);
+    suite.check_eq_i64("v[2]", v[2], 30);
+
+    // 2. Vector indexing mutation
+    v[1] = 99;
+    suite.check_eq_i64("v[1] after mutation", v[1], 99);
+
+    // 3. Vector pop
+    let last = v.pop();
+    suite.check_eq_i64("v.pop() value", last, 30);
+    suite.check_eq_i64("v.len() after pop", v.len() as i64, 2);
+
+    // 4. Vector iteration sum
+    var sum: i64 = 0;
+    var i = 0usize;
+    while i < v.len() {
+        sum = sum + v[i];
+        i = i + 1usize;
+    }
+    suite.check_eq_i64("Vector sum (10 + 99)", sum, 109);
+
+    // 5. String operations
+    var s = String.new();
+    suite.check_eq_i64("Empty String len", s.len() as i64, 0);
+
+    s.push_str("Hello");
+    s.push_str(", ");
+    s.push_str("Rad!");
+    suite.check_eq_i64("String len", s.len() as i64, 11);
+    suite.check_eq_str("String content", s.as_ptr() as str, "Hello, Rad!");
+
+    // String from_str
+    let s2 = String.from_str("Rad Language");
+    suite.check_eq_i64("from_str len", s2.len() as i64, 12);
+    suite.check_eq_str("from_str content", s2.as_ptr() as str, "Rad Language");
+
+    return suite.print_summary();
+}

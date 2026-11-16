@@ -1,0 +1,52 @@
+// ==============================================================================
+// tests/test_types.rad — Native Rad Integration Test Suite for Types & Casts
+// Tests integer widths, floating point, type conversions, and string equality.
+// ==============================================================================
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Types, Widths & Conversions");
+
+    // 1. Integer Widths & Casts
+    let u8_val: u8 = 255u8;
+    let u8_as_i64 = u8_val as i64;
+    suite.check_eq_i64("u8 as i64", u8_as_i64, 255);
+
+    let i32_val: i32 = 100000i32;
+    let i32_as_i64 = i32_val as i64;
+    suite.check_eq_i64("i32 as i64", i32_as_i64, 100000);
+
+    let usize_val: usize = 42usize;
+    let usize_as_i64 = usize_val as i64;
+    suite.check_eq_i64("usize as i64", usize_as_i64, 42);
+
+    // Truncation cast
+    let big: i64 = 305419896i64;
+    let trunc_i32 = big as i32;
+    suite.check_true("i64 to i32 truncation nonzero", (trunc_i32 as i64) != 0i64);
+
+    // 2. Floating point calculations
+    let f1: f64 = 10.5;
+    let f2: f64 = 2.5;
+    let f_sum = f1 + f2;
+    suite.check_true("Float addition > 12.0", f_sum > 12.0);
+    suite.check_true("Float addition < 14.0", f_sum < 14.0);
+
+    let f_mul = f1 * 2.0;
+    suite.check_true("Float multiplication == 21.0", f_mul == 21.0);
+
+    let f_to_i = f1 as i64;
+    suite.check_eq_i64("Float to int cast truncation", f_to_i, 10);
+
+    let i_to_f = 42i64 as f64;
+    suite.check_true("Int to float cast", i_to_f == 42.0);
+
+    // 3. String literals & equality
+    let s1 = "hello world";
+    let s2 = "hello world";
+    let s3 = "hello rad";
+    suite.check_eq_str("String literal equality", s1, s2);
+    suite.check_ne_str("String inequality", s1, s3);
+    suite.check_eq_str("Empty string equality", "", "");
+
+    return suite.print_summary();
+}

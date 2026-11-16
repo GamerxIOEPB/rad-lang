@@ -64,6 +64,7 @@ struct FunctionDef {
     param_types: Vec<String>,
     ret_type: String,
     body: Vec<usize>,
+    is_test: bool,
 }
 
 struct StructDef {

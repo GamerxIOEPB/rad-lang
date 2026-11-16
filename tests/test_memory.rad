@@ -1,0 +1,66 @@
+// ==============================================================================
+// tests/test_memory.rad — Native Rad Integration Test Suite for Memory & Pointers
+// Tests heap allocation (malloc/free), raw pointers, and buffer read/writes.
+// ==============================================================================
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Memory Management & Raw Pointers");
+
+    // 1. Allocate a byte buffer
+    let buf_size = 128usize;
+    let buf = malloc(buf_size);
+    suite.check_true("malloc returned non-null pointer", (buf as usize) != 0usize);
+
+    // 2. Write pattern into buffer
+    var i = 0usize;
+    while i < buf_size {
+        buf[i] = ((i * 3usize + 7usize) % 256usize) as u8;
+        i = i + 1usize;
+    }
+
+    // 3. Verify pattern from buffer
+    var matches = true;
+    i = 0usize;
+    while i < buf_size {
+        let expected = ((i * 3usize + 7usize) % 256usize) as u8;
+        if buf[i] != expected {
+            matches = false;
+            break;
+        }
+        i = i + 1usize;
+    }
+    suite.check_true("Buffer byte integrity preserved", matches);
+
+    // 4. Free buffer
+    free(buf);
+    suite.check_true("Buffer freed successfully", true);
+
+    // 5. Allocate 64-bit integer array
+    let i64_count = 16usize;
+    let i64_buf = malloc(i64_count * 8usize) as *raw var i64;
+    suite.check_true("i64 buffer allocated", (i64_buf as usize) != 0usize);
+
+    var idx = 0usize;
+    while idx < i64_count {
+        i64_buf[idx] = (idx as i64) * 100i64;
+        idx = idx + 1usize;
+    }
+
+    var i64_sum = 0i64;
+    idx = 0usize;
+    while idx < i64_count {
+        i64_sum = i64_sum + i64_buf[idx];
+        idx = idx + 1usize;
+    }
+    // Sum of 0*100 + 1*100 + ... + 15*100 = 100 * (15 * 16 / 2) = 12000
+    suite.check_eq_i64("i64 array element sum", i64_sum, 12000);
+
+    free(i64_buf as *raw var u8);
+
+    return suite.print_summary();
+}

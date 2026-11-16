@@ -1,0 +1,124 @@
+// ==============================================================================
+// tests/test_structs.rad — Native Rad Integration Test Suite for Structs & Methods
+// Tests struct fields, methods, constructors, and struct-scoped name mangling.
+// ==============================================================================
+
+struct Point2D {
+    x: i64,
+    y: i64,
+}
+
+impl Point2D {
+    fn new(x: i64, y: i64) -> Point2D {
+        return Point2D { x: x, y: y };
+    }
+
+    fn add(self, other: Point2D) -> Point2D {
+        return Point2D { x: self.x + other.x, y: self.y + other.y };
+    }
+
+    fn len_sq(self) -> i64 {
+        return self.x * self.x + self.y * self.y;
+    }
+
+    fn reset(var self) {
+        self.x = 0;
+        self.y = 0;
+    }
+}
+
+// Struct sharing method names with Point2D (tests name mangling)
+struct Point3D {
+    x: i64,
+    y: i64,
+    z: i64,
+}
+
+impl Point3D {
+    fn new(x: i64, y: i64, z: i64) -> Point3D {
+        return Point3D { x: x, y: y, z: z };
+    }
+
+    fn add(self, other: Point3D) -> Point3D {
+        return Point3D { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z };
+    }
+
+    fn len_sq(self) -> i64 {
+        return self.x * self.x + self.y * self.y + self.z * self.z;
+    }
+
+    fn reset(var self) {
+        self.x = 0;
+        self.y = 0;
+        self.z = 0;
+    }
+}
+
+struct Rectangle {
+    top_left: Point2D,
+    width: i64,
+    height: i64,
+}
+
+impl Rectangle {
+    fn new(x: i64, y: i64, w: i64, h: i64) -> Rectangle {
+        return Rectangle {
+            top_left: Point2D.new(x, y),
+            width: w,
+            height: h,
+        };
+    }
+
+    fn area(self) -> i64 {
+        return self.width * self.height;
+    }
+
+    fn perimeter(self) -> i64 {
+        return 2 * (self.width + self.height);
+    }
+}
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Structs, Methods & Name Mangling");
+
+    // 1. Point2D creation and methods
+    let p1 = Point2D.new(3, 4);
+    suite.check_eq_i64("Point2D.x", p1.x, 3);
+    suite.check_eq_i64("Point2D.y", p1.y, 4);
+    suite.check_eq_i64("Point2D.len_sq", p1.len_sq(), 25);
+
+    let p2 = Point2D.new(1, 2);
+    let p3 = p1.add(p2);
+    suite.check_eq_i64("Point2D.add x", p3.x, 4);
+    suite.check_eq_i64("Point2D.add y", p3.y, 6);
+
+    // 2. Point3D sharing same method names (add, len_sq, reset) without collision
+    let v1 = Point3D.new(1, 2, 3);
+    let v2 = Point3D.new(4, 5, 6);
+    let v3 = v1.add(v2);
+    suite.check_eq_i64("Point3D.add x", v3.x, 5);
+    suite.check_eq_i64("Point3D.add y", v3.y, 7);
+    suite.check_eq_i64("Point3D.add z", v3.z, 9);
+    suite.check_eq_i64("Point3D.len_sq", v1.len_sq(), 14);
+
+    // 3. Mutating struct via self
+    var mut_p = Point2D.new(10, 20);
+    mut_p.reset();
+    suite.check_eq_i64("Point2D.reset x", mut_p.x, 0);
+    suite.check_eq_i64("Point2D.reset y", mut_p.y, 0);
+
+    var mut_v = Point3D.new(10, 20, 30);
+    mut_v.reset();
+    suite.check_eq_i64("Point3D.reset x", mut_v.x, 0);
+    suite.check_eq_i64("Point3D.reset y", mut_v.y, 0);
+    suite.check_eq_i64("Point3D.reset z", mut_v.z, 0);
+
+    // 4. Nested structs
+    let rect = Rectangle.new(10, 10, 20, 30);
+    suite.check_eq_i64("Rectangle top_left x", rect.top_left.x, 10);
+    suite.check_eq_i64("Rectangle top_left y", rect.top_left.y, 10);
+    suite.check_eq_i64("Rectangle area", rect.area(), 600);
+    suite.check_eq_i64("Rectangle perimeter", rect.perimeter(), 100);
+
+    return suite.print_summary();
+}

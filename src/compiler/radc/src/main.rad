@@ -22,6 +22,7 @@ struct CompilerOptions {
     compile_only: bool,
     cli_color_mode: i32,      // 0 = auto, 1 = always, 2 = never
     cli_json_format: bool,
+    test_mode: bool,
 }
 
 fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
@@ -37,6 +38,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
     var compile_only = false
     var color_mode = 0i32
     var json_format = false
+    var test_mode = false
 
     var i = 1usize
     let total = argc as usize
@@ -77,6 +79,8 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
             } else {
                 color_mode = 0i32
             }
+        } else if str_eq(arg, "--test") {
+            test_mode = true
         } else if str_starts_with(arg, "-O") {
             let p = arg as *raw u8
             opt_level = String.new()
@@ -150,6 +154,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
         compile_only: compile_only,
         cli_color_mode: color_mode,
         cli_json_format: json_format,
+        test_mode: test_mode,
     }
 }
 
@@ -494,6 +499,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  -c                           Compile to object file (.o) without linking")
         println("  --emit-llvm                  Emit textual LLVM IR (.ll) without linking")
         println("  --check                      Check source syntax and structure without code generation")
+        println("  --test                       Enable test mode (compiles #[test] and #[cfg(test)])")
         println("  --color <auto|always|never>  Set ANSI terminal color mode (default: auto)")
         println("  --error-format=json          Emit structured JSON diagnostics")
         println("  -O0, -O2, -O3                Set optimization level (default: -O2)")
@@ -521,6 +527,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         diagnostics: Vec.new(),
         color_mode: opts.cli_color_mode,
         json_format: opts.cli_json_format,
+        test_mode: opts.test_mode,
+        cur_is_test: false,
     }
     parser.const_names.push(String.from_str("Option::None"))
     parser.const_values.push(0i64)

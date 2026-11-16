@@ -19,6 +19,8 @@ struct Parser {
     diagnostics: Vec<Diagnostic>,
     color_mode: i32,      // 0 = auto, 1 = always, 2 = never
     json_format: bool,
+    test_mode: bool,
+    cur_is_test: bool,
 }
 
 fn json_escape_str(s: str) -> String {
@@ -1794,7 +1796,7 @@ impl Parser {
             }
         }
         var fn_name = String.new()
-        if !has_self && str_len(prefix) > 0usize {
+        if str_len(prefix) > 0usize && !str_eq(prefix, "String") && !str_eq(prefix, "Vec") {
             fn_name.push_str(prefix)
             fn_name.push_str("__")
         }
@@ -1813,12 +1815,16 @@ impl Parser {
         let body = self.parse_block_stmts()
         self.expect_tok(TOK_RBRACE, "}")
 
+        let f_is_test = self.cur_is_test
+        self.cur_is_test = false
+
         self.functions.push(FunctionDef {
             fn_name: fn_name,
             param_names: param_names,
             param_types: param_types,
             ret_type: ret_type,
             body: body,
+            is_test: f_is_test,
         })
     }
 
@@ -1859,6 +1865,7 @@ impl Parser {
             param_types: param_types,
             ret_type: ret_type,
             body: Vec.new(),
+            is_test: false,
         })
     }
 
@@ -1938,21 +1945,74 @@ impl Parser {
             if self.check_lex_error() {
                 continue
             }
-            let k = self.peek_kind()
-            if k == TOK_HASH || k == TOK_LBRACKET {
-                if self.peek_kind() == TOK_HASH {
-                    self.advance()
-                }
-                if self.peek_kind() == TOK_LBRACKET {
-                    self.advance()
-                    while self.peek_kind() != TOK_RBRACKET && self.peek_kind() != TOK_EOF {
+            var is_test = false
+            var cfg_test = false
+            while self.peek_kind() == TOK_HASH {
+                self.advance()
+                if self.match_tok(TOK_LBRACKET) {
+                    let attr_name = self.peek_text()
+                    if str_eq(attr_name, "test") {
+                        is_test = true
                         self.advance()
-                    }
-                    if self.peek_kind() == TOK_RBRACKET {
+                    } else if str_eq(attr_name, "cfg") {
                         self.advance()
+                        if self.match_tok(TOK_LPAREN) {
+                            let cfg_arg = self.peek_text()
+                            if str_eq(cfg_arg, "test") {
+                                cfg_test = true
+                            }
+                            self.advance()
+                            self.match_tok(TOK_RPAREN)
+                        }
+                    } else {
+                        while self.peek_kind() != TOK_RBRACKET && self.peek_kind() != TOK_EOF {
+                            self.advance()
+                        }
                     }
+                    self.match_tok(TOK_RBRACKET)
                 }
             }
+
+            if (cfg_test || is_test) && !self.test_mode {
+                while self.peek_kind() == TOK_PUB {
+                    self.advance()
+                }
+                if str_eq(self.peek_text(), "mod") {
+                    self.advance()
+                    self.match_tok(TOK_IDENT)
+                    if self.match_tok(TOK_LBRACE) {
+                        var depth = 1i64
+                        while depth > 0i64 && self.peek_kind() != TOK_EOF {
+                            if self.peek_kind() == TOK_LBRACE {
+                                depth = depth + 1i64
+                            } else if self.peek_kind() == TOK_RBRACE {
+                                depth = depth - 1i64
+                            }
+                            self.advance()
+                        }
+                    }
+                    continue
+                }
+                if self.peek_kind() == TOK_FN {
+                    self.advance()
+                    while self.peek_kind() != TOK_LBRACE && self.peek_kind() != TOK_EOF {
+                        self.advance()
+                    }
+                    if self.match_tok(TOK_LBRACE) {
+                        var depth = 1i64
+                        while depth > 0i64 && self.peek_kind() != TOK_EOF {
+                            if self.peek_kind() == TOK_LBRACE {
+                                depth = depth + 1i64
+                            } else if self.peek_kind() == TOK_RBRACE {
+                                depth = depth - 1i64
+                            }
+                            self.advance()
+                        }
+                    }
+                    continue
+                }
+            }
+            self.cur_is_test = is_test
             while self.peek_kind() == TOK_PUB || str_eq(self.peek_text(), "extern") || self.peek_kind() == TOK_STR {
                 if str_eq(self.peek_text(), "extern") {
                     let next_p = self.pos + 1usize
@@ -2110,11 +2170,49 @@ impl Parser {
                 self.match_tok(TOK_SEMI)
                 self.const_names.push(c_name)
                 self.const_values.push(c_val)
+            } else if str_eq(self.peek_text(), "mod") {
+                self.advance() // skip 'mod'
+                let mod_name = String.from_str(self.peek_text())
+                self.match_tok(TOK_IDENT)
+                self.expect_tok(TOK_LBRACE, "{")
+                while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+                    var inner_is_test = false
+                    while self.peek_kind() == TOK_HASH {
+                        self.advance()
+                        if self.match_tok(TOK_LBRACKET) {
+                            if str_eq(self.peek_text(), "test") {
+                                inner_is_test = true
+                            }
+                            while self.peek_kind() != TOK_RBRACKET && self.peek_kind() != TOK_EOF {
+                                self.advance()
+                            }
+                            self.match_tok(TOK_RBRACKET)
+                        }
+                    }
+                    while self.peek_kind() == TOK_PUB {
+                        self.advance()
+                    }
+                    self.cur_is_test = inner_is_test
+                    if self.peek_kind() == TOK_FN {
+                        self.parse_function(mod_name.as_ptr() as str)
+                    } else if self.peek_kind() == TOK_STRUCT {
+                        self.parse_struct()
+                    } else if str_eq(self.peek_text(), "import") {
+                        self.advance()
+                        while self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_EOF {
+                            self.advance()
+                        }
+                        self.match_tok(TOK_SEMI)
+                    } else {
+                        self.advance()
+                    }
+                }
+                self.expect_tok(TOK_RBRACE, "}")
             } else if self.peek_kind() != TOK_SEMI {
                 let err_line = self.cur_tok_line()
                 let err_col = self.cur_tok_col()
                 var err = String.new()
-                err.push_str("expected top-level item ('fn', 'struct', 'impl', 'enum', 'const', 'import'), found '")
+                err.push_str("expected top-level item ('fn', 'struct', 'impl', 'enum', 'const', 'import', 'mod'), found '")
                 err.push_str(self.peek_text())
                 err.push_str("'")
                 self.report_error("E0012", err.as_ptr() as str, err_line, err_col)

@@ -205,4 +205,87 @@ impl Path {
         }
         res
     }
+
+    pub fn is_relative(p: str) -> bool {
+        !Path.is_absolute(p)
+    }
+
+    pub fn file_name(p: str) -> String {
+        Path.basename(p)
+    }
+
+    pub fn parent(p: str) -> String {
+        Path.dirname(p)
+    }
+
+    pub fn has_extension(p: str, ext: str) -> bool {
+        let cur_ext = Path.extension(p)
+        let c_str = cur_ext.as_ptr() as str
+        let len_c = path_len(c_str)
+        let len_e = path_len(ext)
+        if len_c == 0usize || len_e == 0usize {
+            return false
+        }
+        var target_ext = ext
+        if (ext as *raw u8)[0usize] == 46u8 { // skip leading '.'
+            target_ext = (ext as usize + 1usize) as str
+        }
+        let pc = c_str as *raw u8
+        let pe = target_ext as *raw u8
+        var i = 0usize
+        while pc[i] != 0u8 && pe[i] != 0u8 {
+            if pc[i] != pe[i] {
+                return false
+            }
+            i = i + 1usize
+        }
+        pc[i] == pe[i]
+    }
+
+    pub fn with_extension(p: str, new_ext: str) -> String {
+        let len = path_len(p)
+        if len == 0usize {
+            var s = String.new()
+            if path_len(new_ext) > 0usize {
+                if (new_ext as *raw u8)[0usize] != 46u8 {
+                    s.push_byte(46u8)
+                }
+                s.push_str(new_ext)
+            }
+            return s
+        }
+        let ptr = p as *raw u8
+        var last_slash: i64 = -1i64
+        var last_dot: i64 = -1i64
+        var i = 0usize
+        while i < len {
+            if ptr[i] == 47u8 { // '/'
+                last_slash = i as i64
+                last_dot = -1i64
+            } else if ptr[i] == 46u8 { // '.'
+                last_dot = i as i64
+            }
+            i = i + 1usize
+        }
+
+        var stem_len = len
+        if last_dot > last_slash && last_dot > 0i64 {
+            stem_len = last_dot as usize
+        }
+
+        var res = String.new()
+        i = 0usize
+        while i < stem_len {
+            res.push_byte(ptr[i])
+            i = i + 1usize
+        }
+
+        if path_len(new_ext) > 0usize {
+            if (new_ext as *raw u8)[0usize] != 46u8 {
+                res.push_byte(46u8) // '.'
+            }
+            res.push_str(new_ext)
+        }
+        res
+    }
 }

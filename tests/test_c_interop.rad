@@ -1,0 +1,34 @@
+// ==============================================================================
+// tests/test_c_interop.rad — Native Rad Integration Test Suite for C Interop
+// Tests extern "C" bindings, calling standard libc functions, and return types.
+// ==============================================================================
+
+extern "C" {
+    fn strlen(s: str) -> usize;
+    fn abs(x: i32) -> i32;
+    fn sprintf(str_buf: *raw var u8, format: str, a: i32, b: i32) -> i32;
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn main() -> i32 {
+    var suite = TestSuite.new("POSIX C Interop & Standard Library");
+
+    // 1. strlen
+    let str_val = "Hello, C interop!";
+    let len = strlen(str_val);
+    suite.check_eq_i64("libc strlen", len as i64, 17);
+
+    // 2. abs
+    suite.check_eq_i64("libc abs(-42)", abs(-42i32) as i64, 42);
+    suite.check_eq_i64("libc abs(100)", abs(100i32) as i64, 100);
+
+    // 3. sprintf formatting into heap buffer
+    let buf = malloc(64usize);
+    let written = sprintf(buf, "Values: %d and %d", 123i32, 456i32);
+    suite.check_true("sprintf wrote characters", written > 0i32);
+    suite.check_eq_str("sprintf output string", buf as str, "Values: 123 and 456");
+    free(buf);
+
+    return suite.print_summary();
+}

@@ -1,4 +1,142 @@
-// Rad Standard Library: Networking (TCP / UDP)
+// ==============================================================================
+// Rad Standard Library: Networking (TCP / UDP & Hostname Resolution)
+// ==============================================================================
+
+fn net_str_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    i
+}
+
+fn net_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize || (b as usize) == 0usize {
+        return (a as usize) == (b as usize)
+    }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    pa[i] == pb[i]
+}
+
+extern "C" {
+    fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+    fn bind(sockfd: i32, addr: *raw u8, addrlen: u32) -> i32;
+    fn connect(sockfd: i32, addr: *raw u8, addrlen: u32) -> i32;
+    fn close(fd: i32) -> i32;
+    fn send(sockfd: i32, buf: *raw u8, len: usize, flags: i32) -> i64;
+    fn recv(sockfd: i32, buf: *raw var u8, len: usize, flags: i32) -> i64;
+    fn sendto(sockfd: i32, buf: *raw u8, len: usize, flags: i32, dest_addr: *raw u8, addrlen: u32) -> i64;
+    fn recvfrom(sockfd: i32, buf: *raw var u8, len: usize, flags: i32, src_addr: *raw var u8, addrlen: *raw var u32) -> i64;
+    fn inet_pton(af: i32, src: str, dst: *raw var u8) -> i32;
+    fn inet_ntop(af: i32, src: *raw u8, dst: *raw var u8, size: u32) -> str;
+    fn getaddrinfo(node: str, service: str, hints: *raw u8, res: *raw var *raw var u8) -> i32;
+    fn freeaddrinfo(res: *raw var u8);
+}
+
+fn int_to_string(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0")
+    }
+    var v = val
+    var is_neg = false
+    if v < 0i64 {
+        is_neg = true
+        v = -v
+    }
+    var rev = String.new()
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8
+        rev.push_byte(48u8 + digit)
+        v = v / 10i64
+    }
+    if is_neg {
+        rev.push_byte(45u8)
+    }
+    var res = String.new()
+    var len = rev.len()
+    let p = rev.as_ptr()
+    while len > 0usize {
+        len = len - 1usize
+        res.push_byte(p[len])
+    }
+    res
+}
+
+// ------------------------------------------------------------------------------
+// Hostname Resolution
+// ------------------------------------------------------------------------------
+
+pub fn lookup_host(host: str) -> Option<String> {
+    if net_str_len(host) == 0usize {
+        return Option.None
+    }
+    let hints = malloc(48usize) as *raw var u8
+    var hi = 0usize
+    while hi < 48usize {
+        hints[hi] = 0u8
+        hi = hi + 1usize
+    }
+    // Set ai_family = 2 (AF_INET) at offset 4
+    hints[4usize] = 2u8
+
+    let pp_res = malloc(8usize) as *raw var usize
+    pp_res[0usize] = 0usize
+    let r = getaddrinfo(host, 0 as str, hints as *raw u8, pp_res as *raw var *raw var u8)
+    free(hints)
+
+    let res_val = pp_res[0usize]
+    free(pp_res as *raw var u8)
+    if r != 0 || res_val == 0usize {
+        return Option.None
+    }
+    let res_ptr = res_val as *raw var u8
+
+    // struct addrinfo: ai_addr is at offset 24
+    let p_addr_slot = (res_ptr as usize + 24usize) as *raw usize
+    let sockaddr_ptr = p_addr_slot[0usize] as *raw u8
+    if (sockaddr_ptr as usize) == 0usize {
+        freeaddrinfo(res_ptr)
+        return Option.None
+    }
+
+    // sockaddr_in: sin_addr is at offset 4 (4 bytes)
+    let b0 = sockaddr_ptr[4usize] as i64
+    let b1 = sockaddr_ptr[5usize] as i64
+    let b2 = sockaddr_ptr[6usize] as i64
+    let b3 = sockaddr_ptr[7usize] as i64
+
+    freeaddrinfo(res_ptr)
+
+    var out = String.new()
+    let s0 = int_to_string(b0)
+    let s1 = int_to_string(b1)
+    let s2 = int_to_string(b2)
+    let s3 = int_to_string(b3)
+    out.push_str(s0.as_ptr() as str)
+    out.push_byte(46u8) // '.'
+    out.push_str(s1.as_ptr() as str)
+    out.push_byte(46u8) // '.'
+    out.push_str(s2.as_ptr() as str)
+    out.push_byte(46u8) // '.'
+    out.push_str(s3.as_ptr() as str)
+    Option.Some(out)
+}
+
+// ------------------------------------------------------------------------------
+// TCP Stream
+// ------------------------------------------------------------------------------
 
 pub struct TcpStream {
     pub fd: i32,
@@ -7,7 +145,7 @@ pub struct TcpStream {
 
 impl TcpStream {
     pub fn connect(host_ip: str, port: u16) -> Option<TcpStream> {
-        let sock = socket(2, 1, 0)
+        let sock = socket(2, 1, 0) // AF_INET = 2, SOCK_STREAM = 1
         if sock < 0 {
             return Option.None
         }
@@ -20,19 +158,21 @@ impl TcpStream {
             i = i + 1usize
         }
 
-        var p16 = raw as *raw var u16
-        p16[0] = 2u16
-        let p_be = ((port >> 8u16) | (port << 8u16)) as u16
-        p16[1] = p_be
+        p[0usize] = 2u8 // AF_INET
+        p[1usize] = 0u8
+        p[2usize] = ((port >> 8u16) & 255u16) as u8
+        p[3usize] = (port & 255u16) as u8
 
-        let res = sys_connect(sock, raw, 16)
+        let _ = inet_pton(2, host_ip, (raw as usize + 4usize) as *raw var u8)
+
+        let res = connect(sock, raw as *raw u8, 16u32)
         free(raw)
 
         if res < 0 {
-            sys_close(sock)
-            Option.None
+            let _ = close(sock)
+            return Option.None
         } else {
-            Option.Some(TcpStream {
+            return Option.Some(TcpStream {
                 fd: sock,
                 is_connected: true,
             })
@@ -43,19 +183,166 @@ impl TcpStream {
         if !self.is_connected {
             return false
         }
-        let p = s as *raw u8
-        var len = 0usize
-        while p[len] != 0u8 {
-            len = len + 1usize
-        }
-        let sent = send(self.fd, p as *raw var u8, len, 0)
+        let len = net_str_len(s)
+        let sent = send(self.fd, s as *raw u8, len, 0)
         sent == (len as i64)
+    }
+
+    pub fn read(self, buf: *raw var u8, len: usize) -> i64 {
+        if !self.is_connected {
+            return -1i64
+        }
+        recv(self.fd, buf, len, 0)
     }
 
     pub fn close(var self) {
         if self.is_connected {
-            sys_close(self.fd)
+            let _ = close(self.fd)
             self.is_connected = false
+        }
+    }
+
+    pub fn drop(var self) {
+        self.close()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// UDP Socket
+// ------------------------------------------------------------------------------
+
+pub struct UdpSocket {
+    pub fd: i32,
+    pub is_bound: bool,
+}
+
+impl UdpSocket {
+    pub fn bind(host_ip: str, port: u16) -> Option<UdpSocket> {
+        let sock = socket(2, 2, 0) // AF_INET = 2, SOCK_DGRAM = 2, IPPROTO_UDP = 0
+        if sock < 0 {
+            return Option.None
+        }
+
+        let raw = malloc(16usize)
+        var p = raw as *raw var u8
+        var i = 0usize
+        while i < 16usize {
+            p[i] = 0u8
+            i = i + 1usize
+        }
+
+        p[0usize] = 2u8 // AF_INET
+        p[1usize] = 0u8
+        p[2usize] = ((port >> 8u16) & 255u16) as u8
+        p[3usize] = (port & 255u16) as u8
+
+        if net_str_len(host_ip) > 0usize && !net_str_eq(host_ip, "0.0.0.0") {
+            let _ = inet_pton(2, host_ip, (raw as usize + 4usize) as *raw var u8)
+        }
+
+        let res = bind(sock, raw as *raw u8, 16u32)
+        free(raw)
+
+        if res < 0 {
+            let _ = close(sock)
+            return Option.None
+        } else {
+            return Option.Some(UdpSocket {
+                fd: sock,
+                is_bound: true,
+            })
+        }
+    }
+
+    pub fn connect(var self, dest_ip: str, port: u16) -> bool {
+        if self.fd < 0 {
+            return false
+        }
+        let raw = malloc(16usize)
+        var p = raw as *raw var u8
+        var i = 0usize
+        while i < 16usize {
+            p[i] = 0u8
+            i = i + 1usize
+        }
+        p[0usize] = 2u8 // AF_INET
+        p[1usize] = 0u8
+        p[2usize] = ((port >> 8u16) & 255u16) as u8
+        p[3usize] = (port & 255u16) as u8
+        let _ = inet_pton(2, dest_ip, (raw as usize + 4usize) as *raw var u8)
+        let res = connect(self.fd, raw as *raw u8, 16u32)
+        free(raw)
+        res == 0
+    }
+
+    pub fn send_to(self, buf: *raw u8, len: usize, dest_ip: str, port: u16) -> i64 {
+        if self.fd < 0 {
+            return -1i64
+        }
+        let raw = malloc(16usize)
+        var p = raw as *raw var u8
+        var i = 0usize
+        while i < 16usize {
+            p[i] = 0u8
+            i = i + 1usize
+        }
+        p[0usize] = 2u8 // AF_INET
+        p[1usize] = 0u8
+        p[2usize] = ((port >> 8u16) & 255u16) as u8
+        p[3usize] = (port & 255u16) as u8
+        let _ = inet_pton(2, dest_ip, (raw as usize + 4usize) as *raw var u8)
+        let sent = sendto(self.fd, buf, len, 0, raw as *raw u8, 16u32)
+        free(raw)
+        sent
+    }
+
+    pub fn send_str_to(self, s: str, dest_ip: str, port: u16) -> i64 {
+        let len = net_str_len(s)
+        self.send_to(s as *raw u8, len, dest_ip, port)
+    }
+
+    pub fn send(self, buf: *raw u8, len: usize) -> i64 {
+        if self.fd < 0 {
+            return -1i64
+        }
+        send(self.fd, buf, len, 0)
+    }
+
+    pub fn recv(self, buf: *raw var u8, len: usize) -> i64 {
+        if self.fd < 0 {
+            return -1i64
+        }
+        recv(self.fd, buf, len, 0)
+    }
+
+    pub fn recv_from(self, buf: *raw var u8, len: usize, out_ip: *raw var u8, out_port: *raw var u16) -> i64 {
+        if self.fd < 0 {
+            return -1i64
+        }
+        let raw = malloc(16usize)
+        let p_len = malloc(4usize) as *raw var u32
+        p_len[0usize] = 16u32
+        let n = recvfrom(self.fd, buf, len, 0, raw as *raw var u8, p_len)
+        free(p_len as *raw var u8)
+        if n >= 0i64 {
+            if (out_port as usize) != 0usize {
+                let p = raw as *raw u8
+                let port = ((p[2usize] as u16) << 8u16) | (p[3usize] as u16)
+                out_port[0] = port
+            }
+            if (out_ip as usize) != 0usize {
+                let _ = inet_ntop(2, (raw as usize + 4usize) as *raw u8, out_ip, 16u32)
+            }
+        }
+        free(raw)
+        n
+    }
+
+    pub fn close(var self) {
+        if self.fd >= 0 {
+            let _ = close(self.fd)
+            self.fd = -1
+            self.is_bound = false
         }
     }
 

@@ -18,3 +18,4 @@ extensions/vscode-rad/dist/*.map
 *.log
 .DS_Store
 /lib/llvm
+target/

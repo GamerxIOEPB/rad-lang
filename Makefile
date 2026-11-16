@@ -50,6 +50,7 @@ RADC_SRCS := \
 RAD_SRCS := \
     $(RADPM_DIR)/fmt.rad \
     $(RADPM_DIR)/lsp.rad \
+    $(RADPM_DIR)/test.rad \
     $(RADPM_DIR)/main.rad
 
 # Output binaries
@@ -127,7 +128,7 @@ install: all
 		cp -rf $(BIN_DIR)/arcade/* $(PREFIX)/bin/arcade/; \
 		cp -f $(BIN_DIR)/arcade/arcade $(PREFIX)/bin/rad-arcade; \
 	fi
-	cp -rf lib/rad/core lib/rad/alloc lib/rad/std $(PREFIX)/lib/rad/
+	cp -rf lib/rad/core lib/rad/alloc lib/rad/std lib/rad/rad-test $(PREFIX)/lib/rad/
 	cp -rf $(SYSROOT)/* $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/
 	@if [ -d "../rad-lib/packages" ]; then \
 		echo "==> Pre-installing Rad ecosystem libraries to $(PREFIX)/packages..."; \

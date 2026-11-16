@@ -1,5 +1,17 @@
 // Rad Standard Library: File System Operations
 
+fn fs_str_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    i
+}
+
 pub struct File {
     pub handle: *raw var u8,
     pub is_open: bool,
@@ -144,6 +156,24 @@ extern "C" {
     fn rmdir(path: str) -> i32;
     fn stat(path: str, buf: *raw var u8) -> i32;
     fn fflush(fp: *raw var u8) -> i32;
+    fn opendir(name: str) -> *raw var u8;
+    fn readdir(dirp: *raw var u8) -> *raw var u8;
+    fn closedir(dirp: *raw var u8) -> i32;
+}
+
+pub struct FileMetadata {
+    pub size: i64,
+    pub modified_sec: i64,
+    pub is_directory: bool,
+    pub is_regular_file: bool,
+    pub mode: u32,
+}
+
+pub struct DirEntry {
+    pub name: String,
+    pub path: String,
+    pub is_directory: bool,
+    pub is_file: bool,
 }
 
 pub struct Fs {}
@@ -160,10 +190,15 @@ impl Fs {
     pub fn read_file(path: str) -> Option<String> { read_file(path) }
     pub fn write_file(path: str, content: str) -> bool { write_file(path, content) }
     pub fn temp_dir() -> String { temp_dir() }
+    pub fn metadata(path: str) -> Option<FileMetadata> { get_metadata(path) }
+    pub fn file_size(path: str) -> i64 { get_file_size(path) }
+    pub fn modified_time(path: str) -> i64 { get_modified_time(path) }
+    pub fn read_dir(path: str) -> Vec<DirEntry> { read_dir(path) }
+    pub fn walk_dir(path: str) -> Vec<String> { walk_dir(path) }
 }
 
 pub fn exists(path: str) -> bool {
-    access(path, 0) == 0
+    return access(path, 0) == 0
 }
 
 pub fn is_dir(path: str) -> bool {
@@ -198,11 +233,11 @@ pub fn is_file(path: str) -> bool {
 }
 
 pub fn make_dir(path: str) -> bool {
-    mkdir(path, 511u32) == 0 // 0777
+    return mkdir(path, 511u32) == 0 // 0777
 }
 
 pub fn remove_dir(path: str) -> bool {
-    rmdir(path) == 0
+    return rmdir(path) == 0
 }
 
 pub fn make_dir_p(path: str) -> bool {
@@ -234,7 +269,7 @@ pub fn make_dir_p(path: str) -> bool {
     if !exists(path) {
         return make_dir(path)
     }
-    true
+    return true
 }
 
 pub fn copy_file(src: str, dst: str) -> bool {
@@ -263,7 +298,7 @@ pub fn copy_file(src: str, dst: str) -> bool {
     free(buf)
     fclose(fp_in)
     fclose(fp_out)
-    ok
+    return ok
 }
 
 pub fn temp_dir() -> String {
@@ -271,5 +306,135 @@ pub fn temp_dir() -> String {
     if (env_tmp as usize) != 0usize {
         return String.from_str(env_tmp as str)
     }
-    String.from_str("/tmp")
+    return String.from_str("/tmp")
+}
+
+pub fn get_metadata(path: str) -> Option<FileMetadata> {
+    let statbuf = malloc(144usize) as *raw var u8
+    let r = stat(path, statbuf)
+    if r != 0 {
+        free(statbuf)
+        return Option.None
+    }
+    let b0 = statbuf[24usize] as u32
+    let b1 = statbuf[25usize] as u32
+    let mode = b0 + (b1 * 256u32)
+    let is_directory = (mode & 61440u32) == 16384u32
+    let is_regular_file = (mode & 61440u32) == 32768u32
+
+    // st_size at offset 48 (i64)
+    let p_size = (statbuf as usize + 48usize) as *raw i64
+    let size = p_size[0usize]
+
+    // st_mtime at offset 88 (i64)
+    let p_mtime = (statbuf as usize + 88usize) as *raw i64
+    let mtime = p_mtime[0usize]
+
+    free(statbuf)
+    return Option.Some(FileMetadata {
+        size: size,
+        modified_sec: mtime,
+        is_directory: is_directory,
+        is_regular_file: is_regular_file,
+        mode: mode,
+    })
+}
+
+pub fn get_file_size(path: str) -> i64 {
+    let statbuf = malloc(144usize) as *raw var u8
+    let r = stat(path, statbuf)
+    if r != 0 {
+        free(statbuf)
+        return -1i64
+    }
+    let p_size = (statbuf as usize + 48usize) as *raw i64
+    let size = p_size[0usize]
+    free(statbuf)
+    return size
+}
+
+pub fn get_modified_time(path: str) -> i64 {
+    let statbuf = malloc(144usize) as *raw var u8
+    let r = stat(path, statbuf)
+    if r != 0 {
+        free(statbuf)
+        return 0i64
+    }
+    let p_mtime = (statbuf as usize + 88usize) as *raw i64
+    let mtime = p_mtime[0usize]
+    free(statbuf)
+    return mtime
+}
+
+pub fn read_dir(path: str) -> Vec<DirEntry> {
+    var entries = Vec.new()
+    let dirp = opendir(path)
+    if (dirp as usize) == 0usize {
+        return entries
+    }
+    let plen = fs_str_len(path)
+    let has_trailing_slash = plen > 0usize && (path as *raw u8)[plen - 1usize] == 47u8
+
+    while true {
+        let ent = readdir(dirp)
+        if (ent as usize) == 0usize {
+            break
+        }
+        let d_type = ent[18usize]
+        let name_ptr = (ent as usize + 19usize) as *raw u8
+
+        // Skip "." and ".."
+        if name_ptr[0usize] == 46u8 { // '.'
+            if name_ptr[1usize] == 0u8 {
+                continue
+            }
+            if name_ptr[1usize] == 46u8 && name_ptr[2usize] == 0u8 {
+                continue
+            }
+        }
+
+        var name_str = String.new()
+        var ni = 0usize
+        while name_ptr[ni] != 0u8 {
+            name_str.push_byte(name_ptr[ni])
+            ni = ni + 1usize
+        }
+
+        var full_path = String.new()
+        full_path.push_str(path)
+        if !has_trailing_slash {
+            full_path.push_byte(47u8) // '/'
+        }
+        full_path.push_str(name_str.as_ptr() as str)
+
+        entries.push(DirEntry {
+            name: name_str,
+            path: full_path,
+            is_directory: (d_type == 4u8),
+            is_file: (d_type == 8u8),
+        })
+    }
+    closedir(dirp)
+    return entries
+}
+
+pub fn walk_dir(path: str) -> Vec<String> {
+    var all_files = Vec.new()
+    var dirs_to_visit = Vec.new()
+    dirs_to_visit.push(String.from_str(path))
+
+    while dirs_to_visit.len > 0usize {
+        let cur_dir = dirs_to_visit.pop()
+        let entries = read_dir(cur_dir.as_ptr() as str)
+        var ei = 0usize
+        while ei < entries.len {
+            let ent = entries.ptr[ei]
+            all_files.push(ent.path)
+            if ent.is_directory {
+                dirs_to_visit.push(ent.path)
+            }
+            ei = ei + 1usize
+        }
+    }
+    return all_files
 }

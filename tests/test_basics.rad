@@ -1,0 +1,63 @@
+// ==============================================================================
+// tests/test_basics.rad — Native Rad Integration Test Suite for Language Basics
+// Tests arithmetic, boolean logic, bitwise operations, scoping, and f-strings.
+// ==============================================================================
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Language Basics & Arithmetic");
+
+    // 1. Basic Arithmetic
+    let a = 10;
+    let b = 3;
+    suite.check_eq_i64("Addition", a + b, 13);
+    suite.check_eq_i64("Subtraction", a - b, 7);
+    suite.check_eq_i64("Multiplication", a * b, 30);
+    suite.check_eq_i64("Integer Division", a / b, 3);
+    suite.check_eq_i64("Modulo", a % b, 1);
+    suite.check_eq_i64("Precedence 1", a + b * 2 - a / b, 13);
+    suite.check_eq_i64("Precedence with Parentheses", (a + b) * 2, 26);
+
+    // 2. Negative numbers & unary negation
+    let neg = -15;
+    suite.check_eq_i64("Negation", -neg, 15);
+    suite.check_eq_i64("Negative addition", neg + 5, -10);
+    suite.check_eq_i64("Negative multiplication", neg * -2, 30);
+
+    // 3. Boolean Logic
+    let t = true;
+    let f = false;
+    suite.check_true("True literal", t);
+    suite.check_false("False literal", f);
+    suite.check_true("Logical AND (true && true)", t && true);
+    suite.check_false("Logical AND (true && false)", t && f);
+    suite.check_true("Logical OR (false || true)", f || t);
+    suite.check_false("Logical OR (false || false)", f || false);
+    suite.check_true("Logical NOT (!false)", !f);
+    suite.check_false("Logical NOT (!true)", !t);
+
+    // 4. Comparisons
+    suite.check_true("Less than", 5 < 10);
+    suite.check_true("Less or equal", 10 <= 10);
+    suite.check_true("Greater than", 20 > 5);
+    suite.check_true("Greater or equal", 20 >= 20);
+    suite.check_true("Equality", 42 == 42);
+    suite.check_true("Inequality", 42 != 43);
+
+    // 5. Bitwise Operations
+    let bit_a = 10;
+    let bit_b = 12;
+    suite.check_eq_i64("Bitwise AND", bit_a & bit_b, 8);
+    suite.check_eq_i64("Bitwise OR", bit_a | bit_b, 14);
+    suite.check_eq_i64("Bitwise XOR", bit_a ^ bit_b, 6);
+    suite.check_eq_i64("Bitwise Shift Left", 1 << 4, 16);
+    suite.check_eq_i64("Bitwise Shift Right", 32 >> 2, 8);
+
+    // 6. Mutability and Variables
+    var count = 0;
+    count = count + 1;
+    count = count + 5;
+    count = count * 2;
+    suite.check_eq_i64("Mutable re-assignment", count, 12);
+
+    return suite.print_summary();
+}

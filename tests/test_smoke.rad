@@ -1,0 +1,59 @@
+// ==============================================================================
+// tests/test_smoke.rad — Native Rad Integration Test Suite: Core Smoke Tests
+// End-to-end verification of fundamental compiler and runtime pipelines.
+// ==============================================================================
+
+enum Status {
+    Pending,
+    Active,
+    Done,
+}
+
+struct Item {
+    id: i64,
+    status: Status,
+    name: str,
+}
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Core Smoke Tests");
+
+    // 1. Literal smoke
+    let a = 100i64;
+    let b = 200i64;
+    suite.check_eq_i64("Smoke integer arithmetic", a + b, 300);
+
+    // 2. Struct & Enum smoke
+    let item = Item {
+        id: 1,
+        status: Status.Active,
+        name: "test item",
+    };
+    suite.check_eq_i64("Item id", item.id, 1);
+    suite.check_eq_str("Item name", item.name, "test item");
+
+    var is_active = false;
+    match item.status {
+        Status::Pending => {},
+        Status::Active => { is_active = true; },
+        Status::Done => {},
+    }
+    suite.check_true("Item status is Active", is_active);
+
+    // 3. String smoke
+    var greeting = String.from_str("Hello");
+    greeting.push_str(" World");
+    suite.check_eq_str("Greeting string", greeting.as_ptr() as str, "Hello World");
+
+    // 4. Vector smoke
+    var list: Vec<i64> = Vec.new();
+    var idx = 0;
+    while idx < 5 {
+        list.push(idx * 10);
+        idx = idx + 1;
+    }
+    suite.check_eq_i64("List len", list.len() as i64, 5);
+    suite.check_eq_i64("List[4]", list[4], 40);
+
+    return suite.print_summary();
+}

@@ -1,0 +1,92 @@
+// ==============================================================================
+// tests/test_stdlib.rad — Native Rad Integration Test Suite for Standard Library
+// Tests std::path, std::fs, and std::net primitives.
+// ==============================================================================
+
+import std::path;
+import std::fs;
+import std::net;
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Standard Library (std::path, std::fs, std::net)");
+
+    // 1. std::path::Path
+    let joined = Path.join("home/user", "projects/rad");
+    suite.check_eq_str("Path.join", joined.as_ptr() as str, "home/user/projects/rad");
+
+    let norm = Path.normalize("a/b/../c/./d");
+    suite.check_eq_str("Path.normalize", norm.as_ptr() as str, "a/c/d");
+
+    let ext = Path.extension("src/main.rad");
+    suite.check_eq_str("Path.extension", ext.as_ptr() as str, "rad");
+
+    let fname = Path.file_name("path/to/my_file.txt");
+    suite.check_eq_str("Path.file_name", fname.as_ptr() as str, "my_file.txt");
+
+    let parent_dir = Path.parent("path/to/my_file.txt");
+    suite.check_eq_str("Path.parent", parent_dir.as_ptr() as str, "path/to");
+
+    suite.check_true("Path.has_extension true", Path.has_extension("code.rad", "rad"));
+    suite.check_false("Path.has_extension false", Path.has_extension("code.c", "rad"));
+
+    let replaced_ext = Path.with_extension("document.txt", "pdf");
+    suite.check_eq_str("Path.with_extension", replaced_ext.as_ptr() as str, "document.pdf");
+
+    suite.check_true("Path.is_absolute", Path.is_absolute("/usr/bin/rad"));
+    suite.check_false("Path.is_absolute on relative", Path.is_absolute("src/main.rad"));
+    suite.check_true("Path.is_relative", Path.is_relative("src/main.rad"));
+
+    // 2. std::fs::Fs
+    let makefile_exists = Fs.exists("Makefile");
+    suite.check_true("Fs.exists Makefile", makefile_exists);
+
+    let mk_size = Fs.file_size("Makefile");
+    suite.check_true("Fs.file_size Makefile > 0", mk_size > 0i64);
+
+    let mk_meta_opt = Fs.metadata("Makefile");
+    var is_file = false;
+    var is_dir = true;
+    match mk_meta_opt {
+        Option::Some(m) => {
+            is_file = m.is_regular_file;
+            is_dir = m.is_directory;
+        },
+        Option::None => {}
+    }
+    suite.check_true("Fs.metadata.is_regular_file", is_file);
+    suite.check_false("Fs.metadata.is_directory", is_dir);
+
+    let src_entries = Fs.read_dir("src");
+    suite.check_true("Fs.read_dir src has entries", src_entries.len() > 0usize);
+
+    // 3. std::net
+    let resolved_opt = lookup_host("localhost");
+    var has_resolved = false;
+    match resolved_opt {
+        Option::Some(ip) => {
+            has_resolved = true;
+            suite.check_eq_str("lookup_host('localhost')", ip.as_ptr() as str, "127.0.0.1");
+        },
+        Option::None => {
+            suite.check_true("lookup_host failed", false);
+        }
+    }
+    suite.check_true("Resolved localhost", has_resolved);
+
+    let sock_opt = UdpSocket.bind("127.0.0.1", 19999);
+    var bind_ok = false;
+    match sock_opt {
+        Option::Some(sock) => {
+            bind_ok = true;
+            suite.check_true("UdpSocket.bind succeeded", sock.fd >= 0);
+            var u_sock: UdpSocket = sock as UdpSocket;
+            u_sock.close();
+        },
+        Option::None => {
+            suite.check_true("UdpSocket.bind failed", false);
+        }
+    }
+    suite.check_true("UdpSocket verified", bind_ok);
+
+    return suite.print_summary();
+}

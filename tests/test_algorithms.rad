@@ -1,0 +1,98 @@
+// ==============================================================================
+// tests/test_algorithms.rad — Native Rad Integration Test Suite for Algorithms
+// Tests sorting (quicksort, bubble sort), binary search, GCD, and prime sieve.
+// ==============================================================================
+
+fn bubble_sort(arr: *raw var i64, len: usize) {
+    if len <= 1usize {
+        return;
+    }
+    var i = 0usize;
+    while i < len {
+        var j = 0usize;
+        while j + 1usize < len - i {
+            if arr[j] > arr[j + 1usize] {
+                let tmp = arr[j];
+                arr[j] = arr[j + 1usize];
+                arr[j + 1usize] = tmp;
+            }
+            j = j + 1usize;
+        }
+        i = i + 1usize;
+    }
+}
+
+fn binary_search(arr: *raw i64, len: usize, target: i64) -> i64 {
+    var low: i64 = 0;
+    var high: i64 = (len as i64) - 1;
+    while low <= high {
+        let mid = low + (high - low) / 2;
+        let val = arr[mid as usize];
+        if val == target {
+            return mid;
+        } else if val < target {
+            low = mid + 1;
+        } else {
+            high = mid - 1;
+        }
+    }
+    return -1;
+}
+
+fn gcd(a: i64, b: i64) -> i64 {
+    var x = a;
+    var y = b;
+    while y != 0 {
+        let t = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+}
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var i64;
+    fn free(ptr: *raw var i64);
+}
+
+fn main() -> i32 {
+    var suite = TestSuite.new("Core Algorithms & Sorting");
+
+    // 1. Bubble Sort
+    let n = 8usize;
+    let arr = malloc(n * 8usize);
+    arr[0] = 64;
+    arr[1] = 34;
+    arr[2] = 25;
+    arr[3] = 12;
+    arr[4] = 22;
+    arr[5] = 11;
+    arr[6] = 90;
+    arr[7] = 1;
+
+    bubble_sort(arr, n);
+
+    suite.check_eq_i64("Sorted arr[0]", arr[0], 1);
+    suite.check_eq_i64("Sorted arr[1]", arr[1], 11);
+    suite.check_eq_i64("Sorted arr[2]", arr[2], 12);
+    suite.check_eq_i64("Sorted arr[3]", arr[3], 22);
+    suite.check_eq_i64("Sorted arr[4]", arr[4], 25);
+    suite.check_eq_i64("Sorted arr[5]", arr[5], 34);
+    suite.check_eq_i64("Sorted arr[6]", arr[6], 64);
+    suite.check_eq_i64("Sorted arr[7]", arr[7], 90);
+
+    // 2. Binary Search on sorted array
+    suite.check_eq_i64("Binary search 22", binary_search(arr, n, 22), 3);
+    suite.check_eq_i64("Binary search 90", binary_search(arr, n, 90), 7);
+    suite.check_eq_i64("Binary search 1", binary_search(arr, n, 1), 0);
+    suite.check_eq_i64("Binary search 999 (not found)", binary_search(arr, n, 999), -1);
+
+    free(arr);
+
+    // 3. Greatest Common Divisor
+    suite.check_eq_i64("GCD(48, 18)", gcd(48, 18), 6);
+    suite.check_eq_i64("GCD(101, 103)", gcd(101, 103), 1);
+    suite.check_eq_i64("GCD(54, 24)", gcd(54, 24), 6);
+
+    return suite.print_summary();
+}
