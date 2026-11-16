@@ -509,6 +509,66 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         return 0
     }
 
+    // When --test is passed, automatically include rad-test library if not explicitly provided
+    if opts.test_mode {
+        var already_has_test_lib = false
+        var ci = 0usize
+        while ci < opts.input_paths.len {
+            let inp = opts.input_paths.ptr[ci].as_ptr() as str
+            if str_contains(inp, "rad-test") || str_contains(inp, "rad_test") {
+                already_has_test_lib = true
+                break
+            }
+            ci = ci + 1usize
+        }
+        if !already_has_test_lib {
+            var rad_test_path = String.new()
+            let rad_home = getenv("RAD_HOME")
+            if (rad_home as usize) != 0usize && str_len(rad_home) > 0usize {
+                var p0 = String.new()
+                p0.push_str(rad_home)
+                p0.push_str("/packages/rad-test/src/lib.rad")
+                p0.push_byte(0u8)
+                let f0 = fopen(p0.as_ptr() as str, "rb")
+                if (f0 as usize) != 0usize {
+                    fclose(f0)
+                    rad_test_path = p0
+                }
+            }
+            if rad_test_path.len() == 0usize {
+                let home = getenv("HOME")
+                if (home as usize) != 0usize && str_len(home) > 0usize {
+                    var p1 = String.new()
+                    p1.push_str(home)
+                    p1.push_str("/.rad/packages/rad-test/src/lib.rad")
+                    p1.push_byte(0u8)
+                    let f1 = fopen(p1.as_ptr() as str, "rb")
+                    if (f1 as usize) != 0usize {
+                        fclose(f1)
+                        rad_test_path = p1
+                    }
+                }
+            }
+            if rad_test_path.len() == 0usize {
+                let f2 = fopen("lib/rad/rad-test/src/lib.rad", "rb")
+                if (f2 as usize) != 0usize {
+                    fclose(f2)
+                    rad_test_path = String.from_str("lib/rad/rad-test/src/lib.rad")
+                }
+            }
+            if rad_test_path.len() == 0usize {
+                let f3 = fopen("/home/abhinav/Projects/rad-lib/packages/rad-test/0.1.0/src/lib.rad", "rb")
+                if (f3 as usize) != 0usize {
+                    fclose(f3)
+                    rad_test_path = String.from_str("/home/abhinav/Projects/rad-lib/packages/rad-test/0.1.0/src/lib.rad")
+                }
+            }
+            if rad_test_path.len() > 0usize {
+                opts.input_paths.push(rad_test_path)
+            }
+        }
+    }
+
     // Step 1: Lex and Parse all input files into a unified AST arena
     var parser = Parser {
         tokens: Vec.new(),
