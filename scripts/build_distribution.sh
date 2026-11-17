@@ -95,7 +95,7 @@ echo "======================================================================"
 echo " Building Rad Complete Toolchain Distribution v${VERSION}"
 echo " Host:    ${HOST_TRIPLE}"
 echo " Target:  ${TARGET_TRIPLE}"
-echo " Archive: ${DIST_NAME}.tar.gz"
+echo " Archive: ${DIST_NAME}.tar.xz"
 echo "======================================================================"
 
 rm -rf "$BUILD_TMP" "$DIST_OUT"
@@ -114,7 +114,7 @@ echo "==> [1/4] Building hermetic musl toolchain binaries..."
 bash "$SCRIPT_DIR/build_musl_compiler.sh"
 
 # 1.2 Compile static-pie rad package manager using the new radc
-"$ROOT_DIR/bin/radc" "$ROOT_DIR/src/tools/rad_pm/src/fmt.rad" "$ROOT_DIR/src/tools/rad_pm/src/lsp.rad" "$ROOT_DIR/src/tools/rad_pm/src/toml.rad" "$ROOT_DIR/src/tools/rad_pm/src/test.rad" "$ROOT_DIR/src/tools/rad_pm/src/bench.rad" "$ROOT_DIR/src/tools/rad_pm/src/main.rad" -o "$ROOT_DIR/bin/rad" -O2
+"$ROOT_DIR/bin/radc" "$ROOT_DIR/src/tools/rad_pm/src/fmt.rad" "$ROOT_DIR/src/tools/rad_pm/src/lsp.rad" "$ROOT_DIR/src/tools/rad_pm/src/toml.rad" "$ROOT_DIR/src/tools/rad_pm/src/test.rad" "$ROOT_DIR/src/tools/rad_pm/src/bench.rad" "$ROOT_DIR/src/tools/rad_pm/src/doc.rad" "$ROOT_DIR/src/tools/rad_pm/src/main.rad" -o "$ROOT_DIR/bin/rad" -O2
 strip "$ROOT_DIR/bin/rad"
 
 # 1.3 Rigorous ELF verification of core binaries
@@ -167,7 +167,7 @@ elif [ -d "$HOME/Projects/rad-lib/packages" ]; then
     RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
 fi
 if [ -n "$RAD_LIB_DIR" ]; then
-    for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml; do
+    for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml; do
         if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
             cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$DIST_ROOT/packages/$pkg"
         fi
@@ -183,6 +183,7 @@ if [ -n "$RAD_LIB_DIR" ]; then
     ln -sfn rad-sqlite "$DIST_ROOT/packages/sqlite" 2>/dev/null || true
     ln -sfn rad-gfx "$DIST_ROOT/packages/gfx" 2>/dev/null || true
     ln -sfn rad-toml "$DIST_ROOT/packages/toml" 2>/dev/null || true
+    ln -sfn rad-yaml "$DIST_ROOT/packages/yaml" 2>/dev/null || true
 fi
 
 # Documentation & top-level files
@@ -262,22 +263,15 @@ strip --strip-all "$DIST_ROOT/bin/radc" "$DIST_ROOT/bin/rad" 2>/dev/null || true
 strip --strip-debug "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/lib"/*.a 2>/dev/null || true
 strip --strip-debug "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/crt"/*.o 2>/dev/null || true
 
-# 3.1 Package maximum-compression parallel .tar.gz
-if command -v pigz >/dev/null 2>&1; then
-    tar -cf - -C "$BUILD_TMP" "$DIST_NAME" | pigz -9 -p "$(nproc)" > "$DIST_OUT/${DIST_NAME}.tar.gz"
-else
-    GZIP="-9" tar -czf "$DIST_OUT/${DIST_NAME}.tar.gz" -C "$BUILD_TMP" "$DIST_NAME"
-fi
-sha256sum "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}' > "$DIST_OUT/${DIST_NAME}.tar.gz.sha256"
-echo "  [✓] Created ${DIST_NAME}.tar.gz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}'))"
-
-# 3.2 Package ultra-compact .tar.xz (typically 35-50% smaller for lower download size)
+# 3. Package ultra-compact .tar.xz archive
+echo "==> Packaging ultra-compact .tar.xz archive..."
 if command -v xz >/dev/null 2>&1; then
-    echo "==> Packaging ultra-compact .tar.xz..."
     tar -cf - -C "$BUILD_TMP" "$DIST_NAME" | xz -9e -T0 > "$DIST_OUT/${DIST_NAME}.tar.xz"
-    sha256sum "$DIST_OUT/${DIST_NAME}.tar.xz" | awk '{print $1}' > "$DIST_OUT/${DIST_NAME}.tar.xz.sha256"
-    echo "  [✓] Created ${DIST_NAME}.tar.xz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.xz" | awk '{print $1}'))"
+else
+    tar -cJf "$DIST_OUT/${DIST_NAME}.tar.xz" -C "$BUILD_TMP" "$DIST_NAME"
 fi
+sha256sum "$DIST_OUT/${DIST_NAME}.tar.xz" | awk '{print $1}' > "$DIST_OUT/${DIST_NAME}.tar.xz.sha256"
+echo "  [✓] Created ${DIST_NAME}.tar.xz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.xz" | awk '{print $1}'))"
 
 # Copy VS Code extension if available
 if [ -f "$ROOT_DIR/extensions/vscode-rad/rad-utils-${VERSION}.vsix" ]; then
@@ -340,7 +334,7 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
         echo "   Repository:  $REPO"
         echo "   Tag:         $RELEASE_TAG"
         echo "   Title:       $RELEASE_TITLE"
-        echo "   Asset:       $DIST_OUT/${DIST_NAME}.tar.gz"
+        echo "   Asset:       $DIST_OUT/${DIST_NAME}.tar.xz"
         echo "   Description: $RELEASE_DESC"
         echo "======================================================================"
         read -r -p "Proceed with upload? (y/n)> " proceed
@@ -352,10 +346,7 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
 
     echo ""
     echo "==> Uploading release to GitHub (${REPO})..."
-    UPLOAD_FILES=("$DIST_OUT/${DIST_NAME}.tar.gz" "$DIST_OUT/SHA256SUMS")
-    if [ -f "$DIST_OUT/${DIST_NAME}.tar.xz" ]; then
-        UPLOAD_FILES+=("$DIST_OUT/${DIST_NAME}.tar.xz")
-    fi
+    UPLOAD_FILES=("$DIST_OUT/${DIST_NAME}.tar.xz" "$DIST_OUT/SHA256SUMS")
     if [ -f "$DIST_OUT/rad-utils-${VERSION}.vsix" ]; then
         UPLOAD_FILES+=("$DIST_OUT/rad-utils-${VERSION}.vsix")
     fi

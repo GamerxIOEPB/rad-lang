@@ -1,0 +1,519 @@
+// ==============================================================================
+// rad doc — Native Documentation Generator for Rad
+// Extracts /// and /** */ doc comments from Rad source files and generates
+// modern, searchable, static HTML documentation.
+// ==============================================================================
+
+struct DocItem {
+    pub name: String,
+    pub kind: String,        // "Function", "Struct", "Enum", "Constant"
+    pub signature: String,
+    pub doc_comment: String,
+    pub file_name: String,
+    pub line_num: usize,
+}
+
+fn doc_trim(s: str) -> String {
+    let len = str_len(s);
+    if len == 0usize {
+        return String.new();
+    }
+    let p = s as *raw u8;
+    var start = 0usize;
+    while start < len && (p[start] == 32u8 || p[start] == 9u8 || p[start] == 10u8 || p[start] == 13u8) {
+        start = start + 1usize;
+    }
+    if start >= len {
+        return String.new();
+    }
+    var end = len - 1usize;
+    while end > start && (p[end] == 32u8 || p[end] == 9u8 || p[end] == 10u8 || p[end] == 13u8) {
+        end = end - 1usize;
+    }
+    var res = String.new();
+    var i = start;
+    while i <= end {
+        res.push_byte(p[i]);
+        i = i + 1usize;
+    }
+    res.push_byte(0u8);
+    return res;
+}
+
+fn string_slice(s: str, len: usize) -> String {
+    var out = String.new();
+    let p = s as *raw u8;
+    var i = 0usize;
+    while i < len {
+        out.push_byte(p[i]);
+        i = i + 1usize;
+    }
+    out.push_byte(0u8);
+    return out;
+}
+
+fn html_escape(s: str) -> String {
+    var out = String.new();
+    let p = s as *raw u8;
+    let len = str_len(s);
+    var i = 0usize;
+    while i < len {
+        let b = p[i];
+        if b == 60u8 { // '<'
+            out.push_str("&lt;");
+        } else if b == 62u8 { // '>'
+            out.push_str("&gt;");
+        } else if b == 38u8 { // '&'
+            out.push_str("&amp;");
+        } else if b == 34u8 { // '"'
+            out.push_str("&quot;");
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1usize;
+    }
+    return out;
+}
+
+fn extract_decl_name(line: str, prefix: str) -> String {
+    let p = line as *raw u8;
+    let len = str_len(line);
+    let plen = str_len(prefix);
+    var i = 0usize;
+    while i + plen <= len {
+        var match_prefix = true;
+        var pi = 0usize;
+        while pi < plen {
+            if p[i + pi] != (prefix as *raw u8)[pi] {
+                match_prefix = false;
+                break;
+            }
+            pi = pi + 1usize;
+        }
+        if match_prefix {
+            i = i + plen;
+            break;
+        }
+        i = i + 1usize;
+    }
+    // Skip spaces
+    while i < len && p[i] == 32u8 {
+        i = i + 1usize;
+    }
+    var name = String.new();
+    while i < len {
+        let b = p[i];
+        if (b >= 97u8 && b <= 122u8) || (b >= 65u8 && b <= 90u8) || (b >= 48u8 && b <= 57u8) || b == 95u8 {
+            name.push_byte(b);
+            i = i + 1usize;
+        } else {
+            break;
+        }
+    }
+    name.push_byte(0u8);
+    return name;
+}
+
+fn parse_doc_items_in_file(path: str, var items: *raw var Vec<usize >) {
+    let content = read_file_str(path);
+    if content.len() == 0usize {
+        return;
+    }
+    let lines = split_source_lines(content);
+
+    var current_doc = String.new();
+    var in_block_comment = false;
+
+    var line_idx = 0usize;
+    while line_idx < lines.len {
+        let line_str = lines.ptr[line_idx].as_ptr() as str;
+        let trimmed_str = doc_trim(line_str);
+        let trimmed = trimmed_str.as_ptr() as str;
+
+        if str_starts_with(trimmed, "/**") {
+            in_block_comment = true;
+            line_idx = line_idx + 1usize;
+            continue;
+        }
+        if in_block_comment {
+            if str_contains(trimmed, "*/") {
+                in_block_comment = false;
+            } else {
+                var stripped = trimmed;
+                if str_starts_with(stripped, "* ") {
+                    stripped = (stripped as usize + 2usize) as str;
+                } else if str_starts_with(stripped, "*") {
+                    stripped = (stripped as usize + 1usize) as str;
+                }
+                if current_doc.len() > 0usize {
+                    current_doc.push_byte(10u8);
+                }
+                current_doc.push_str(stripped);
+            }
+            line_idx = line_idx + 1usize;
+            continue;
+        }
+
+        if str_starts_with(trimmed, "///") {
+            var doc_line = trimmed;
+            if str_starts_with(doc_line, "/// ") {
+                doc_line = (doc_line as usize + 4usize) as str;
+            } else {
+                doc_line = (doc_line as usize + 3usize) as str;
+            }
+            if current_doc.len() > 0usize {
+                current_doc.push_byte(10u8);
+            }
+            current_doc.push_str(doc_line);
+            line_idx = line_idx + 1usize;
+            continue;
+        }
+
+        // Check for declarations
+        if str_starts_with(trimmed, "pub fn ") || str_starts_with(trimmed, "fn ") {
+            let fn_name = extract_decl_name(trimmed, "fn ");
+            if fn_name.len() > 0usize {
+                var sig = String.from_str(trimmed);
+                if str_ends_with(trimmed, "{") {
+                    sig = string_slice(trimmed, str_len(trimmed) - 1usize);
+                }
+                let it = malloc(200usize) as *raw var DocItem;
+                it.name = fn_name;
+                it.kind = String.from_str("Function");
+                it.signature = sig;
+                it.doc_comment = current_doc;
+                it.file_name = String.from_str(path);
+                it.line_num = line_idx + 1usize;
+                items.push(it as usize);
+                current_doc = String.new();
+            }
+        } else if str_starts_with(trimmed, "pub struct ") || str_starts_with(trimmed, "struct ") {
+            let s_name = extract_decl_name(trimmed, "struct ");
+            if s_name.len() > 0usize {
+                var sig = String.from_str(trimmed);
+                if str_ends_with(trimmed, "{") {
+                    sig = string_slice(trimmed, str_len(trimmed) - 1usize);
+                }
+                let it = malloc(200usize) as *raw var DocItem;
+                it.name = s_name;
+                it.kind = String.from_str("Struct");
+                it.signature = sig;
+                it.doc_comment = current_doc;
+                it.file_name = String.from_str(path);
+                it.line_num = line_idx + 1usize;
+                items.push(it as usize);
+                current_doc = String.new();
+            }
+        } else if str_starts_with(trimmed, "pub enum ") || str_starts_with(trimmed, "enum ") {
+            let e_name = extract_decl_name(trimmed, "enum ");
+            if e_name.len() > 0usize {
+                var sig = String.from_str(trimmed);
+                if str_ends_with(trimmed, "{") {
+                    sig = string_slice(trimmed, str_len(trimmed) - 1usize);
+                }
+                let it = malloc(200usize) as *raw var DocItem;
+                it.name = e_name;
+                it.kind = String.from_str("Enum");
+                it.signature = sig;
+                it.doc_comment = current_doc;
+                it.file_name = String.from_str(path);
+                it.line_num = line_idx + 1usize;
+                items.push(it as usize);
+                current_doc = String.new();
+            }
+        } else if str_starts_with(trimmed, "pub const ") || str_starts_with(trimmed, "const ") {
+            let c_name = extract_decl_name(trimmed, "const ");
+            if c_name.len() > 0usize {
+                let it = malloc(200usize) as *raw var DocItem;
+                it.name = c_name;
+                it.kind = String.from_str("Constant");
+                it.signature = String.from_str(trimmed);
+                it.doc_comment = current_doc;
+                it.file_name = String.from_str(path);
+                it.line_num = line_idx + 1usize;
+                items.push(it as usize);
+                current_doc = String.new();
+            }
+        } else if str_len(trimmed) > 0usize && !str_starts_with(trimmed, "//") && !str_starts_with(trimmed, "#[") {
+            current_doc = String.new();
+        }
+
+        line_idx = line_idx + 1usize;
+    }
+}
+
+pub fn cmd_doc(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
+    var is_open = false;
+    var output_dir = "target/doc";
+    var target_path = "";
+
+    var i = 2;
+    while i < argc {
+        let arg = argv[i] as str;
+        if str_eq(arg, "--open") {
+            is_open = true;
+        } else if str_eq(arg, "--output") && i + 1 < argc {
+            i = i + 1;
+            output_dir = argv[i] as str;
+        } else if !str_starts_with(arg, "-") {
+            target_path = arg;
+        }
+        i = i + 1;
+    }
+
+    println("==> Generating documentation for Rad project...");
+
+    var pkg_name = "Package Documentation";
+    if file_exists("rad.toml") {
+        let manifest_content = read_file_str("rad.toml");
+        let toml_res = TomlValue.parse(manifest_content);
+        match toml_res {
+            Result.Ok(tv) => {
+                let name_opt = tv.get("package.name");
+                match name_opt {
+                    Option.Some(nv) => {
+                        let ns = nv.as_str();
+                        if str_len(ns) > 0usize {
+                            pkg_name = ns;
+                        }
+                    },
+                    Option.None => {},
+                    _ => {},
+                }
+            },
+            Result.Err(_) => {},
+            _ => {},
+        }
+    }
+
+    // Collect source files
+    var files = Vec.new();
+    if str_len(target_path) > 0usize {
+        files.push(String.from_str(target_path));
+    } else if file_exists("src") {
+        let _f = system("find src -type f -name '*.rad' > /tmp/rad_doc_flist.txt 2>/dev/null");
+        let flist_str = read_file_str("/tmp/rad_doc_flist.txt");
+        let _rm = remove("/tmp/rad_doc_flist.txt");
+        let lines = split_source_lines(flist_str);
+        var fi = 0usize;
+        while fi < lines.len {
+            let f_trimmed = doc_trim(lines.ptr[fi].as_ptr() as str);
+            let f = f_trimmed.as_ptr() as str;
+            if str_len(f) > 0usize {
+                files.push(String.from_str(f));
+            }
+            fi = fi + 1usize;
+        }
+    } else {
+        let _f = system("find . -maxdepth 2 -type f -name '*.rad' > /tmp/rad_doc_flist.txt 2>/dev/null");
+        let flist_str = read_file_str("/tmp/rad_doc_flist.txt");
+        let _rm = remove("/tmp/rad_doc_flist.txt");
+        let lines = split_source_lines(flist_str);
+        var fi = 0usize;
+        while fi < lines.len {
+            let f_trimmed = doc_trim(lines.ptr[fi].as_ptr() as str);
+            let f = f_trimmed.as_ptr() as str;
+            if str_len(f) > 0usize && !str_starts_with(f, "./target") {
+                files.push(String.from_str(f));
+            }
+            fi = fi + 1usize;
+        }
+    }
+
+    if files.len == 0usize {
+        println("error: no .rad source files found to document.");
+        return 1;
+    }
+
+    var doc_items: Vec<usize > = Vec.new();
+    var fi = 0usize;
+    while fi < files.len {
+        let fpath = files.ptr[fi].as_ptr() as str;
+        parse_doc_items_in_file(fpath, &doc_items);
+        fi = fi + 1usize;
+    }
+
+    // Create output directory
+    var mkdir_cmd = String.new();
+    mkdir_cmd.push_str("mkdir -p ");
+    mkdir_cmd.push_str(output_dir);
+    let _ = system(mkdir_cmd.as_ptr() as str);
+
+    // Count categories
+    var fn_count = 0usize;
+    var struct_count = 0usize;
+    var enum_count = 0usize;
+    var const_count = 0usize;
+    var di = 0usize;
+    while di < doc_items.len {
+        let it = doc_items.ptr[di] as *raw var DocItem;
+        let kname = it.kind.as_ptr() as str;
+        if str_eq(kname, "Function") { fn_count = fn_count + 1usize; }
+        else if str_eq(kname, "Struct") { struct_count = struct_count + 1usize; }
+        else if str_eq(kname, "Enum") { enum_count = enum_count + 1usize; }
+        else if str_eq(kname, "Constant") { const_count = const_count + 1usize; }
+        di = di + 1usize;
+    }
+
+    // Build HTML
+    var html = String.new();
+    html.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
+    html.push_str("<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+    html.push_str("<title>");
+    html.push_str(html_escape(pkg_name).as_ptr() as str);
+    html.push_str(" — Rad Documentation</title>\n");
+    html.push_str("<style>\n");
+    html.push_str(":root { --bg: #0d1117; --card-bg: #161b22; --border: #30363d; --text: #c9d1d9; --heading: #f0f6fc; --accent: #58a6ff; --code-bg: #1f242c; --fn-badge: #388bfd; --struct-badge: #7ee787; --enum-badge: #ffa657; --const-badge: #d2a8ff; }\n");
+    html.push_str("body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }\n");
+    html.push_str(".sidebar { width: 300px; background: #010409; border-right: 1px solid var(--border); padding: 24px; box-sizing: border-box; flex-shrink: 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }\n");
+    html.push_str(".sidebar h1 { font-size: 20px; color: var(--heading); margin: 0 0 16px 0; }\n");
+    html.push_str(".sidebar .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 12px; background: var(--accent); color: #010409; font-weight: bold; margin-bottom: 16px; }\n");
+    html.push_str(".search-box { width: 100%; padding: 8px 12px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 14px; box-sizing: border-box; margin-bottom: 20px; outline: none; }\n");
+    html.push_str(".search-box:focus { border-color: var(--accent); }\n");
+    html.push_str(".nav-section { margin-bottom: 20px; }\n");
+    html.push_str(".nav-section h3 { font-size: 12px; text-transform: uppercase; color: #8b949e; letter-spacing: 0.5px; margin: 0 0 8px 0; }\n");
+    html.push_str(".nav-link { display: flex; justify-content: space-between; color: var(--text); text-decoration: none; font-size: 13px; padding: 4px 0; }\n");
+    html.push_str(".nav-link:hover { color: var(--accent); }\n");
+    html.push_str(".content { flex-grow: 1; padding: 40px; max-width: 900px; margin: 0 auto; }\n");
+    html.push_str(".doc-item { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 24px; transition: border-color 0.2s; }\n");
+    html.push_str(".doc-item:hover { border-color: #58a6ff66; }\n");
+    html.push_str(".item-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }\n");
+    html.push_str(".badge { font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; }\n");
+    html.push_str(".badge-Function { background: #388bfd26; color: var(--fn-badge); border: 1px solid #388bfd40; }\n");
+    html.push_str(".badge-Struct { background: #7ee78726; color: var(--struct-badge); border: 1px solid #7ee78740; }\n");
+    html.push_str(".badge-Enum { background: #ffa65726; color: var(--enum-badge); border: 1px solid #ffa65740; }\n");
+    html.push_str(".badge-Constant { background: #d2a8ff26; color: var(--const-badge); border: 1px solid #d2a8ff40; }\n");
+    html.push_str(".item-title { font-size: 18px; color: var(--heading); margin: 0; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }\n");
+    html.push_str(".item-file { margin-left: auto; font-size: 12px; color: #8b949e; font-family: monospace; }\n");
+    html.push_str(".decl-box { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; margin-bottom: 12px; }\n");
+    html.push_str(".decl-box code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 13px; color: #79c0ff; }\n");
+    html.push_str(".doc-body { font-size: 14px; line-height: 1.6; color: var(--text); }\n");
+    html.push_str(".doc-body p { margin: 8px 0; }\n");
+    html.push_str(".doc-body code { background: #6e768166; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-family: monospace; }\n");
+    html.push_str("</style>\n</head>\n<body>\n");
+
+    // Sidebar
+    html.push_str("<div class=\"sidebar\">\n");
+    html.push_str("<h1>");
+    html.push_str(html_escape(pkg_name).as_ptr() as str);
+    html.push_str("</h1>\n");
+    html.push_str("<span class=\"tag\">Rad v0.2.4</span>\n");
+    html.push_str("<input type=\"text\" id=\"docSearch\" class=\"search-box\" placeholder=\"Filter symbols...\" oninput=\"filterSymbols()\">\n");
+
+    html.push_str("<div class=\"nav-section\">\n<h3>Summary</h3>\n");
+    html.push_str("<div class=\"nav-link\"><span>Functions</span><span>");
+    html.push_str(int_to_str(fn_count as i64).as_ptr() as str);
+    html.push_str("</span></div>\n");
+    html.push_str("<div class=\"nav-link\"><span>Structs</span><span>");
+    html.push_str(int_to_str(struct_count as i64).as_ptr() as str);
+    html.push_str("</span></div>\n");
+    html.push_str("<div class=\"nav-link\"><span>Enums</span><span>");
+    html.push_str(int_to_str(enum_count as i64).as_ptr() as str);
+    html.push_str("</span></div>\n");
+    html.push_str("<div class=\"nav-link\"><span>Constants</span><span>");
+    html.push_str(int_to_str(const_count as i64).as_ptr() as str);
+    html.push_str("</span></div>\n");
+    html.push_str("</div>\n</div>\n");
+
+    // Main Content
+    html.push_str("<div class=\"content\">\n");
+    html.push_str("<h1 style=\"color:var(--heading);border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:24px;\">");
+    html.push_str(html_escape(pkg_name).as_ptr() as str);
+    html.push_str(" API Reference</h1>\n");
+
+    di = 0usize;
+    while di < doc_items.len {
+        let it = doc_items.ptr[di] as *raw var DocItem;
+        let kname = it.kind.as_ptr() as str;
+
+        html.push_str("<div class=\"doc-item\" data-name=\"");
+        html.push_str(html_escape(it.name.as_ptr() as str).as_ptr() as str);
+        html.push_str("\" data-kind=\"");
+        html.push_str(kname);
+        html.push_str("\">\n");
+
+        html.push_str("<div class=\"item-header\">\n");
+        html.push_str("<span class=\"badge badge-");
+        html.push_str(kname);
+        html.push_str("\">");
+        html.push_str(kname);
+        html.push_str("</span>\n");
+        html.push_str("<h3 class=\"item-title\" id=\"");
+        html.push_str(html_escape(it.name.as_ptr() as str).as_ptr() as str);
+        html.push_str("\">");
+        html.push_str(html_escape(it.name.as_ptr() as str).as_ptr() as str);
+        html.push_str("</h3>\n");
+        html.push_str("<span class=\"item-file\">");
+        html.push_str(html_escape(it.file_name.as_ptr() as str).as_ptr() as str);
+        html.push_str(":");
+        html.push_str(int_to_str(it.line_num as i64).as_ptr() as str);
+        html.push_str("</span>\n</div>\n");
+
+        html.push_str("<div class=\"decl-box\"><code>");
+        html.push_str(html_escape(it.signature.as_ptr() as str).as_ptr() as str);
+        html.push_str("</code></div>\n");
+
+        html.push_str("<div class=\"doc-body\">\n");
+        if it.doc_comment.len() > 0usize {
+            let doc_lines = split_source_lines(it.doc_comment);
+            var dli = 0usize;
+            while dli < doc_lines.len {
+                let dl = doc_lines.ptr[dli].as_ptr() as str;
+                if str_len(dl) > 0usize {
+                    html.push_str("<p>");
+                    html.push_str(html_escape(dl).as_ptr() as str);
+                    html.push_str("</p>\n");
+                }
+                dli = dli + 1usize;
+            }
+        } else {
+            html.push_str("<p><em>No documentation provided.</em></p>\n");
+        }
+        html.push_str("</div>\n</div>\n");
+
+        di = di + 1usize;
+    }
+    html.push_str("</div>\n");
+
+    // Search filter script
+    html.push_str("<script>\n");
+    html.push_str("function filterSymbols() {\n");
+    html.push_str("  const q = document.getElementById('docSearch').value.toLowerCase();\n");
+    html.push_str("  const items = document.querySelectorAll('.doc-item');\n");
+    html.push_str("  items.forEach(el => {\n");
+    html.push_str("    const name = el.getAttribute('data-name').toLowerCase();\n");
+    html.push_str("    const kind = el.getAttribute('data-kind').toLowerCase();\n");
+    html.push_str("    if (name.includes(q) || kind.includes(q)) {\n");
+    html.push_str("      el.style.display = 'block';\n");
+    html.push_str("    } else {\n");
+    html.push_str("      el.style.display = 'none';\n");
+    html.push_str("    }\n");
+    html.push_str("  });\n");
+    html.push_str("}\n");
+    html.push_str("</script>\n");
+    html.push_str("</body>\n</html>\n");
+
+    // Write index.html
+    var out_file = String.new();
+    out_file.push_str(output_dir);
+    out_file.push_str("/index.html");
+
+    let ok = write_file_str(out_file.as_ptr() as str, html.as_ptr() as str);
+    if !ok {
+        println("error: failed to write documentation file.");
+        return 1;
+    }
+
+    println("   [✓] Documentation generated successfully at ");
+    println(out_file.as_ptr() as str);
+
+    if is_open {
+        var open_cmd = String.new();
+        open_cmd.push_str("xdg-open ");
+        open_cmd.push_str(out_file.as_ptr() as str);
+        open_cmd.push_str(" >/dev/null 2>&1 &");
+        let _ = system(open_cmd.as_ptr() as str);
+    }
+
+    return 0;
+}

@@ -1,0 +1,191 @@
+// ==============================================================================
+// Rad Graphics Demo 3: Conway's Game of Life Cellular Automaton (60 FPS)
+// Features age-based color gradients, toroidal boundary wrapping, and interactive controls.
+// Controls: 'r' randomize, 'c' clear, 'q' quit.
+// ==============================================================================
+
+import gfx;
+
+struct Rng {
+    pub state: u64,
+}
+
+impl Rng {
+    pub fn new(seed: u64) -> Rng {
+        return Rng { state: seed };
+    }
+
+    pub fn next(var self) -> u64 {
+        self.state = self.state ^ (self.state << 13u64);
+        self.state = self.state ^ (self.state >> 7u64);
+        self.state = self.state ^ (self.state << 17u64);
+        return self.state;
+    }
+
+    pub fn range(var self, min_val: i64, max_val: i64) -> i64 {
+        let span = (max_val - min_val) + 1i64;
+        let r = (self.next() % (span as u64)) as i64;
+        return min_val + r;
+    }
+}
+
+fn seed_glider(grid: *raw var u8, width: usize, gx: usize, gy: usize) {
+    // Standard 3x3 glider
+    grid[(gy * width) + gx + 1usize] = 1u8;
+    grid[((gy + 1usize) * width) + gx + 2usize] = 1u8;
+    grid[((gy + 2usize) * width) + gx] = 1u8;
+    grid[((gy + 2usize) * width) + gx + 1usize] = 1u8;
+    grid[((gy + 2usize) * width) + gx + 2usize] = 1u8;
+}
+
+pub fn main() -> i32 {
+    let width = 80usize;
+    let height = 48usize;
+    let total_cells = width * height;
+
+    var window = Window.open(width, height, "Rad Conway's Game of Life");
+    var canvas = Canvas.new(width, height);
+
+    var rng = Rng.new(9876543219876543u64);
+
+    let cur_grid = malloc(total_cells) as *raw var u8;
+    let next_grid = malloc(total_cells) as *raw var u8;
+    let age_grid = malloc(total_cells) as *raw var u8;
+
+    // Initialize with randomized clusters and gliders
+    var idx = 0usize;
+    while idx < total_cells {
+        cur_grid[idx] = 0u8;
+        next_grid[idx] = 0u8;
+        age_grid[idx] = 0u8;
+        if rng.range(0i64, 100i64) < 18i64 {
+            cur_grid[idx] = 1u8;
+            age_grid[idx] = 1u8;
+        }
+        idx = idx + 1usize;
+    }
+
+    // Spawn gliders
+    seed_glider(cur_grid, width, 5usize, 5usize);
+    seed_glider(cur_grid, width, 25usize, 12usize);
+    seed_glider(cur_grid, width, 55usize, 20usize);
+
+    var frame = 0u64;
+    let max_frames = 180u64;
+
+    while window.is_open() && frame < max_frames {
+        let ev_opt = window.poll_event();
+        match ev_opt {
+            Option.Some(ev) => {
+                if ev.is_close() || ev.is_key(113u8) { // 'q'
+                    window.close();
+                } else if ev.is_key(114u8) { // 'r' randomize
+                    idx = 0usize;
+                    while idx < total_cells {
+                        if rng.range(0i64, 100i64) < 22i64 {
+                            cur_grid[idx] = 1u8;
+                            age_grid[idx] = 1u8;
+                        } else {
+                            cur_grid[idx] = 0u8;
+                            age_grid[idx] = 0u8;
+                        }
+                        idx = idx + 1usize;
+                    }
+                } else if ev.is_key(99u8) { // 'c' clear
+                    idx = 0usize;
+                    while idx < total_cells {
+                        cur_grid[idx] = 0u8;
+                        age_grid[idx] = 0u8;
+                        idx = idx + 1usize;
+                    }
+                }
+            },
+            Option.None => {},
+            _ => {},
+        }
+
+        if !window.is_open() {
+            break;
+        }
+
+        canvas.clear(Color.rgb(8u8, 10u8, 16u8)); // Deep background
+
+        // Update grid and render
+        var y = 0usize;
+        while y < height {
+            var x = 0usize;
+            while x < width {
+                // Toroidal neighbor counting
+                let left = (x + width - 1usize) % width;
+                let right = (x + 1usize) % width;
+                let up = (y + height - 1usize) % height;
+                let down = (y + 1usize) % height;
+
+                var neighbors = 0i32;
+                if cur_grid[(up * width) + left] > 0u8 { neighbors = neighbors + 1; }
+                if cur_grid[(up * width) + x] > 0u8 { neighbors = neighbors + 1; }
+                if cur_grid[(up * width) + right] > 0u8 { neighbors = neighbors + 1; }
+                if cur_grid[(y * width) + left] > 0u8 { neighbors = neighbors + 1; }
+                if cur_grid[(y * width) + right] > 0u8 { neighbors = neighbors + 1; }
+                if cur_grid[(down * width) + left] > 0u8 { neighbors = neighbors + 1; }
+                if cur_grid[(down * width) + x] > 0u8 { neighbors = neighbors + 1; }
+                if cur_grid[(down * width) + right] > 0u8 { neighbors = neighbors + 1; }
+
+                let cell_idx = (y * width) + x;
+                let is_alive = cur_grid[cell_idx] > 0u8;
+
+                // Conway B3/S23 rules
+                if is_alive && (neighbors == 2 || neighbors == 3) {
+                    next_grid[cell_idx] = 1u8;
+                    let old_age = age_grid[cell_idx];
+                    if old_age < 250u8 {
+                        age_grid[cell_idx] = old_age + 1u8;
+                    }
+                } else if !is_alive && neighbors == 3 {
+                    next_grid[cell_idx] = 1u8;
+                    age_grid[cell_idx] = 1u8;
+                } else {
+                    next_grid[cell_idx] = 0u8;
+                    age_grid[cell_idx] = 0u8;
+                }
+
+                // Render cell with color based on age
+                if is_alive {
+                    let a = age_grid[cell_idx];
+                    var col = Color.rgb(80u8, 255u8, 120u8); // Young: neon green
+                    if a > 8u8 {
+                        col = Color.rgb(255u8, 100u8, 220u8); // Veteran: magenta/pink
+                    } else if a > 4u8 {
+                        col = Color.rgb(80u8, 220u8, 255u8); // Mature: electric cyan
+                    } else if a > 2u8 {
+                        col = Color.rgb(255u8, 230u8, 80u8);  // Mid-age: gold yellow
+                    }
+                    canvas.set_pixel(x, y, col);
+                }
+
+                x = x + 1usize;
+            }
+            y = y + 1usize;
+        }
+
+        // Copy next_grid back to cur_grid
+        idx = 0usize;
+        while idx < total_cells {
+            cur_grid[idx] = next_grid[idx];
+            idx = idx + 1usize;
+        }
+
+        window.draw_canvas(canvas);
+        Window.sleep_frame(30u64); // 30 FPS update for clear cellular evolution
+        frame = frame + 1u64;
+    }
+
+    free(cur_grid);
+    free(next_grid);
+    free(age_grid);
+    canvas.destroy();
+    window.close();
+
+    println("Conway's Game of Life finished successfully!");
+    return 0;
+}

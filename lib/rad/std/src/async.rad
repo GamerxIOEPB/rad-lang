@@ -1,126 +1,237 @@
 // Rad Asynchronous Concurrency Runtime (`std.async`)
-// Cooperative task scheduling, Futures, Epoll reactor, and non-blocking I/O.
+// Pure Linux epoll reactor, non-blocking sockets, and task scheduling.
 
-enum Poll<T> {
-    Pending,
-    Ready(T),
+pub const EPOLLIN: u32 = 1u32;
+pub const EPOLLPRI: u32 = 2u32;
+pub const EPOLLOUT: u32 = 4u32;
+pub const EPOLLERR: u32 = 8u32;
+pub const EPOLLHUP: u32 = 16u32;
+pub const EPOLLET: u32 = 2147483648u32; // (1u32 << 31) Edge-Triggered
+pub const EPOLLONESHOT: u32 = 1073741824u32; // (1u32 << 30)
+
+pub const EPOLL_CTL_ADD: i32 = 1;
+pub const EPOLL_CTL_DEL: i32 = 2;
+pub const EPOLL_CTL_MOD: i32 = 3;
+
+pub struct EpollEvent {
+    pub events: u32,
+    pub fd: i32,
 }
 
-impl<T> Poll<T> {
-    pub fn is_ready(self) -> bool {
-        match self {
-            Poll.Ready(_) => true,
-            Poll.Pending => false,
-        }
+impl EpollEvent {
+    pub fn is_readable(self) -> bool {
+        return (self.events & EPOLLIN) != 0u32;
     }
 
-    pub fn is_pending(self) -> bool {
-        match self {
-            Poll.Pending => true,
-            Poll.Ready(_) => false,
-        }
-    }
-}
-
-pub struct Waker {
-    pipe_write_fd: i32,
-}
-
-impl Waker {
-    pub fn new(pipe_write_fd: i32) -> Waker {
-        Waker { pipe_write_fd: pipe_write_fd }
+    pub fn is_writable(self) -> bool {
+        return (self.events & EPOLLOUT) != 0u32;
     }
 
-    pub fn wake(self) {
-        if self.pipe_write_fd >= 0 {
-            let buf = 1u8
-            let _ = write(self.pipe_write_fd, (&buf) as *raw const u8, 1usize)
-        }
+    pub fn is_error(self) -> bool {
+        return (self.events & (EPOLLERR | EPOLLHUP)) != 0u32;
     }
 }
 
-pub struct Context {
-    waker: Waker,
-}
-
-impl Context {
-    pub fn from_waker(waker: Waker) -> Context {
-        Context { waker: waker }
+pub fn set_nonblocking(fd: i32) -> bool {
+    // SYS_fcntl = 72
+    let flags = syscall3(72i64, fd as i64, 3i64, 0i64); // F_GETFL = 3
+    if flags < 0i64 {
+        return false;
     }
-
-    pub fn waker(self) -> Waker {
-        self.waker
-    }
+    let res = syscall3(72i64, fd as i64, 4i64, (flags | 2048i64)); // F_SETFL = 4, O_NONBLOCK = 2048
+    return (res >= 0i64);
 }
 
 pub struct EpollReactor {
-    epfd: i32,
+    pub epfd: i32,
 }
 
 impl EpollReactor {
-    pub fn new() -> EpollReactor {
-        let fd = epoll_create1(0)
-        EpollReactor { epfd: fd }
+    pub fn new() -> Option<EpollReactor> {
+        // SYS_epoll_create1 = 291
+        let fd = syscall1(291i64, 524288i64); // EPOLL_CLOEXEC
+        if fd < 0i64 {
+            let fd_plain = syscall1(291i64, 0i64);
+            if fd_plain < 0i64 {
+                return Option.None;
+            }
+            return Option.Some(EpollReactor { epfd: fd_plain as i32 });
+        }
+        return Option.Some(EpollReactor { epfd: fd as i32 });
     }
 
-    pub fn poll(self, timeout_ms: i32) -> i32 {
-        let events_buf = [0u8; 128]
-        epoll_wait(self.epfd, (&events_buf) as *raw const u8, 10, timeout_ms)
+    pub fn add(self, fd: i32, events: u32) -> bool {
+        let ev = malloc(16usize) as *raw var u8;
+        ev[0usize] = (events & 255u32) as u8;
+        ev[1usize] = ((events >> 8u32) & 255u32) as u8;
+        ev[2usize] = ((events >> 16u32) & 255u32) as u8;
+        ev[3usize] = ((events >> 24u32) & 255u32) as u8;
+        ev[4usize] = 0u8; ev[5usize] = 0u8; ev[6usize] = 0u8; ev[7usize] = 0u8;
+        ev[8usize] = (fd & 255) as u8;
+        ev[9usize] = ((fd >> 8) & 255) as u8;
+        ev[10usize] = ((fd >> 16) & 255) as u8;
+        ev[11usize] = ((fd >> 24) & 255) as u8;
+        ev[12usize] = 0u8; ev[13usize] = 0u8; ev[14usize] = 0u8; ev[15usize] = 0u8;
+        // SYS_epoll_ctl = 233, EPOLL_CTL_ADD = 1
+        let ret = syscall4(233i64, self.epfd as i64, 1i64, fd as i64, ev);
+        free(ev);
+        return (ret == 0i64);
+    }
+
+    pub fn modify(self, fd: i32, events: u32) -> bool {
+        let ev = malloc(16usize) as *raw var u8;
+        ev[0usize] = (events & 255u32) as u8;
+        ev[1usize] = ((events >> 8u32) & 255u32) as u8;
+        ev[2usize] = ((events >> 16u32) & 255u32) as u8;
+        ev[3usize] = ((events >> 24u32) & 255u32) as u8;
+        ev[4usize] = 0u8; ev[5usize] = 0u8; ev[6usize] = 0u8; ev[7usize] = 0u8;
+        ev[8usize] = (fd & 255) as u8;
+        ev[9usize] = ((fd >> 8) & 255) as u8;
+        ev[10usize] = ((fd >> 16) & 255) as u8;
+        ev[11usize] = ((fd >> 24) & 255) as u8;
+        ev[12usize] = 0u8; ev[13usize] = 0u8; ev[14usize] = 0u8; ev[15usize] = 0u8;
+        // SYS_epoll_ctl = 233, EPOLL_CTL_MOD = 3
+        let ret = syscall4(233i64, self.epfd as i64, 3i64, fd as i64, ev);
+        free(ev);
+        return (ret == 0i64);
+    }
+
+    pub fn remove(self, fd: i32) -> bool {
+        // SYS_epoll_ctl = 233, EPOLL_CTL_DEL = 2
+        let ret = syscall4(233i64, self.epfd as i64, 2i64, fd as i64, 0usize as *raw u8);
+        return (ret == 0i64);
+    }
+
+    pub fn poll_events(self, max_events: usize, timeout_ms: i32) -> Vec<EpollEvent> {
+        var list = Vec.new();
+        if max_events == 0usize {
+            return list;
+        }
+        let ev_buf = malloc(max_events * 16usize) as *raw var u8;
+        // SYS_epoll_wait = 232
+        let count = syscall4(232i64, self.epfd as i64, ev_buf, max_events as i64, timeout_ms as i64);
+        if count <= 0i64 {
+            free(ev_buf);
+            return list;
+        }
+        var i = 0usize;
+        let total = count as usize;
+        while i < total {
+            let offset = i * 16usize;
+            let b0 = ev_buf[offset] as u32;
+            let b1 = ev_buf[offset + 1usize] as u32;
+            let b2 = ev_buf[offset + 2usize] as u32;
+            let b3 = ev_buf[offset + 3usize] as u32;
+            let ev_mask = (b0 & 255u32) | ((b1 & 255u32) << 8u32) | ((b2 & 255u32) << 16u32) | ((b3 & 255u32) << 24u32);
+
+            let f0 = ev_buf[offset + 8usize] as i32;
+            let f1 = ev_buf[offset + 9usize] as i32;
+            let f2 = ev_buf[offset + 10usize] as i32;
+            let f3 = ev_buf[offset + 11usize] as i32;
+            let fd = (f0 & 255) | ((f1 & 255) << 8) | ((f2 & 255) << 16) | ((f3 & 255) << 24);
+
+            list.push(EpollEvent {
+                events: ev_mask,
+                fd: fd,
+            });
+            i = i + 1usize;
+        }
+        free(ev_buf);
+        return list;
     }
 
     pub fn close(self) {
         if self.epfd >= 0 {
-            close(self.epfd)
+            let _ = syscall1(3i64, self.epfd as i64);
         }
     }
 }
 
-pub struct Task<T> {
-    func: fn() -> T,
-    completed: bool,
+pub struct AsyncTcpListener {
+    pub listener_fd: i32,
+    pub reactor: EpollReactor,
 }
 
-impl<T> Task<T> {
-    pub fn new(f: fn() -> T) -> Task<T> {
-        Task {
-            func: f,
-            completed: false,
+impl AsyncTcpListener {
+    pub fn bind(port: i32) -> Option<AsyncTcpListener> {
+        let reactor_opt = EpollReactor.new();
+        match reactor_opt {
+            Option.Some(reactor) => {
+                // SYS_socket = 41 (AF_INET = 2, SOCK_STREAM = 1, 0)
+                let fd = syscall3(41i64, 2i64, 1i64, 0i64) as i32;
+                if fd < 0 {
+                    return Option.None;
+                }
+                // SO_REUSEADDR (level SOL_SOCKET = 1, opt SO_REUSEADDR = 2)
+                let one_val = malloc(4usize) as *raw var u8;
+                one_val[0usize] = 1u8; one_val[1usize] = 0u8; one_val[2usize] = 0u8; one_val[3usize] = 0u8;
+                let _ = syscall5(54i64, fd as i64, 1i64, 2i64, one_val, 4i64); // SYS_setsockopt = 54
+                free(one_val);
+
+                // sockaddr_in: sin_family = 2 (AF_INET), sin_port = htons(port), sin_addr = 0 (INADDR_ANY)
+                let addr = malloc(16usize) as *raw var u8;
+                var a_i = 0usize;
+                while a_i < 16usize { addr[a_i] = 0u8; a_i = a_i + 1usize; }
+                addr[0usize] = 2u8; // AF_INET
+                let p_hi = ((port >> 8) & 255) as u8;
+                let p_lo = (port & 255) as u8;
+                addr[2usize] = p_hi;
+                addr[3usize] = p_lo;
+
+                // SYS_bind = 49
+                let b_res = syscall3(49i64, fd as i64, addr, 16i64);
+                free(addr);
+                if b_res != 0i64 {
+                    let _ = syscall1(3i64, fd as i64);
+                    return Option.None;
+                }
+
+                // SYS_listen = 50
+                let l_res = syscall2(50i64, fd as i64, 128i64);
+                if l_res != 0i64 {
+                    let _ = syscall1(3i64, fd as i64);
+                    return Option.None;
+                }
+
+                set_nonblocking(fd);
+                reactor.add(fd, EPOLLIN);
+                return Option.Some(AsyncTcpListener {
+                    listener_fd: fd,
+                    reactor: reactor,
+                });
+            },
+            Option.None => return Option.None,
+            _ => return Option.None,
         }
     }
 
-    pub fn poll(var self) -> Poll<T> {
-        if self.completed {
-            Poll.Pending
-        } else {
-            let res = (self.func)()
-            self.completed = true
-            Poll.Ready(res)
+    pub fn accept_client(self) -> Option<i32> {
+        // SYS_accept = 43
+        let cfd = syscall3(43i64, self.listener_fd as i64, 0usize as *raw u8, 0usize as *raw u8) as i32;
+        if cfd < 0 {
+            return Option.None;
         }
+        set_nonblocking(cfd);
+        return Option.Some(cfd);
     }
 }
 
 pub fn yield_now() {
-    sched_yield()
+    // SYS_sched_yield = 24
+    let _ = syscall0(24i64);
 }
 
-pub fn block_on<T>(f: fn() -> T) -> T {
-    var task = Task.new(f)
-    var result = (f)()
-    var done = false
-    while !done {
-        match task.poll() {
-            Poll.Ready(val) => {
-                result = val
-                done = true
-            }
-            Poll.Pending => {
-                let _ = sched_yield()
-            }
-        }
+pub fn sleep_ms(ms: u64) {
+    // SYS_nanosleep = 35
+    let req = malloc(16usize) as *raw var u8;
+    let sec = (ms / 1000u64) as i64;
+    let nsec = ((ms % 1000u64) * 1000000u64) as i64;
+    var i = 0usize;
+    while i < 8usize {
+        req[i] = ((sec >> (i * 8usize)) & 255i64) as u8;
+        req[i + 8usize] = ((nsec >> (i * 8usize)) & 255i64) as u8;
+        i = i + 1usize;
     }
-    result
-}
-
-pub fn sleep_async_ms(ms: u64) {
-    usleep((ms * 1000u64) as u32)
+    let _ = syscall2(35i64, req, 0usize as *raw u8);
+    free(req);
 }

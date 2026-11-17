@@ -19,6 +19,28 @@ fn proc_str_len(s: str) -> usize {
     return len
 }
 
+fn os_read_all(fd: i32) -> String {
+    var out = String.new()
+    if fd < 0 {
+        return out
+    }
+    let buf = malloc(4096usize) as *raw var u8
+    var n = syscall3(0i64, fd as i64, buf, 4096i64)
+    while n > 0i64 {
+        var i = 0usize
+        let count = n as usize
+        while i < count {
+            out.push_byte(buf[i])
+            i = i + 1usize
+        }
+        n = syscall3(0i64, fd as i64, buf, 4096i64)
+    }
+    free(buf)
+    let _ = syscall1(3i64, fd as i64)
+    out.push_byte(0u8)
+    return out
+}
+
 pub struct ChildProcess {
     pub pid: i32,
     pub stdin_fd: i32,
@@ -71,6 +93,14 @@ impl ChildProcess {
             let _ = syscall1(3i64, self.stdin_fd as i64)
             self.stdin_fd = -1
         }
+    }
+
+    pub fn read_stdout(self) -> String {
+        return os_read_all(self.stdout_fd)
+    }
+
+    pub fn read_stderr(self) -> String {
+        return os_read_all(self.stderr_fd)
     }
 }
 
@@ -324,6 +354,9 @@ impl Command {
                     i = i + 1usize
                 }
                 envp_raw[envc] = 0usize
+            } else {
+                envp_raw = malloc(8usize) as *raw var usize
+                envp_raw[0usize] = 0usize
             }
 
             // SYS_execve = 59
@@ -422,6 +455,219 @@ impl Command {
             _ => return Option.None,
         }
     }
+
+    pub fn pipe(self, next_cmd: Command) -> Pipeline {
+        return Pipeline.new(self, next_cmd)
+    }
+}
+
+pub struct Pipeline {
+    pub cmd1: Command,
+    pub cmd2: Command,
+}
+
+impl Pipeline {
+    pub fn new(c1: Command, c2: Command) -> Pipeline {
+        return Pipeline {
+            cmd1: c1,
+            cmd2: c2,
+        }
+    }
+
+    pub fn run(self) -> Option<Output> {
+        // Intermediate pipe between cmd1 and cmd2
+        let pbuf = malloc(8usize) as *raw var u8
+        let pr_mid = syscall1(22i64, pbuf)
+        if pr_mid != 0i64 {
+            free(pbuf)
+            return Option.None
+        }
+        let mid_r = (pbuf[0usize] as i32 & 255) | ((pbuf[1usize] as i32 & 255) << 8) | ((pbuf[2usize] as i32 & 255) << 16) | ((pbuf[3usize] as i32 & 255) << 24)
+        let mid_w = (pbuf[4usize] as i32 & 255) | ((pbuf[5usize] as i32 & 255) << 8) | ((pbuf[6usize] as i32 & 255) << 16) | ((pbuf[7usize] as i32 & 255) << 24)
+
+        // Capture stdout pipe for cmd2
+        let pr_out = syscall1(22i64, pbuf)
+        if pr_out != 0i64 {
+            let _ = syscall1(3i64, mid_r as i64)
+            let _ = syscall1(3i64, mid_w as i64)
+            free(pbuf)
+            return Option.None
+        }
+        let out_r = (pbuf[0usize] as i32 & 255) | ((pbuf[1usize] as i32 & 255) << 8) | ((pbuf[2usize] as i32 & 255) << 16) | ((pbuf[3usize] as i32 & 255) << 24)
+        let out_w = (pbuf[4usize] as i32 & 255) | ((pbuf[5usize] as i32 & 255) << 8) | ((pbuf[6usize] as i32 & 255) << 16) | ((pbuf[7usize] as i32 & 255) << 24)
+
+        // Capture stderr pipe for cmd2
+        let pr_err = syscall1(22i64, pbuf)
+        if pr_err != 0i64 {
+            let _ = syscall1(3i64, mid_r as i64)
+            let _ = syscall1(3i64, mid_w as i64)
+            let _ = syscall1(3i64, out_r as i64)
+            let _ = syscall1(3i64, out_w as i64)
+            free(pbuf)
+            return Option.None
+        }
+        let err_r = (pbuf[0usize] as i32 & 255) | ((pbuf[1usize] as i32 & 255) << 8) | ((pbuf[2usize] as i32 & 255) << 16) | ((pbuf[3usize] as i32 & 255) << 24)
+        let err_w = (pbuf[4usize] as i32 & 255) | ((pbuf[5usize] as i32 & 255) << 8) | ((pbuf[6usize] as i32 & 255) << 16) | ((pbuf[7usize] as i32 & 255) << 24)
+        free(pbuf)
+
+        // Fork child 1 (cmd1)
+        let pid1 = syscall0(57i64) as i32
+        if pid1 < 0 {
+            let _ = syscall1(3i64, mid_r as i64)
+            let _ = syscall1(3i64, mid_w as i64)
+            let _ = syscall1(3i64, out_r as i64)
+            let _ = syscall1(3i64, out_w as i64)
+            let _ = syscall1(3i64, err_r as i64)
+            let _ = syscall1(3i64, err_w as i64)
+            return Option.None
+        }
+        if pid1 == 0 {
+            // Redirect stdout to mid_w
+            let _ = syscall2(33i64, mid_w as i64, 1i64)
+            let _ = syscall1(3i64, mid_r as i64)
+            let _ = syscall1(3i64, mid_w as i64)
+            let _ = syscall1(3i64, out_r as i64)
+            let _ = syscall1(3i64, out_w as i64)
+            let _ = syscall1(3i64, err_r as i64)
+            let _ = syscall1(3i64, err_w as i64)
+
+            let c1 = self.cmd1
+            if c1.current_dir.len() > 0usize {
+                let _ = syscall1(80i64, c1.current_dir.as_ptr() as *raw u8)
+            }
+
+            let argc1 = c1.args.len
+            let args_vec1 = malloc((argc1 + 1usize) * 8usize) as *raw var usize
+            var i1 = 0usize
+            while i1 < argc1 {
+                args_vec1[i1] = c1.args.ptr[i1].as_ptr() as usize
+                i1 = i1 + 1usize
+            }
+            args_vec1[argc1] = 0usize
+
+            var envp_vec1 = 0usize as *raw var usize
+            if c1.env_vars.len > 0usize {
+                let envc1 = c1.env_vars.len
+                envp_vec1 = malloc((envc1 + 1usize) * 8usize) as *raw var usize
+                var e1 = 0usize
+                while e1 < envc1 {
+                    envp_vec1[e1] = c1.env_vars.ptr[e1].as_ptr() as usize
+                    e1 = e1 + 1usize
+                }
+                envp_vec1[envc1] = 0usize
+            } else {
+                envp_vec1 = malloc(8usize) as *raw var usize
+                envp_vec1[0usize] = 0usize
+            }
+
+            let _ = syscall3(59i64, c1.program.as_ptr() as *raw u8, args_vec1 as *raw u8, envp_vec1 as *raw u8)
+            let _ = syscall1(60i64, 127i64)
+        }
+
+        // Fork child 2 (cmd2)
+        let pid2 = syscall0(57i64) as i32
+        if pid2 < 0 {
+            let _ = syscall1(3i64, mid_r as i64)
+            let _ = syscall1(3i64, mid_w as i64)
+            let _ = syscall1(3i64, out_r as i64)
+            let _ = syscall1(3i64, out_w as i64)
+            let _ = syscall1(3i64, err_r as i64)
+            let _ = syscall1(3i64, err_w as i64)
+            return Option.None
+        }
+        if pid2 == 0 {
+            // Redirect stdin from mid_r
+            let _ = syscall2(33i64, mid_r as i64, 0i64)
+            // Redirect stdout to out_w
+            let _ = syscall2(33i64, out_w as i64, 1i64)
+            // Redirect stderr to err_w
+            let _ = syscall2(33i64, err_w as i64, 2i64)
+
+            let _ = syscall1(3i64, mid_r as i64)
+            let _ = syscall1(3i64, mid_w as i64)
+            let _ = syscall1(3i64, out_r as i64)
+            let _ = syscall1(3i64, out_w as i64)
+            let _ = syscall1(3i64, err_r as i64)
+            let _ = syscall1(3i64, err_w as i64)
+
+            let c2 = self.cmd2
+            if c2.current_dir.len() > 0usize {
+                let _ = syscall1(80i64, c2.current_dir.as_ptr() as *raw u8)
+            }
+
+            let argc2 = c2.args.len
+            let args_vec2 = malloc((argc2 + 1usize) * 8usize) as *raw var usize
+            var i2 = 0usize
+            while i2 < argc2 {
+                args_vec2[i2] = c2.args.ptr[i2].as_ptr() as usize
+                i2 = i2 + 1usize
+            }
+            args_vec2[argc2] = 0usize
+
+            var envp_vec2 = 0usize as *raw var usize
+            if c2.env_vars.len > 0usize {
+                let envc2 = c2.env_vars.len
+                envp_vec2 = malloc((envc2 + 1usize) * 8usize) as *raw var usize
+                var e2 = 0usize
+                while e2 < envc2 {
+                    envp_vec2[e2] = c2.env_vars.ptr[e2].as_ptr() as usize
+                    e2 = e2 + 1usize
+                }
+                envp_vec2[envc2] = 0usize
+            } else {
+                envp_vec2 = malloc(8usize) as *raw var usize
+                envp_vec2[0usize] = 0usize
+            }
+
+            let _ = syscall3(59i64, c2.program.as_ptr() as *raw u8, args_vec2 as *raw u8, envp_vec2 as *raw u8)
+            let _ = syscall1(60i64, 127i64)
+        }
+
+        // Parent process: close mid pipe and write ends of output capture pipes
+        let _ = syscall1(3i64, mid_r as i64)
+        let _ = syscall1(3i64, mid_w as i64)
+        let _ = syscall1(3i64, out_w as i64)
+        let _ = syscall1(3i64, err_w as i64)
+
+        // Read output from final command
+        let out_str = os_read_all(out_r)
+        let err_str = os_read_all(err_r)
+
+        // Wait for children
+        let status_buf = malloc(8usize) as *raw var u8
+        status_buf[0usize] = 0u8
+        status_buf[1usize] = 0u8
+        let _ = syscall4(61i64, pid1 as i64, status_buf, 0i64, 0usize as *raw u8)
+
+        status_buf[0usize] = 0u8
+        status_buf[1usize] = 0u8
+        let r2 = syscall4(61i64, pid2 as i64, status_buf, 0i64, 0usize as *raw u8)
+        var st2 = 0
+        if r2 >= 0i64 {
+            let b0 = status_buf[0usize] as i32
+            let b1 = status_buf[1usize] as i32
+            let b2 = status_buf[2usize] as i32
+            let b3 = status_buf[3usize] as i32
+            let status = (b0 & 255) | ((b1 & 255) << 8) | ((b2 & 255) << 16) | ((b3 & 255) << 24)
+            st2 = ((status >> 8) & 255)
+        }
+        free(status_buf)
+
+        return Option.Some(Output {
+            status: st2,
+            stdout: out_str,
+            stderr: err_str,
+        })
+    }
+
+    pub fn status(self) -> i32 {
+        let res = self.run()
+        match res {
+            Option.Some(out) => return out.status,
+            Option.None => return -1,
+            _ => return -1,
+        }
+    }
 }
 
 pub struct Process {}
@@ -454,6 +700,50 @@ pub fn get_env(name: str) -> Option<String> {
 
 pub fn set_env(name: str, val: str) -> bool {
     return (setenv(name, val, 1) == 0)
+}
+
+pub fn env_get(name: str) -> Option<String> {
+    return get_env(name)
+}
+
+pub fn env_set(name: str, val: str) -> bool {
+    return set_env(name, val)
+}
+
+pub fn env_vars() -> Vec<String> {
+    var list = Vec.new()
+    let fd = syscall3(2i64, "/proc/self/environ" as *raw u8, 0i64, 0i64)
+    if fd < 0i64 {
+        return list
+    }
+    let cap = 65536usize
+    let buf = malloc(cap) as *raw var u8
+    let n = syscall3(0i64, fd, buf, cap as i64)
+    let _ = syscall1(3i64, fd)
+    if n <= 0i64 {
+        free(buf)
+        return list
+    }
+    let total = n as usize
+    var cur = String.new()
+    var i = 0usize
+    while i < total {
+        let b = buf[i]
+        if b == 0u8 {
+            if cur.len > 0usize {
+                list.push(cur)
+                cur = String.new()
+            }
+        } else {
+            cur.push_byte(b)
+        }
+        i = i + 1usize
+    }
+    if cur.len > 0usize {
+        list.push(cur)
+    }
+    free(buf)
+    return list
 }
 
 pub fn process_exit(code: i32) {

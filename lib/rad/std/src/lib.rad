@@ -3,6 +3,7 @@
 pub import io
 pub import fs
 pub import process
+pub import env
 pub import time
 pub import net
 pub import sync

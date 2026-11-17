@@ -1,0 +1,457 @@
+// ==============================================================================
+// rad-gfx: Lightweight 2D Graphics Framebuffer & Image Exporter for Rad
+// Zero-dependency pure-Rad rasterizer supporting lines, rects, circles, PPM and BMP.
+// ==============================================================================
+
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Color {
+    pub fn rgb(r: u8, g: u8, b: u8) -> Color {
+        return Color { r: r, g: g, b: b, a: 255u8 }
+    }
+
+    pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color {
+        return Color { r: r, g: g, b: b, a: a }
+    }
+
+    pub fn black() -> Color { return Color.rgb(0u8, 0u8, 0u8) }
+    pub fn white() -> Color { return Color.rgb(255u8, 255u8, 255u8) }
+    pub fn red() -> Color { return Color.rgb(255u8, 0u8, 0u8) }
+    pub fn green() -> Color { return Color.rgb(0u8, 255u8, 0u8) }
+    pub fn blue() -> Color { return Color.rgb(0u8, 0u8, 255u8) }
+    pub fn yellow() -> Color { return Color.rgb(255u8, 255u8, 0u8) }
+    pub fn cyan() -> Color { return Color.rgb(0u8, 255u8, 255u8) }
+    pub fn magenta() -> Color { return Color.rgb(255u8, 0u8, 255u8) }
+}
+
+pub struct Canvas {
+    pub width: usize,
+    pub height: usize,
+    pub pixels: *raw var u8,
+}
+
+fn gfx_int_abs(v: i64) -> i64 {
+    if v < 0i64 {
+        return -v
+    }
+    return v
+}
+
+fn gfx_int_to_str(val: usize) -> String {
+    if val == 0usize {
+        return String.from_str("0")
+    }
+    var buf = String.new()
+    var v = val
+    while v > 0usize {
+        let rem = (v % 10usize) as u8
+        buf.push_byte(48u8 + rem)
+        v = v / 10usize
+    }
+    // Reverse digits
+    var res = String.new()
+    var i = buf.len()
+    while i > 0usize {
+        i = i - 1usize
+        let ch = (buf.as_ptr() as *raw u8)[i]
+        res.push_byte(ch)
+    }
+    return res
+}
+
+impl Canvas {
+    pub fn new(width: usize, height: usize) -> Canvas {
+        let total_bytes = width * height * 4usize
+        let p = malloc(total_bytes) as *raw var u8
+        var c = Canvas {
+            width: width,
+            height: height,
+            pixels: p,
+        }
+        c.clear(Color.black())
+        return c
+    }
+
+    pub fn clear(var self, color: Color) {
+        var y = 0usize
+        while y < self.height {
+            var x = 0usize
+            while x < self.width {
+                self.set_pixel(x, y, color)
+                x = x + 1usize
+            }
+            y = y + 1usize
+        }
+    }
+
+    pub fn set_pixel(var self, x: usize, y: usize, color: Color) {
+        if x >= self.width || y >= self.height {
+            return
+        }
+        let idx = ((y * self.width) + x) * 4usize
+        self.pixels[idx] = color.r
+        self.pixels[idx + 1usize] = color.g
+        self.pixels[idx + 2usize] = color.b
+        self.pixels[idx + 3usize] = color.a
+    }
+
+    pub fn get_pixel(self, x: usize, y: usize) -> Color {
+        if x >= self.width || y >= self.height {
+            return Color.black()
+        }
+        let idx = ((y * self.width) + x) * 4usize
+        return Color.rgba(
+            self.pixels[idx],
+            self.pixels[idx + 1usize],
+            self.pixels[idx + 2usize],
+            self.pixels[idx + 3usize]
+        )
+    }
+
+    pub fn fill_rect(var self, x: usize, y: usize, w: usize, h: usize, color: Color) {
+        var py = y
+        let max_y = y + h
+        let max_x = x + w
+        while py < max_y && py < self.height {
+            var px = x
+            while px < max_x && px < self.width {
+                self.set_pixel(px, py, color)
+                px = px + 1usize
+            }
+            py = py + 1usize
+        }
+    }
+
+    pub fn draw_rect(var self, x: usize, y: usize, w: usize, h: usize, color: Color) {
+        if w == 0usize || h == 0usize {
+            return
+        }
+        let x1 = (x + w) - 1usize
+        let y1 = (y + h) - 1usize
+
+        var px = x
+        while px <= x1 {
+            self.set_pixel(px, y, color)
+            self.set_pixel(px, y1, color)
+            px = px + 1usize
+        }
+
+        var py = y
+        while py <= y1 {
+            self.set_pixel(x, py, color)
+            self.set_pixel(x1, py, color)
+            py = py + 1usize
+        }
+    }
+
+    pub fn draw_line(var self, x0: i64, y0: i64, x1: i64, y1: i64, color: Color) {
+        let dx = gfx_int_abs(x1 - x0)
+        var sx = -1i64
+        if x0 < x1 {
+            sx = 1i64
+        }
+        let dy = -gfx_int_abs(y1 - y0)
+        var sy = -1i64
+        if y0 < y1 {
+            sy = 1i64
+        }
+        var err = dx + dy
+
+        var cx = x0
+        var cy = y0
+        var running = true
+        while running {
+            if cx >= 0i64 && cy >= 0i64 {
+                self.set_pixel(cx as usize, cy as usize, color)
+            }
+            if cx == x1 && cy == y1 {
+                running = false
+            } else {
+                let e2 = err * 2i64
+                if e2 >= dy {
+                    err = err + dy
+                    cx = cx + sx
+                }
+                if e2 <= dx {
+                    err = err + dx
+                    cy = cy + sy
+                }
+            }
+        }
+    }
+
+    pub fn draw_circle(var self, cx: i64, cy: i64, radius: i64, color: Color) {
+        var x = 0i64
+        var y = radius
+        var d = 3i64 - (2i64 * radius)
+
+        while y >= x {
+            self.draw_circle_pts(cx, cy, x, y, color)
+            x = x + 1i64
+            if d > 0i64 {
+                y = y - 1i64
+                d = d + (4i64 * (x - y)) + 10i64
+            } else {
+                d = d + (4i64 * x) + 6i64
+            }
+        }
+    }
+
+    fn draw_circle_pts(var self, cx: i64, cy: i64, x: i64, y: i64, color: Color) {
+        if cx + x >= 0i64 && cy + y >= 0i64 { self.set_pixel((cx + x) as usize, (cy + y) as usize, color) }
+        if cx - x >= 0i64 && cy + y >= 0i64 { self.set_pixel((cx - x) as usize, (cy + y) as usize, color) }
+        if cx + x >= 0i64 && cy - y >= 0i64 { self.set_pixel((cx + x) as usize, (cy - y) as usize, color) }
+        if cx - x >= 0i64 && cy - y >= 0i64 { self.set_pixel((cx - x) as usize, (cy - y) as usize, color) }
+        if cx + y >= 0i64 && cy + x >= 0i64 { self.set_pixel((cx + y) as usize, (cy + x) as usize, color) }
+        if cx - y >= 0i64 && cy + x >= 0i64 { self.set_pixel((cx - y) as usize, (cy + x) as usize, color) }
+        if cx + y >= 0i64 && cy - x >= 0i64 { self.set_pixel((cx + y) as usize, (cy - x) as usize, color) }
+        if cx - y >= 0i64 && cy - x >= 0i64 { self.set_pixel((cx - y) as usize, (cy - x) as usize, color) }
+    }
+
+    pub fn fill_circle(var self, cx: i64, cy: i64, radius: i64, color: Color) {
+        var y = -radius
+        while y <= radius {
+            var x = -radius
+            while x <= radius {
+                if (x * x) + (y * y) <= (radius * radius) {
+                    let px = cx + x
+                    let py = cy + y
+                    if px >= 0i64 && py >= 0i64 {
+                        self.set_pixel(px as usize, py as usize, color)
+                    }
+                }
+                x = x + 1i64
+            }
+            y = y + 1i64
+        }
+    }
+
+    pub fn save_ppm(self, path: str) -> bool {
+        // Open O_WRONLY | O_CREAT | O_TRUNC (1 | 64 | 512 = 577), mode 0644 (420)
+        let fd = syscall3(2i64, path as *raw u8, 577i64, 420i64)
+        if fd < 0i64 {
+            return false
+        }
+
+        // Header: "P6\n<width> <height>\n255\n"
+        var hdr = String.from_str("P6\n")
+        hdr.push_str(gfx_int_to_str(self.width).as_ptr() as str)
+        hdr.push_byte(32u8) // ' '
+        hdr.push_str(gfx_int_to_str(self.height).as_ptr() as str)
+        hdr.push_str("\n255\n")
+
+        let _ = syscall3(1i64, fd, hdr.as_ptr() as *raw u8, hdr.len() as i64)
+
+        // Write RGB data row by row
+        let row_buf = malloc(self.width * 3usize) as *raw var u8
+        var y = 0usize
+        while y < self.height {
+            var x = 0usize
+            while x < self.width {
+                let p_idx = ((y * self.width) + x) * 4usize
+                let r_idx = x * 3usize
+                row_buf[r_idx] = self.pixels[p_idx]
+                row_buf[r_idx + 1usize] = self.pixels[p_idx + 1usize]
+                row_buf[r_idx + 2usize] = self.pixels[p_idx + 2usize]
+                x = x + 1usize
+            }
+            let _ = syscall3(1i64, fd, row_buf, (self.width * 3usize) as i64)
+            y = y + 1usize
+        }
+        free(row_buf)
+
+        let _ = syscall1(3i64, fd) // SYS_close
+        return true
+    }
+
+    pub fn destroy(var self) {
+        if (self.pixels as usize) != 0usize {
+            free(self.pixels)
+            self.pixels = 0 as *raw var u8
+        }
+    }
+}
+
+// ==============================================================================
+// Interactive Windowing & Framebuffer Display
+// Zero-dependency 60 FPS live rendering backend with non-blocking event polling.
+// ==============================================================================
+
+pub const EVENT_NONE: i32 = 0;
+pub const EVENT_KEY: i32 = 1;
+pub const EVENT_MOUSE: i32 = 2;
+pub const EVENT_CLOSE: i32 = 3;
+
+pub struct Event {
+    pub kind: i32,
+    pub key: u8,
+    pub mouse_x: i32,
+    pub mouse_y: i32,
+}
+
+impl Event {
+    pub fn is_key(self, ch: u8) -> bool {
+        return self.kind == EVENT_KEY && self.key == ch;
+    }
+
+    pub fn is_close(self) -> bool {
+        return self.kind == EVENT_CLOSE;
+    }
+}
+
+pub struct Window {
+    pub width: usize,
+    pub height: usize,
+    pub title: String,
+    pub open: bool,
+    pub frame_count: u64,
+}
+
+impl Window {
+    pub fn open(width: usize, height: usize, title: str) -> Window {
+        // Clear screen and hide cursor: \x1b[2J\x1b[H\x1b[?25l
+        let init_seq = "\x1b[2J\x1b[H\x1b[?25l";
+        let _ = syscall3(1i64, 1i64, init_seq as *raw u8, 10i64);
+
+        // Set stdin non-blocking:
+        let flags = syscall3(72i64, 0i64, 3i64, 0i64); // F_GETFL = 3
+        if flags >= 0i64 {
+            let _ = syscall3(72i64, 0i64, 4i64, (flags | 2048i64)); // F_SETFL, O_NONBLOCK = 2048
+        }
+
+        // Set raw terminal mode via termios ioctl if available:
+        let termios_buf = malloc(64usize) as *raw var u8;
+        let r_tc = syscall3(16i64, 0i64, 21505i64, termios_buf); // SYS_ioctl = 16, TCGETS = 0x5401
+        if r_tc == 0i64 {
+            let lflag = (termios_buf[12usize] as i32 & 255) | ((termios_buf[13usize] as i32 & 255) << 8);
+            let new_lflag = lflag & (~(2 | 8)); // disable ICANON (2) and ECHO (8)
+            termios_buf[12usize] = (new_lflag & 255) as u8;
+            termios_buf[13usize] = ((new_lflag >> 8) & 255) as u8;
+            let _ = syscall3(16i64, 0i64, 21506i64, termios_buf); // TCSETS = 0x5402
+        }
+        free(termios_buf);
+
+        return Window {
+            width: width,
+            height: height,
+            title: String.from_str(title),
+            open: true,
+            frame_count: 0u64,
+        };
+    }
+
+    pub fn draw_canvas(var self, canvas: Canvas) {
+        var out = String.new();
+        out.push_str("\x1b[H"); // Cursor home
+
+        var y = 0usize;
+        while y < canvas.height {
+            var x = 0usize;
+            while x < canvas.width {
+                let top_col = canvas.get_pixel(x, y);
+                var bot_col = Color.black();
+                if y + 1usize < canvas.height {
+                    bot_col = canvas.get_pixel(x, y + 1usize);
+                }
+
+                out.push_str("\x1b[38;2;");
+                out.push_str(gfx_int_to_str(top_col.r as usize).as_ptr() as str);
+                out.push_byte(59u8);
+                out.push_str(gfx_int_to_str(top_col.g as usize).as_ptr() as str);
+                out.push_byte(59u8);
+                out.push_str(gfx_int_to_str(top_col.b as usize).as_ptr() as str);
+                out.push_byte(109u8);
+
+                out.push_str("\x1b[48;2;");
+                out.push_str(gfx_int_to_str(bot_col.r as usize).as_ptr() as str);
+                out.push_byte(59u8);
+                out.push_str(gfx_int_to_str(bot_col.g as usize).as_ptr() as str);
+                out.push_byte(59u8);
+                out.push_str(gfx_int_to_str(bot_col.b as usize).as_ptr() as str);
+                out.push_byte(109u8);
+
+                // Upper half-block: ▀
+                out.push_byte(226u8);
+                out.push_byte(150u8);
+                out.push_byte(128u8);
+
+                x = x + 1usize;
+            }
+            out.push_str("\x1b[0m\n");
+            y = y + 2usize;
+        }
+
+        let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
+        self.frame_count = self.frame_count + 1u64;
+    }
+
+    pub fn poll_event(var self) -> Option<Event> {
+        let buf = malloc(8usize) as *raw var u8;
+        let n = syscall3(0i64, 0i64, buf, 1i64);
+        if n > 0i64 {
+            let ch = buf[0usize];
+            free(buf);
+            if ch == 113u8 || ch == 81u8 || ch == 27u8 { // 'q', 'Q', ESC
+                self.open = false;
+                return Option.Some(Event {
+                    kind: EVENT_CLOSE,
+                    key: ch,
+                    mouse_x: 0,
+                    mouse_y: 0,
+                });
+            }
+            return Option.Some(Event {
+                kind: EVENT_KEY,
+                key: ch,
+                mouse_x: 0,
+                mouse_y: 0,
+            });
+        }
+        free(buf);
+        return Option.None;
+    }
+
+    pub fn is_open(self) -> bool {
+        return self.open;
+    }
+
+    pub fn close(var self) {
+        self.open = false;
+        let exit_seq = "\x1b[?25h\x1b[0m\n";
+        let _ = syscall3(1i64, 1i64, exit_seq as *raw u8, 9i64);
+
+        let termios_buf = malloc(64usize) as *raw var u8;
+        let r_tc = syscall3(16i64, 0i64, 21505i64, termios_buf);
+        if r_tc == 0i64 {
+            let lflag = (termios_buf[12usize] as i32 & 255) | ((termios_buf[13usize] as i32 & 255) << 8);
+            let new_lflag = lflag | (2 | 8);
+            termios_buf[12usize] = (new_lflag & 255) as u8;
+            termios_buf[13usize] = ((new_lflag >> 8) & 255) as u8;
+            let _ = syscall3(16i64, 0i64, 21506i64, termios_buf);
+        }
+        free(termios_buf);
+    }
+
+    pub fn sleep_frame(fps: u64) {
+        var ms = 16u64;
+        if fps > 0u64 {
+            ms = 1000u64 / fps;
+        }
+        let req = malloc(16usize) as *raw var u8;
+        let sec = (ms / 1000u64) as i64;
+        let nsec = ((ms % 1000u64) * 1000000u64) as i64;
+        var i = 0usize;
+        while i < 8usize {
+            req[i] = ((sec >> (i * 8usize)) & 255i64) as u8;
+            req[i + 8usize] = ((nsec >> (i * 8usize)) & 255i64) as u8;
+            i = i + 1usize;
+        }
+        let _ = syscall2(35i64, req, 0usize as *raw u8);
+        free(req);
+    }
+}

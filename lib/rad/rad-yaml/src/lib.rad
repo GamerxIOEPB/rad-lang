@@ -1,0 +1,885 @@
+// ==============================================================================
+// rad-yaml — Pure-Rad YAML Parser, DOM Document Tree, and Serializer
+// Zero C, zero libc, zero external dependencies.
+// ==============================================================================
+
+pub const YAML_NULL: i32    = 0;
+pub const YAML_STRING: i32  = 1;
+pub const YAML_INTEGER: i32 = 2;
+pub const YAML_FLOAT: i32   = 3;
+pub const YAML_BOOL: i32    = 4;
+pub const YAML_SEQ: i32     = 5;
+pub const YAML_MAP: i32     = 6;
+
+pub struct YamlMember {
+    pub key: String,
+    pub val: YamlValue,
+}
+
+pub struct YamlValue {
+    pub kind: i32,
+    pub str_val: String,
+    pub int_val: i64,
+    pub float_val: f64,
+    pub bool_val: bool,
+    pub seq_val: Vec<YamlValue>,
+    pub map_val: Vec<YamlMember>,
+}
+
+fn yaml_str_len(s: str) -> usize {
+    let p = s as *raw u8;
+    var len = 0usize;
+    while p[len] != 0u8 {
+        len = len + 1usize;
+    }
+    return len;
+}
+
+fn yaml_str_eq(a: str, b: str) -> bool {
+    let la = yaml_str_len(a);
+    let lb = yaml_str_len(b);
+    if la != lb {
+        return false;
+    }
+    let pa = a as *raw u8;
+    let pb = b as *raw u8;
+    var i = 0usize;
+    while i < la {
+        if pa[i] != pb[i] {
+            return false;
+        }
+        i = i + 1usize;
+    }
+    return true;
+}
+
+fn yaml_str_starts_with(s: str, prefix: str) -> bool {
+    let slen = yaml_str_len(s);
+    let plen = yaml_str_len(prefix);
+    if slen < plen {
+        return false;
+    }
+    let ps = s as *raw u8;
+    let pp = prefix as *raw u8;
+    var i = 0usize;
+    while i < plen {
+        if ps[i] != pp[i] {
+            return false;
+        }
+        i = i + 1usize;
+    }
+    return true;
+}
+
+fn yaml_is_space(c: u8) -> bool {
+    return c == 32u8 || c == 9u8 || c == 10u8 || c == 13u8;
+}
+
+fn yaml_is_digit(c: u8) -> bool {
+    return c >= 48u8 && c <= 57u8;
+}
+
+impl YamlValue {
+    pub fn null_val() -> YamlValue {
+        return YamlValue {
+            kind: YAML_NULL,
+            str_val: String.new(),
+            int_val: 0i64,
+            float_val: 0.0,
+            bool_val: false,
+            seq_val: Vec.new(),
+            map_val: Vec.new(),
+        };
+    }
+
+    pub fn string(s: str) -> YamlValue {
+        return YamlValue {
+            kind: YAML_STRING,
+            str_val: String.from_str(s),
+            int_val: 0i64,
+            float_val: 0.0,
+            bool_val: false,
+            seq_val: Vec.new(),
+            map_val: Vec.new(),
+        };
+    }
+
+    pub fn integer(i: i64) -> YamlValue {
+        return YamlValue {
+            kind: YAML_INTEGER,
+            str_val: String.new(),
+            int_val: i,
+            float_val: 0.0,
+            bool_val: false,
+            seq_val: Vec.new(),
+            map_val: Vec.new(),
+        };
+    }
+
+    pub fn float(f: f64) -> YamlValue {
+        return YamlValue {
+            kind: YAML_FLOAT,
+            str_val: String.new(),
+            int_val: 0i64,
+            float_val: f,
+            bool_val: false,
+            seq_val: Vec.new(),
+            map_val: Vec.new(),
+        };
+    }
+
+    pub fn bool(b: bool) -> YamlValue {
+        return YamlValue {
+            kind: YAML_BOOL,
+            str_val: String.new(),
+            int_val: 0i64,
+            float_val: 0.0,
+            bool_val: b,
+            seq_val: Vec.new(),
+            map_val: Vec.new(),
+        };
+    }
+
+    pub fn sequence() -> YamlValue {
+        return YamlValue {
+            kind: YAML_SEQ,
+            str_val: String.new(),
+            int_val: 0i64,
+            float_val: 0.0,
+            bool_val: false,
+            seq_val: Vec.new(),
+            map_val: Vec.new(),
+        };
+    }
+
+    pub fn mapping() -> YamlValue {
+        return YamlValue {
+            kind: YAML_MAP,
+            str_val: String.new(),
+            int_val: 0i64,
+            float_val: 0.0,
+            bool_val: false,
+            seq_val: Vec.new(),
+            map_val: Vec.new(),
+        };
+    }
+
+    pub fn is_null(self) -> bool {
+        return self.kind == YAML_NULL;
+    }
+
+    pub fn is_string(self) -> bool {
+        return self.kind == YAML_STRING;
+    }
+
+    pub fn is_integer(self) -> bool {
+        return self.kind == YAML_INTEGER;
+    }
+
+    pub fn is_float(self) -> bool {
+        return self.kind == YAML_FLOAT;
+    }
+
+    pub fn is_bool(self) -> bool {
+        return self.kind == YAML_BOOL;
+    }
+
+    pub fn is_sequence(self) -> bool {
+        return self.kind == YAML_SEQ;
+    }
+
+    pub fn is_mapping(self) -> bool {
+        return self.kind == YAML_MAP;
+    }
+
+    pub fn as_str(self) -> str {
+        if self.kind == YAML_STRING {
+            return self.str_val.as_ptr() as str;
+        }
+        return "";
+    }
+
+    pub fn as_int(self) -> i64 {
+        if self.kind == YAML_INTEGER {
+            return self.int_val;
+        } else if self.kind == YAML_FLOAT {
+            return self.float_val as i64;
+        }
+        return 0i64;
+    }
+
+    pub fn as_float(self) -> f64 {
+        if self.kind == YAML_FLOAT {
+            return self.float_val;
+        } else if self.kind == YAML_INTEGER {
+            return self.int_val as f64;
+        }
+        return 0.0;
+    }
+
+    pub fn as_bool(self) -> bool {
+        return self.bool_val;
+    }
+
+    pub fn add(var self, val: YamlValue) {
+        if self.kind == YAML_SEQ {
+            self.seq_val.push(val);
+        }
+    }
+
+    pub fn set(var self, key: str, val: YamlValue) {
+        if self.kind != YAML_MAP {
+            return;
+        }
+        var i = 0usize;
+        while i < self.map_val.len {
+            if yaml_str_eq(self.map_val.ptr[i].key.as_ptr() as str, key) {
+                self.map_val.ptr[i].val = val;
+                return;
+            }
+            i = i + 1usize;
+        }
+        self.map_val.push(YamlMember {
+            key: String.from_str(key),
+            val: val,
+        });
+    }
+
+    pub fn get(self, path: str) -> Option<YamlValue> {
+        if self.kind != YAML_MAP {
+            return Option.None;
+        }
+        let p_len = yaml_str_len(path);
+        let p = path as *raw u8;
+        var dot_pos = p_len;
+        var i = 0usize;
+        while i < p_len {
+            if p[i] == 46u8 { // '.'
+                dot_pos = i;
+                break;
+            }
+            i = i + 1usize;
+        }
+
+        var head = String.new();
+        var j = 0usize;
+        while j < dot_pos {
+            head.push_byte(p[j]);
+            j = j + 1usize;
+        }
+
+        let head_str = head.as_ptr() as str;
+        var found_idx = 0usize;
+        var found = false;
+        var k = 0usize;
+        while k < self.map_val.len {
+            if yaml_str_eq(self.map_val.ptr[k].key.as_ptr() as str, head_str) {
+                found_idx = k;
+                found = true;
+                break;
+            }
+            k = k + 1usize;
+        }
+
+        if !found {
+            return Option.None;
+        }
+
+        let curr_val = self.map_val.ptr[found_idx].val;
+        if dot_pos >= p_len {
+            return Option.Some(curr_val);
+        } else {
+            let tail_str = (path as usize + dot_pos + 1usize) as str;
+            return curr_val.get(tail_str);
+        }
+    }
+
+    pub fn get_str(self, path: str) -> str {
+        let opt = self.get(path);
+        match opt {
+            Option.Some(v) => return v.as_str(),
+            _ => return "",
+        }
+    }
+
+    pub fn get_int(self, path: str) -> i64 {
+        let opt = self.get(path);
+        match opt {
+            Option.Some(v) => return v.as_int(),
+            _ => return 0i64,
+        }
+    }
+
+    pub fn get_bool(self, path: str) -> bool {
+        let opt = self.get(path);
+        match opt {
+            Option.Some(v) => return v.as_bool(),
+            _ => return false,
+        }
+    }
+
+    pub fn get_map(self, path: str) -> Option<YamlValue> {
+        let opt = self.get(path);
+        match opt {
+            Option.Some(v) => {
+                if v.kind == YAML_MAP {
+                    return Option.Some(v);
+                }
+                return Option.None;
+            },
+            _ => return Option.None,
+        }
+    }
+
+    pub fn get_seq(self, path: str) -> Option<YamlValue> {
+        let opt = self.get(path);
+        match opt {
+            Option.Some(v) => {
+                if v.kind == YAML_SEQ {
+                    return Option.Some(v);
+                }
+                return Option.None;
+            },
+            _ => return Option.None,
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // Scalar Parser
+    // --------------------------------------------------------------------------
+    pub fn parse_scalar(raw: str) -> YamlValue {
+        let len = yaml_str_len(raw);
+        if len == 0usize {
+            return YamlValue.null_val();
+        }
+        let p = raw as *raw u8;
+
+        // Strip leading & trailing spaces
+        var start = 0usize;
+        while start < len && yaml_is_space(p[start]) {
+            start = start + 1usize;
+        }
+        var end = len;
+        while end > start && yaml_is_space(p[end - 1usize]) {
+            end = end - 1usize;
+        }
+
+        if start >= end {
+            return YamlValue.null_val();
+        }
+
+        // Quoted string
+        if (p[start] == 34u8 && p[end - 1usize] == 34u8) || (p[start] == 39u8 && p[end - 1usize] == 39u8) {
+            var s = String.new();
+            var qi = start + 1usize;
+            let q_end = end - 1usize;
+            while qi < q_end {
+                s.push_byte(p[qi]);
+                qi = qi + 1usize;
+            }
+            return YamlValue.string(s.as_ptr() as str);
+        }
+
+        // Slice to extracted string
+        var clean = String.new();
+        var si = start;
+        while si < end {
+            clean.push_byte(p[si]);
+            si = si + 1usize;
+        }
+        let clean_str = clean.as_ptr() as str;
+
+        if yaml_str_eq(clean_str, "true") || yaml_str_eq(clean_str, "True") || yaml_str_eq(clean_str, "yes") || yaml_str_eq(clean_str, "on") {
+            return YamlValue.bool(true);
+        }
+        if yaml_str_eq(clean_str, "false") || yaml_str_eq(clean_str, "False") || yaml_str_eq(clean_str, "no") || yaml_str_eq(clean_str, "off") {
+            return YamlValue.bool(false);
+        }
+        if yaml_str_eq(clean_str, "null") || yaml_str_eq(clean_str, "~") {
+            return YamlValue.null_val();
+        }
+
+        // Check if integer or float
+        var is_numeric = true;
+        var has_dot = false;
+        var ni = start;
+        if p[ni] == 45u8 || p[ni] == 43u8 { // '-' or '+'
+            ni = ni + 1usize;
+        }
+        if ni >= end {
+            is_numeric = false;
+        }
+        while ni < end {
+            if p[ni] == 46u8 { // '.'
+                if has_dot {
+                    is_numeric = false;
+                    break;
+                }
+                has_dot = true;
+            } else if !yaml_is_digit(p[ni]) {
+                is_numeric = false;
+                break;
+            }
+            ni = ni + 1usize;
+        }
+
+        if is_numeric {
+            if has_dot {
+                var fval = 0.0;
+                var sign = 1.0;
+                var idx = start;
+                if p[idx] == 45u8 {
+                    sign = -1.0;
+                    idx = idx + 1usize;
+                } else if p[idx] == 43u8 {
+                    idx = idx + 1usize;
+                }
+                while idx < end && p[idx] != 46u8 {
+                    fval = (fval * 10.0) + ((p[idx] - 48u8) as f64);
+                    idx = idx + 1usize;
+                }
+                if idx < end && p[idx] == 46u8 {
+                    idx = idx + 1usize;
+                    var div = 10.0;
+                    while idx < end {
+                        fval = fval + (((p[idx] - 48u8) as f64) / div);
+                        div = div * 10.0;
+                        idx = idx + 1usize;
+                    }
+                }
+                return YamlValue.float(fval * sign);
+            } else {
+                var ival = 0i64;
+                var is_neg = false;
+                var idx = start;
+                if p[idx] == 45u8 {
+                    is_neg = true;
+                    idx = idx + 1usize;
+                } else if p[idx] == 43u8 {
+                    idx = idx + 1usize;
+                }
+                while idx < end {
+                    ival = (ival * 10i64) + ((p[idx] - 48u8) as i64);
+                    idx = idx + 1usize;
+                }
+                if is_neg {
+                    ival = -ival;
+                }
+                return YamlValue.integer(ival);
+            }
+        }
+
+        return YamlValue.string(clean_str);
+    }
+
+    // --------------------------------------------------------------------------
+    // Parser
+    // --------------------------------------------------------------------------
+    pub fn parse(content: str) -> Result<YamlValue, String> {
+        let total_len = yaml_str_len(content);
+        if total_len == 0usize {
+            return Result.Ok(YamlValue.mapping());
+        }
+
+        let cp = content as *raw u8;
+        var lines = Vec.new();
+        var indents = Vec.new();
+
+        var cur = String.new();
+        var i = 0usize;
+        while i < total_len {
+            let c = cp[i];
+            if c == 10u8 || c == 13u8 {
+                let l_str = cur.as_ptr() as str;
+                let llen = yaml_str_len(l_str);
+                let lp = l_str as *raw u8;
+
+                var indent = 0;
+                var idx = 0usize;
+                while idx < llen && lp[idx] == 32u8 {
+                    indent = indent + 1;
+                    idx = idx + 1usize;
+                }
+
+                // Check for comment
+                var trimmed = String.new();
+                var in_str = false;
+                var q_char = 0u8;
+                while idx < llen {
+                    let b = lp[idx];
+                    if !in_str && (b == 34u8 || b == 39u8) {
+                        in_str = true;
+                        q_char = b;
+                        trimmed.push_byte(b);
+                    } else if in_str && b == q_char {
+                        in_str = false;
+                        trimmed.push_byte(b);
+                    } else if !in_str && b == 35u8 { // '#'
+                        break;
+                    } else {
+                        trimmed.push_byte(b);
+                    }
+                    idx = idx + 1usize;
+                }
+
+                // Trim trailing spaces
+                var t_len = trimmed.len();
+                let tp = trimmed.as_ptr();
+                while t_len > 0usize && yaml_is_space(tp[t_len - 1usize]) {
+                    t_len = t_len - 1usize;
+                }
+
+                if t_len > 0usize {
+                    var final_line = String.new();
+                    var ti = 0usize;
+                    while ti < t_len {
+                        final_line.push_byte(tp[ti]);
+                        ti = ti + 1usize;
+                    }
+                    lines.push(final_line);
+                    indents.push(indent);
+                }
+
+                cur = String.new();
+            } else {
+                cur.push_byte(c);
+            }
+            i = i + 1usize;
+        }
+
+        // Handle trailing line without newline
+        if cur.len() > 0usize {
+            let l_str = cur.as_ptr() as str;
+            let llen = yaml_str_len(l_str);
+            let lp = l_str as *raw u8;
+            var indent = 0;
+            var idx = 0usize;
+            while idx < llen && lp[idx] == 32u8 {
+                indent = indent + 1;
+                idx = idx + 1usize;
+            }
+            var trimmed = String.new();
+            while idx < llen {
+                let b = lp[idx];
+                if b == 35u8 { break; }
+                trimmed.push_byte(b);
+                idx = idx + 1usize;
+            }
+            var t_len = trimmed.len();
+            let tp = trimmed.as_ptr();
+            while t_len > 0usize && yaml_is_space(tp[t_len - 1usize]) {
+                t_len = t_len - 1usize;
+            }
+            if t_len > 0usize {
+                var final_line = String.new();
+                var ti = 0usize;
+                while ti < t_len {
+                    final_line.push_byte(tp[ti]);
+                    ti = ti + 1usize;
+                }
+                lines.push(final_line);
+                indents.push(indent);
+            }
+        }
+
+        if lines.len == 0usize {
+            return Result.Ok(YamlValue.mapping());
+        }
+
+        // Recursive block parser
+        let cursor = YamlCursor { index: 0usize };
+        let root = yaml_parse_block(lines, indents, &cursor, 0);
+        return Result.Ok(root);
+    }
+
+    // --------------------------------------------------------------------------
+    // Serializer
+    // --------------------------------------------------------------------------
+    pub fn to_string(self) -> String {
+        let out = String.new();
+        self.serialize_to(&out, 0);
+        return out;
+    }
+
+    fn serialize_to(self, var out: *raw var String, indent_level: i32) {
+        if self.kind == YAML_NULL {
+            out.push_str("null\n");
+        } else if self.kind == YAML_BOOL {
+            if self.bool_val {
+                out.push_str("true\n");
+            } else {
+                out.push_str("false\n");
+            }
+        } else if self.kind == YAML_INTEGER {
+            var v = self.int_val;
+            if v == 0i64 {
+                out.push_str("0\n");
+            } else {
+                var is_neg = false;
+                if v < 0i64 {
+                    is_neg = true;
+                    v = -v;
+                }
+                var rev = String.new();
+                while v > 0i64 {
+                    let d = (v % 10i64) as u8;
+                    rev.push_byte(48u8 + d);
+                    v = v / 10i64;
+                }
+                if is_neg {
+                    out.push_byte(45u8);
+                }
+                var rlen = rev.len();
+                let rp = rev.as_ptr();
+                while rlen > 0usize {
+                    rlen = rlen - 1usize;
+                    out.push_byte(rp[rlen]);
+                }
+                out.push_byte(10u8);
+            }
+        } else if self.kind == YAML_FLOAT {
+            let iv = self.float_val as i64;
+            var frac = ((self.float_val - (iv as f64)) * 100.0) as i64;
+            if frac < 0i64 { frac = -frac; }
+            var fstr = String.new();
+            fstr.push_str(self.int_to_str_local(iv).as_ptr() as str);
+            fstr.push_str(".");
+            if frac < 10i64 {
+                fstr.push_str("0");
+            }
+            fstr.push_str(self.int_to_str_local(frac).as_ptr() as str);
+            fstr.push_str("\n");
+            out.push_str(fstr.as_ptr() as str);
+        } else if self.kind == YAML_STRING {
+            out.push_str(self.str_val.as_ptr() as str);
+            out.push_byte(10u8);
+        } else if self.kind == YAML_SEQ {
+            var i = 0usize;
+            while i < self.seq_val.len {
+                var ind = 0;
+                while ind < indent_level {
+                    out.push_str("  ");
+                    ind = ind + 1;
+                }
+                out.push_str("- ");
+                let item = self.seq_val.ptr[i];
+                if item.kind == YAML_MAP || item.kind == YAML_SEQ {
+                    out.push_byte(10u8);
+                    item.serialize_to(out, indent_level + 1);
+                } else {
+                    item.serialize_to(out, indent_level);
+                }
+                i = i + 1usize;
+            }
+        } else if self.kind == YAML_MAP {
+            var i = 0usize;
+            while i < self.map_val.len {
+                var ind = 0;
+                while ind < indent_level {
+                    out.push_str("  ");
+                    ind = ind + 1;
+                }
+                out.push_str(self.map_val.ptr[i].key.as_ptr() as str);
+                out.push_str(": ");
+                let val = self.map_val.ptr[i].val;
+                if val.kind == YAML_MAP || val.kind == YAML_SEQ {
+                    out.push_byte(10u8);
+                    val.serialize_to(out, indent_level + 1);
+                } else {
+                    val.serialize_to(out, indent_level);
+                }
+                i = i + 1usize;
+            }
+        }
+    }
+
+    fn int_to_str_local(self, val: i64) -> String {
+        if val == 0i64 {
+            return String.from_str("0");
+        }
+        var v = val;
+        var is_neg = false;
+        if v < 0i64 {
+            is_neg = true;
+            v = -v;
+        }
+        var rev = String.new();
+        while v > 0i64 {
+            let digit = (v % 10i64) as u8;
+            rev.push_byte(48u8 + digit);
+            v = v / 10i64;
+        }
+        if is_neg {
+            rev.push_byte(45u8);
+        }
+        var res = String.new();
+        var len = rev.len();
+        let p = rev.as_ptr();
+        while len > 0usize {
+            len = len - 1usize;
+            res.push_byte(p[len]);
+        }
+        return res;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Internal Hierarchical Parser Implementation
+// ------------------------------------------------------------------------------
+pub struct YamlCursor {
+    pub index: usize,
+}
+
+fn yaml_parse_block(lines: Vec<String>, indents: Vec<i32>, var cur: *raw var YamlCursor, min_indent: i32) -> YamlValue {
+    if cur.index >= lines.len {
+        return YamlValue.mapping();
+    }
+
+    let first_line = lines.ptr[cur.index].as_ptr() as str;
+    let is_sequence = yaml_str_starts_with(first_line, "- ") || yaml_str_eq(first_line, "-");
+
+    if is_sequence {
+        var seq = YamlValue.sequence();
+        while cur.index < lines.len {
+            let cur_indent = indents.ptr[cur.index];
+            if cur_indent < min_indent {
+                break;
+            }
+            let l_str = lines.ptr[cur.index].as_ptr() as str;
+            if !yaml_str_starts_with(l_str, "- ") && !yaml_str_eq(l_str, "-") {
+                break;
+            }
+
+            cur.index = cur.index + 1usize;
+            let llen = yaml_str_len(l_str);
+            if llen <= 2usize {
+                // Empty dash: nested block follows
+                if cur.index < lines.len && indents.ptr[cur.index] > cur_indent {
+                    let child = yaml_parse_block(lines, indents, cur, indents.ptr[cur.index]);
+                    seq.add(child);
+                } else {
+                    seq.add(YamlValue.null_val());
+                }
+            } else {
+                let rest_str = (l_str as usize + 2usize) as str;
+                if yaml_str_starts_with(rest_str, "[") {
+                    // Inline sequence
+                    let in_seq = yaml_parse_inline_seq(rest_str);
+                    seq.add(in_seq);
+                } else {
+                    seq.add(YamlValue.parse_scalar(rest_str));
+                }
+            }
+        }
+        return seq;
+    } else {
+        var map = YamlValue.mapping();
+        while cur.index < lines.len {
+            let cur_indent = indents.ptr[cur.index];
+            if cur_indent < min_indent {
+                break;
+            }
+            let l_str = lines.ptr[cur.index].as_ptr() as str;
+            let llen = yaml_str_len(l_str);
+            let lp = l_str as *raw u8;
+
+            var colon_pos = llen;
+            var ki = 0usize;
+            while ki < llen {
+                if lp[ki] == 58u8 { // ':'
+                    if ki + 1usize == llen || lp[ki + 1usize] == 32u8 {
+                        colon_pos = ki;
+                        break;
+                    }
+                }
+                ki = ki + 1usize;
+            }
+
+            if colon_pos >= llen {
+                cur.index = cur.index + 1usize;
+            } else {
+                var k_str = String.new();
+                var si = 0usize;
+                while si < colon_pos {
+                    k_str.push_byte(lp[si]);
+                    si = si + 1usize;
+                }
+                let key = k_str.as_ptr() as str;
+
+                cur.index = cur.index + 1usize;
+                if colon_pos + 1usize >= llen {
+                    // "key:" with nested block
+                    if cur.index < lines.len && indents.ptr[cur.index] > cur_indent {
+                        let child = yaml_parse_block(lines, indents, cur, indents.ptr[cur.index]);
+                        map.set(key, child);
+                    } else {
+                        map.set(key, YamlValue.null_val());
+                    }
+                } else {
+                    let val_part = (l_str as usize + colon_pos + 2usize) as str;
+                    let v_trim = yaml_trim(val_part);
+                    if yaml_str_len(v_trim) == 0usize {
+                        if cur.index < lines.len && indents.ptr[cur.index] > cur_indent {
+                            let child = yaml_parse_block(lines, indents, cur, indents.ptr[cur.index]);
+                            map.set(key, child);
+                        } else {
+                            map.set(key, YamlValue.null_val());
+                        }
+                    } else if yaml_str_starts_with(v_trim, "[") {
+                        let in_seq = yaml_parse_inline_seq(v_trim);
+                        map.set(key, in_seq);
+                    } else {
+                        map.set(key, YamlValue.parse_scalar(v_trim));
+                    }
+                }
+            }
+        }
+        return map;
+    }
+}
+
+fn yaml_trim(s: str) -> str {
+    let len = yaml_str_len(s);
+    let p = s as *raw u8;
+    var start = 0usize;
+    while start < len && yaml_is_space(p[start]) {
+        start = start + 1usize;
+    }
+    return (s as usize + start) as str;
+}
+
+fn yaml_parse_inline_seq(s: str) -> YamlValue {
+    var seq = YamlValue.sequence();
+    let len = yaml_str_len(s);
+    let p = s as *raw u8;
+    var i = 0usize;
+    while i < len && p[i] != 91u8 { // '['
+        i = i + 1usize;
+    }
+    if i >= len {
+        return seq;
+    }
+    i = i + 1usize; // Skip '['
+
+    var cur = String.new();
+    while i < len && p[i] != 93u8 { // ']'
+        let c = p[i];
+        if c == 44u8 { // ','
+            let trimmed = yaml_trim(cur.as_ptr() as str);
+            if yaml_str_len(trimmed) > 0usize {
+                seq.add(YamlValue.parse_scalar(trimmed));
+            }
+            cur = String.new();
+        } else {
+            cur.push_byte(c);
+        }
+        i = i + 1usize;
+    }
+
+    let final_t = yaml_trim(cur.as_ptr() as str);
+    if yaml_str_len(final_t) > 0usize {
+        seq.add(YamlValue.parse_scalar(final_t));
+    }
+
+    return seq;
+}

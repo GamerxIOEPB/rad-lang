@@ -53,6 +53,7 @@ RAD_SRCS := \
     $(RADPM_DIR)/toml.rad \
     $(RADPM_DIR)/test.rad \
     $(RADPM_DIR)/bench.rad \
+    $(RADPM_DIR)/doc.rad \
     $(RADPM_DIR)/main.rad
 
 # Output binaries
@@ -130,7 +131,7 @@ install: all
 	@if [ -d "share/rad" ]; then cp -rf share/rad/* $(PREFIX)/share/rad/; fi
 	@if [ -d "../rad-lib/packages" ]; then \
 		echo "==> Pre-installing Rad ecosystem libraries to $(PREFIX)/packages..."; \
-		for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml; do \
+		for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml; do \
 			if [ -d "../rad-lib/packages/$$pkg/0.1.0" ]; then \
 				rm -rf $(PREFIX)/packages/$$pkg; \
 				cp -rf ../rad-lib/packages/$$pkg/0.1.0 $(PREFIX)/packages/$$pkg; \
@@ -147,6 +148,7 @@ install: all
 		ln -sfn rad-sqlite $(PREFIX)/packages/sqlite; \
 		ln -sfn rad-gfx $(PREFIX)/packages/gfx; \
 		ln -sfn rad-toml $(PREFIX)/packages/toml; \
+		ln -sfn rad-yaml $(PREFIX)/packages/yaml; \
 		echo "    [✓] Ecosystem libraries installed to $(PREFIX)/packages"; \
 	fi
 	@echo "[✓] Rad installed successfully to $(PREFIX)/bin"
@@ -163,7 +165,7 @@ help:
 	@echo "  all        - Build radc and rad into bin/ (default)"
 	@echo "  radc       - Compile self-hosted radc compiler (with embedded LLVM & LLD)"
 	@echo "  rad        - Compile native package manager using radc"
-	@echo "  dist       - Build distribution archives (.tar.gz) and SHA256SUMS"
+	@echo "  dist       - Build distribution archives (.tar.xz) and SHA256SUMS"
 	@echo "  install    - Install built binaries and standard library to PREFIX (default: ~/.rad)"
 	@echo "  clean      - Remove bin/ and temporary distribution outputs"
 	@echo ""

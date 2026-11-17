@@ -16,11 +16,11 @@ on:
       title:
         description: 'Release Title'
         required: false
-        default: 'Rad v0.2.4 — TUI Framework, Package Management & Standard Library Expansion'
+        default: 'Rad v0.2.4 — Standard Library Expansion, Ecosystem Libraries & Tooling Improvements'
       notes:
         description: 'Release Notes / Description'
         required: false
-        default: 'Rad v0.2.4 Release: Major ecosystem milestone introducing the official Rad Library Registry (rad-lib), pure native RadTUI framework (rad-tui 0.1.0) with differential double-buffering and constraint layouts, RadJSON (rad-json 0.1.0), seamless package management (rad package install/search/info/list/tree/outdated), global ~/.rad/packages/ library resolution (callable directly by name), direct system clang/clang++ interop with zero redundant wrappers, native standard library expansions (path, process, sha256, unicode, deque, hash), and 100% test suite pass rate.'
+        default: 'Rad v0.2.4: Comprehensive release introducing pure-Rad ecosystem libraries (JSON, TOML, YAML, TUI, Math, KV, SQLite, Graphics), native benchmarking framework (rad bench), documentation generator (rad doc), asynchronous I/O and process pipelines, package manager expansions (rad check, tree, remove), optimized distribution archives, and extensive standard library improvements with 100% test pass rate.'
 
 concurrency:
   group: release-${{ github.ref }}
@@ -46,12 +46,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.rad /tmp/bootstrap
-          (gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-           gh release download 0.2.4 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-           gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap) || true
-          if [ -d /tmp/bootstrap ] && [ -n "$(ls /tmp/bootstrap/rad-*.tar.gz 2>/dev/null)" ]; then
-            ARCHIVE=$(ls /tmp/bootstrap/rad-*.tar.gz | head -n 1)
-            tar -xzf "$ARCHIVE" -C ~/.rad --strip-components=1 || true
+          (gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.*" --dir /tmp/bootstrap || \
+           gh release download 0.2.4 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.*" --dir /tmp/bootstrap || \
+           gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.*" --dir /tmp/bootstrap) || true
+          if [ -d /tmp/bootstrap ] && [ -n "$(ls /tmp/bootstrap/rad-*.tar.* 2>/dev/null)" ]; then
+            ARCHIVE=$(ls /tmp/bootstrap/rad-*.tar.* | head -n 1)
+            tar -xf "$ARCHIVE" -C ~/.rad --strip-components=1 || true
             echo "$HOME/.rad/bin" >> $GITHUB_PATH
             if [ -d "$HOME/.rad/lib/llvm" ]; then
               echo "LD_LIBRARY_PATH=$HOME/.rad/lib/llvm:${LD_LIBRARY_PATH:-}" >> $GITHUB_ENV
@@ -101,12 +101,12 @@ jobs:
           ARGS+=(--tag "$TAG")
 
           TITLE="${{ github.event.inputs.title }}"
-          [ -z "$TITLE" ] && TITLE="Rad v0.2.4 — TUI Framework, Package Management & Standard Library Expansion"
+          [ -z "$TITLE" ] && TITLE="Rad v0.2.4 — Standard Library Expansion, Ecosystem Libraries & Tooling Improvements"
           ARGS+=(--title "$TITLE")
 
           NOTES="${{ github.event.inputs.notes }}"
           if [ -z "$NOTES" ]; then
-            NOTES="Rad v0.2.4 Release: Major ecosystem milestone introducing the official Rad Library Registry (rad-lib), pure native RadTUI framework (rad-tui 0.1.0) with differential double-buffering and constraint layouts, RadJSON (rad-json 0.1.0), seamless package management (rad package install/search/info/list/tree/outdated), global ~/.rad/packages/ library resolution (callable directly by name), direct system clang/clang++ interop with zero redundant wrappers, native standard library expansions (path, process, sha256, unicode, deque, hash), and 100% test suite pass rate."
+            NOTES="Rad v0.2.4: Comprehensive release introducing pure-Rad ecosystem libraries (JSON, TOML, YAML, TUI, Math, KV, SQLite, Graphics), native benchmarking framework (rad bench), documentation generator (rad doc), asynchronous I/O and process pipelines, package manager expansions (rad check, tree, remove), optimized distribution archives, and extensive standard library improvements with 100% test pass rate."
           fi
           ARGS+=(--notes "$NOTES")
           bash scripts/build_distribution.sh "${ARGS[@]}"

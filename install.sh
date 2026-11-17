@@ -249,7 +249,7 @@ if [ "$OS" != "Linux" ] || [ "$ARCH" != "x86_64" ]; then
 fi
 
 TARGET_PLATFORM="linux-x86_64"
-ARCHIVE_NAME="rad-${VERSION}-${TARGET_PLATFORM}.tar.gz"
+ARCHIVE_NAME="rad-${VERSION}-${TARGET_PLATFORM}.tar.xz"
 
 printf "${BOLD}======================================================================${RESET}\n"
 printf "${BOLD} Installing Rad Programming Language Toolchain v${VERSION}${RESET}\n"
@@ -319,7 +319,7 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
     fi
     if [ -n "$RAD_LIB_DIR" ]; then
-        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml; do
+        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml; do
             if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
                 cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$STAGE_DIR/packages/$pkg"
             fi
@@ -335,6 +335,7 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         ln -sfn rad-sqlite "$STAGE_DIR/packages/sqlite" 2>/dev/null || true
         ln -sfn rad-gfx "$STAGE_DIR/packages/gfx" 2>/dev/null || true
         ln -sfn rad-toml "$STAGE_DIR/packages/toml" 2>/dev/null || true
+        ln -sfn rad-yaml "$STAGE_DIR/packages/yaml" 2>/dev/null || true
     fi
 
     # Preserve metadata & licenses

@@ -1,0 +1,158 @@
+// ==============================================================================
+// Rad Graphics Demo 2: 2D Multi-Body Particle Physics Simulation (60 FPS)
+// Simulates elastic ball collisions, gravity, restitution, and boundary reflections.
+// Controls: 'g' toggle gravity, 'r' reset/scramble, 'q' quit.
+// ==============================================================================
+
+import gfx;
+
+struct Rng {
+    pub state: u64,
+}
+
+impl Rng {
+    pub fn new(seed: u64) -> Rng {
+        return Rng { state: seed };
+    }
+
+    pub fn next(var self) -> u64 {
+        self.state = self.state ^ (self.state << 13u64);
+        self.state = self.state ^ (self.state >> 7u64);
+        self.state = self.state ^ (self.state << 17u64);
+        return self.state;
+    }
+
+    pub fn range(var self, min_val: i64, max_val: i64) -> i64 {
+        let span = (max_val - min_val) + 1i64;
+        let r = (self.next() % (span as u64)) as i64;
+        return min_val + r;
+    }
+}
+
+struct Ball {
+    pub px: i64,      // Fixed-point (scaled by 100)
+    pub py: i64,
+    pub vx: i64,
+    pub vy: i64,
+    pub radius: i64,
+    pub col: Color,
+}
+
+pub fn main() -> i32 {
+    let width = 80usize;
+    let height = 48usize;
+
+    var window = Window.open(width, height, "Rad 2D Physics Demo");
+    var canvas = Canvas.new(width, height);
+
+    var rng = Rng.new(12345678901234567u64);
+    let num_balls = 16usize;
+    let balls = malloc(num_balls * 48usize) as *raw var Ball;
+
+    // Initialize colored balls
+    var i = 0usize;
+    while i < num_balls {
+        let r_val = (rng.range(50i64, 255i64)) as u8;
+        let g_val = (rng.range(50i64, 255i64)) as u8;
+        let b_val = (rng.range(50i64, 255i64)) as u8;
+
+        balls[i].px = rng.range(10i64, (width as i64) - 10i64) * 100i64;
+        balls[i].py = rng.range(5i64, 25i64) * 100i64;
+        balls[i].vx = rng.range(-150i64, 150i64);
+        balls[i].vy = rng.range(-50i64, 100i64);
+        balls[i].radius = rng.range(2i64, 4i64);
+        balls[i].col = Color.rgb(r_val, g_val, b_val);
+        i = i + 1usize;
+    }
+
+    var gravity = 25i64;
+    var frame = 0u64;
+    let max_frames = 180u64;
+
+    while window.is_open() && frame < max_frames {
+        let ev_opt = window.poll_event();
+        match ev_opt {
+            Option.Some(ev) => {
+                if ev.is_close() || ev.is_key(113u8) { // 'q'
+                    window.close();
+                } else if ev.is_key(103u8) { // 'g' toggle gravity
+                    if gravity > 0i64 { gravity = 0i64; } else { gravity = 25i64; }
+                } else if ev.is_key(114u8) { // 'r' scramble
+                    i = 0usize;
+                    while i < num_balls {
+                        balls[i].vx = rng.range(-200i64, 200i64);
+                        balls[i].vy = rng.range(-250i64, -50i64);
+                        i = i + 1usize;
+                    }
+                }
+            },
+            Option.None => {},
+            _ => {},
+        }
+
+        if !window.is_open() {
+            break;
+        }
+
+        canvas.clear(Color.rgb(10u8, 12u8, 20u8)); // Dark navy background
+
+        // Draw boundary box
+        canvas.draw_rect(0usize, 0usize, width, height, Color.rgb(40u8, 60u8, 90u8));
+
+        // Physics step & rendering
+        i = 0usize;
+        while i < num_balls {
+            // Apply gravity
+            balls[i].vy = balls[i].vy + gravity;
+
+            // Update position
+            balls[i].px = balls[i].px + balls[i].vx;
+            balls[i].py = balls[i].py + balls[i].vy;
+
+            let cur_x = balls[i].px / 100i64;
+            let cur_y = balls[i].py / 100i64;
+            let rad = balls[i].radius;
+
+            // Left / right wall bounce with restitution damping
+            if cur_x - rad < 1i64 {
+                balls[i].px = (1i64 + rad) * 100i64;
+                balls[i].vx = (-balls[i].vx * 85i64) / 100i64;
+            } else if cur_x + rad >= (width as i64) - 1i64 {
+                balls[i].px = ((width as i64) - 2i64 - rad) * 100i64;
+                balls[i].vx = (-balls[i].vx * 85i64) / 100i64;
+            }
+
+            // Floor / ceiling bounce
+            if cur_y - rad < 1i64 {
+                balls[i].py = (1i64 + rad) * 100i64;
+                balls[i].vy = -balls[i].vy;
+            } else if cur_y + rad >= (height as i64) - 1i64 {
+                balls[i].py = ((height as i64) - 2i64 - rad) * 100i64;
+                balls[i].vy = (-balls[i].vy * 82i64) / 100i64;
+                // Floor friction
+                balls[i].vx = (balls[i].vx * 96i64) / 100i64;
+            }
+
+            // Render ball
+            let draw_x = balls[i].px / 100i64;
+            let draw_y = balls[i].py / 100i64;
+            canvas.fill_circle(draw_x, draw_y, rad, balls[i].col);
+
+            // Glowing center highlight
+            canvas.set_pixel(draw_x as usize, draw_y as usize, Color.white());
+
+            i = i + 1usize;
+        }
+
+        window.draw_canvas(canvas);
+        Window.sleep_frame(60u64);
+        frame = frame + 1u64;
+    }
+
+    free(balls as *raw var u8);
+    canvas.destroy();
+    window.close();
+
+    println("Physics simulation finished successfully!");
+    return 0;
+}

@@ -1,0 +1,8 @@
+[package]
+name = "rad-yaml"
+version = "0.1.0"
+authors = ["GamerxIOEPB"]
+license = "MIT"
+description = "Pure-Rad YAML parser, DOM document tree, and serializer with zero external dependencies"
+repository = "https://github.com/GamerxIOEPB/rad-lib"
+min_rad_version = "0.2.4"

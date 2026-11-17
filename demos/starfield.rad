@@ -1,0 +1,138 @@
+// ==============================================================================
+// Rad Graphics Demo 1: 3D Perspective Warp Starfield (60 FPS)
+// Uses rad-gfx Window and Canvas with 24-bit TrueColor display.
+// Controls: '+' speed up, '-' slow down, 'q' quit.
+// ==============================================================================
+
+import gfx;
+
+struct Star {
+    pub x: i64,
+    pub y: i64,
+    pub z: i64,
+    pub pz: i64,
+}
+
+struct Rng {
+    pub state: u64,
+}
+
+impl Rng {
+    pub fn new(seed: u64) -> Rng {
+        return Rng { state: seed };
+    }
+
+    pub fn next(var self) -> u64 {
+        self.state = self.state ^ (self.state << 13u64);
+        self.state = self.state ^ (self.state >> 7u64);
+        self.state = self.state ^ (self.state << 17u64);
+        return self.state;
+    }
+
+    pub fn range(var self, min_val: i64, max_val: i64) -> i64 {
+        let span = (max_val - min_val) + 1i64;
+        let r = (self.next() % (span as u64)) as i64;
+        return min_val + r;
+    }
+}
+
+pub fn main() -> i32 {
+    let width = 80usize;
+    let height = 48usize;
+    let cx = (width as i64) / 2i64;
+    let cy = (height as i64) / 2i64;
+
+    var window = Window.open(width, height, "Rad 3D Warp Starfield");
+    var canvas = Canvas.new(width, height);
+
+    let num_stars = 120usize;
+    let max_depth = 1000i64;
+    var speed = 18i64;
+
+    var rng = Rng.new(8817264546332525288u64);
+
+    let stars = malloc(num_stars * 32usize) as *raw var Star;
+    var i = 0usize;
+    while i < num_stars {
+        stars[i].x = rng.range(-1000i64, 1000i64);
+        stars[i].y = rng.range(-600i64, 600i64);
+        stars[i].z = rng.range(100i64, max_depth);
+        stars[i].pz = stars[i].z;
+        i = i + 1usize;
+    }
+
+    var frame = 0u64;
+    let max_frames = 180u64; // Runs 180 frames or until 'q'
+
+    while window.is_open() && frame < max_frames {
+        // Poll user events
+        let ev_opt = window.poll_event();
+        match ev_opt {
+            Option.Some(ev) => {
+                if ev.is_close() || ev.is_key(113u8) { // 'q'
+                    window.close();
+                } else if ev.is_key(43u8) || ev.is_key(61u8) { // '+'
+                    speed = speed + 4i64;
+                } else if ev.is_key(45u8) && speed > 4i64 { // '-'
+                    speed = speed - 4i64;
+                }
+            },
+            Option.None => {},
+            _ => {},
+        }
+
+        if !window.is_open() {
+            break;
+        }
+
+        canvas.clear(Color.rgb(5u8, 5u8, 15u8)); // Deep space blue
+
+        // Update and draw stars
+        i = 0usize;
+        while i < num_stars {
+            stars[i].pz = stars[i].z;
+            stars[i].z = stars[i].z - speed;
+
+            if stars[i].z <= 10i64 {
+                stars[i].x = rng.range(-1000i64, 1000i64);
+                stars[i].y = rng.range(-600i64, 600i64);
+                stars[i].z = max_depth;
+                stars[i].pz = max_depth;
+            }
+
+            let z = stars[i].z;
+            let pz = stars[i].pz;
+
+            let sx = cx + ((stars[i].x * 50i64) / z);
+            let sy = cy + ((stars[i].y * 25i64) / z);
+            let psx = cx + ((stars[i].x * 50i64) / pz);
+            let psy = cy + ((stars[i].y * 25i64) / pz);
+
+            // Brightness scales as star gets closer
+            let factor = ((max_depth - z) * 230i64) / max_depth;
+            let b = (25i64 + factor) as u8;
+            let star_col = Color.rgb(b, b, 255u8);
+
+            if sx >= 0i64 && sx < (width as i64) && sy >= 0i64 && sy < (height as i64) {
+                if sx != psx || sy != psy {
+                    canvas.draw_line(psx, psy, sx, sy, star_col);
+                } else {
+                    canvas.set_pixel(sx as usize, sy as usize, star_col);
+                }
+            }
+
+            i = i + 1usize;
+        }
+
+        window.draw_canvas(canvas);
+        Window.sleep_frame(60u64);
+        frame = frame + 1u64;
+    }
+
+    free(stars as *raw var u8);
+    canvas.destroy();
+    window.close();
+
+    println("Starfield demo finished successfully!");
+    return 0;
+}
