@@ -1,6 +1,6 @@
 // ==============================================================================
 // Rad Graphics Demo 1: 3D Perspective Warp Starfield (60 FPS)
-// Uses rad-gfx Window and Canvas with 24-bit TrueColor display.
+// Dynamically adjusts to terminal/display resolution and runs continuously.
 // Controls: '+' speed up, '-' slow down, 'q' quit.
 // ==============================================================================
 
@@ -30,15 +30,24 @@ impl Rng {
 }
 
 pub fn main() -> i32 {
-    let width = 70usize;
-    let height = 36usize;
-    let cx = (width as i64) / 2i64;
-    let cy = (height as i64) / 2i64;
+    // Dynamically auto-detect terminal resolution:
+    var window = Window.open_autores("Rad 3D Warp Starfield");
+    var width = window.width;
+    var height = window.height;
+    var cx = (width as i64) / 2i64;
+    var cy = (height as i64) / 2i64;
 
-    var window = Window.open(width, height, "Rad 3D Warp Starfield");
     var canvas = Canvas.new(width, height);
 
-    let num_stars = 100usize;
+    // Number of stars scaled to detected resolution
+    var num_stars = (width * height) / 24usize;
+    if num_stars < 80usize {
+        num_stars = 80usize;
+    }
+    if num_stars > 1200usize {
+        num_stars = 1200usize;
+    }
+
     let max_depth = 1000i64;
     var speed = 20i64;
 
@@ -51,22 +60,20 @@ pub fn main() -> i32 {
 
     var i = 0usize;
     while i < num_stars {
-        star_x[i] = rng.range(-600i64, 600i64);
-        star_y[i] = rng.range(-300i64, 300i64);
-        star_z[i] = rng.range(50i64, max_depth);
+        star_x[i] = rng.range(-1000i64, 1000i64);
+        star_y[i] = rng.range(-600i64, 600i64);
+        star_z[i] = rng.range(40i64, max_depth);
         star_pz[i] = star_z[i];
         i = i + 1usize;
     }
 
-    var frame = 0u64;
-    let max_frames = 180u64; // Runs 180 frames (~3 sec) or until 'q'
-
-    while window.is_open() && frame < max_frames {
+    // Runs continuously until user presses 'q' / 'Q' / ESC
+    while window.is_open() {
         // Poll user events
         let ev_opt = window.poll_event();
         match ev_opt {
             Option.Some(ev) => {
-                if ev.is_close() || ev.is_key(113u8) { // 'q'
+                if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) || ev.is_key(27u8) { // 'q', 'Q', ESC
                     window.close();
                 } else if ev.is_key(43u8) || ev.is_key(61u8) { // '+' or '='
                     speed = speed + 4i64;
@@ -82,17 +89,30 @@ pub fn main() -> i32 {
             break;
         }
 
+        // Dynamically adjust on terminal resize
+        if window.check_resize() {
+            width = window.width;
+            height = window.height;
+            cx = (width as i64) / 2i64;
+            cy = (height as i64) / 2i64;
+            canvas.destroy();
+            canvas = Canvas.new(width, height);
+        }
+
         canvas.clear(Color.rgb(4u8, 4u8, 12u8)); // Deep space blue
 
         // Update and draw stars
+        let f_scale_x = (width as i64) / 2i64;
+        let f_scale_y = (height as i64) / 2i64;
+
         i = 0usize;
         while i < num_stars {
             star_pz[i] = star_z[i];
             star_z[i] = star_z[i] - speed;
 
             if star_z[i] <= 15i64 {
-                star_x[i] = rng.range(-600i64, 600i64);
-                star_y[i] = rng.range(-300i64, 300i64);
+                star_x[i] = rng.range(-1000i64, 1000i64);
+                star_y[i] = rng.range(-600i64, 600i64);
                 star_z[i] = max_depth;
                 star_pz[i] = max_depth;
             }
@@ -100,10 +120,10 @@ pub fn main() -> i32 {
             let z = star_z[i];
             let pz = star_pz[i];
 
-            let sx = cx + ((star_x[i] * 40i64) / z);
-            let sy = cy + ((star_y[i] * 20i64) / z);
-            let psx = cx + ((star_x[i] * 40i64) / pz);
-            let psy = cy + ((star_y[i] * 20i64) / pz);
+            let sx = cx + ((star_x[i] * f_scale_x) / z);
+            let sy = cy + ((star_y[i] * f_scale_y) / z);
+            let psx = cx + ((star_x[i] * f_scale_x) / pz);
+            let psy = cy + ((star_y[i] * f_scale_y) / pz);
 
             // Brightness scales as star gets closer
             let factor = ((max_depth - z) * 230i64) / max_depth;
@@ -123,7 +143,6 @@ pub fn main() -> i32 {
 
         window.draw_canvas(canvas);
         Window.sleep_frame(60u64);
-        frame = frame + 1u64;
     }
 
     free(star_x as *raw var u8);

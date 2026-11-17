@@ -304,12 +304,21 @@ impl Event {
     }
 }
 
+pub struct ScreenSize {
+    pub width: usize,
+    pub height: usize,
+    pub cols: usize,
+    pub rows: usize,
+}
+
 pub struct Window {
     pub width: usize,
     pub height: usize,
     pub title: String,
     pub open: bool,
     pub frame_count: u64,
+    pub cols: usize,
+    pub rows: usize,
 }
 
 fn gfx_str_len(s: str) -> usize {
@@ -356,7 +365,50 @@ fn emit_bg(out: var String, r: u8, g: u8, b: u8) {
 }
 
 impl Window {
+    pub fn screen_size() -> ScreenSize {
+        let buf = malloc(8usize) as *raw var u8;
+        var r = syscall3(16i64, 1i64, 21523i64, buf); // SYS_ioctl = 16, stdout = 1, TIOCGWINSZ = 21523
+        if r != 0i64 {
+            r = syscall3(16i64, 0i64, 21523i64, buf); // fallback on stdin = 0
+        }
+        var rows = 24usize;
+        var cols = 80usize;
+        if r == 0i64 {
+            let r_val = (buf[0usize] as usize) | ((buf[1usize] as usize) << 8);
+            let c_val = (buf[2usize] as usize) | ((buf[3usize] as usize) << 8);
+            if r_val > 4usize && c_val > 10usize {
+                rows = r_val;
+                cols = c_val;
+            }
+        }
+        free(buf);
+
+        // In half-block mode, each terminal row holds 2 vertical pixels.
+        // We use (rows - 1) terminal rows for rendering to avoid terminal scrolling.
+        var term_rows = rows;
+        if term_rows > 1usize {
+            term_rows = term_rows - 1usize;
+        }
+        let px_height = term_rows * 2usize;
+        let px_width = cols;
+
+        return ScreenSize {
+            width: px_width,
+            height: px_height,
+            cols: cols,
+            rows: rows,
+        };
+    }
+
     pub fn open(width: usize, height: usize, title: str) -> Window {
+        let sz = Window.screen_size();
+        var w = width;
+        var h = height;
+        if w == 0usize || h == 0usize {
+            w = sz.width;
+            h = sz.height;
+        }
+
         // Clear screen and hide cursor: \x1b[2J\x1b[H\x1b[?25l
         let init_seq = "\x1b[2J\x1b[H\x1b[?25l";
         let _ = syscall3(1i64, 1i64, init_seq as *raw u8, gfx_str_len(init_seq) as i64);
@@ -380,12 +432,30 @@ impl Window {
         free(termios_buf);
 
         return Window {
-            width: width,
-            height: height,
+            width: w,
+            height: h,
             title: String.from_str(title),
             open: true,
             frame_count: 0u64,
+            cols: sz.cols,
+            rows: sz.rows,
         };
+    }
+
+    pub fn open_autores(title: str) -> Window {
+        return Window.open(0usize, 0usize, title);
+    }
+
+    pub fn check_resize(var self) -> bool {
+        let sz = Window.screen_size();
+        if sz.cols != self.cols || sz.rows != self.rows {
+            self.cols = sz.cols;
+            self.rows = sz.rows;
+            self.width = sz.width;
+            self.height = sz.height;
+            return true;
+        }
+        return false;
     }
 
     pub fn draw_canvas(var self, canvas: Canvas) {
@@ -445,7 +515,11 @@ impl Window {
 
                 x = x + 1usize;
             }
-            out.push_str("\x1b[0m\r\n");
+            if y + 2usize < canvas.height {
+                out.push_str("\x1b[0m\r\n");
+            } else {
+                out.push_str("\x1b[0m");
+            }
             last_fg_r = -1i32;
             last_fg_g = -1i32;
             last_fg_b = -1i32;

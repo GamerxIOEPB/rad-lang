@@ -1,6 +1,6 @@
 // ==============================================================================
 // Rad Graphics Demo 2: 2D Multi-Body Particle Physics Simulation (60 FPS)
-// Simulates elastic ball collisions, gravity, restitution, and boundary reflections.
+// Dynamically adjusts to terminal/display resolution and runs continuously.
 // Controls: 'g' toggle gravity, 'r' reset/scramble, 'q' quit.
 // ==============================================================================
 
@@ -30,14 +30,23 @@ impl Rng {
 }
 
 pub fn main() -> i32 {
-    let width = 70usize;
-    let height = 36usize;
+    // Dynamically auto-detect terminal resolution:
+    var window = Window.open_autores("Rad 2D Physics Demo");
+    var width = window.width;
+    var height = window.height;
 
-    var window = Window.open(width, height, "Rad 2D Physics Demo");
     var canvas = Canvas.new(width, height);
 
     var rng = Rng.new(12345678901234567u64);
-    let num_balls = 12usize;
+
+    // Number of particles scaled to resolution
+    var num_balls = (width * height) / 180usize;
+    if num_balls < 12usize {
+        num_balls = 12usize;
+    }
+    if num_balls > 40usize {
+        num_balls = 40usize;
+    }
 
     let ball_px = malloc(num_balls * 8usize) as *raw var i64;
     let ball_py = malloc(num_balls * 8usize) as *raw var i64;
@@ -56,22 +65,21 @@ pub fn main() -> i32 {
         ball_cb[i] = (rng.range(60i64, 255i64)) as u8;
 
         ball_px[i] = rng.range(8i64, (width as i64) - 8i64) * 100i64;
-        ball_py[i] = rng.range(4i64, 18i64) * 100i64;
-        ball_vx[i] = rng.range(-140i64, 140i64);
-        ball_vy[i] = rng.range(-50i64, 80i64);
+        ball_py[i] = rng.range(4i64, (height as i64) / 2i64) * 100i64;
+        ball_vx[i] = rng.range(-150i64, 150i64);
+        ball_vy[i] = rng.range(-60i64, 80i64);
         ball_rad[i] = rng.range(2i64, 3i64);
         i = i + 1usize;
     }
 
     var gravity = 25i64;
-    var frame = 0u64;
-    let max_frames = 180u64;
 
-    while window.is_open() && frame < max_frames {
+    // Runs continuously until user presses 'q' / 'Q' / ESC
+    while window.is_open() {
         let ev_opt = window.poll_event();
         match ev_opt {
             Option.Some(ev) => {
-                if ev.is_close() || ev.is_key(113u8) { // 'q'
+                if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) || ev.is_key(27u8) { // 'q', 'Q', ESC
                     window.close();
                 } else if ev.is_key(103u8) { // 'g' toggle gravity
                     if gravity > 0i64 { gravity = 0i64; } else { gravity = 25i64; }
@@ -92,9 +100,17 @@ pub fn main() -> i32 {
             break;
         }
 
+        // Dynamically adjust on terminal resize
+        if window.check_resize() {
+            width = window.width;
+            height = window.height;
+            canvas.destroy();
+            canvas = Canvas.new(width, height);
+        }
+
         canvas.clear(Color.rgb(8u8, 10u8, 18u8)); // Dark navy background
 
-        // Draw boundary box
+        // Draw boundary box around arena
         canvas.draw_rect(0usize, 0usize, width, height, Color.rgb(50u8, 70u8, 110u8));
 
         // Physics step & rendering
@@ -145,7 +161,6 @@ pub fn main() -> i32 {
 
         window.draw_canvas(canvas);
         Window.sleep_frame(60u64);
-        frame = frame + 1u64;
     }
 
     free(ball_px as *raw var u8);
