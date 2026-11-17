@@ -1401,6 +1401,11 @@ impl Parser {
             self.advance()
             let var_name = String.from_str(self.peek_text())
             self.expect_tok(TOK_IDENT, "loop variable")
+            var type_name = String.new()
+            if self.peek_kind() == TOK_COLON {
+                self.advance()
+                type_name = self.parse_type_str()
+            }
             self.expect_tok(TOK_IN, "in")
             let iter_expr = self.parse_expr(0)
             self.expect_tok(TOK_LBRACE, "{")
@@ -1413,12 +1418,37 @@ impl Parser {
             res_id = self.add_stmt(Stmt {
                 kind: s_kind,
                 name: var_name,
-                type_name: String.new(),
+                type_name: type_name,
                 expr_id: iter_expr,
                 index_expr: 0usize,
                 then_stmts: Vec.new(),
                 else_stmts: Vec.new(),
                 body_stmts: body_stmts,
+                stmt_line: tok_l,
+                stmt_col: tok_c,
+            })
+        } else if k == TOK_DEFER {
+            let tok_l = self.cur_tok_line()
+            let tok_c = self.cur_tok_col()
+            self.advance()
+            var def_stmts = Vec.new()
+            if self.peek_kind() == TOK_LBRACE {
+                self.advance()
+                def_stmts = self.parse_block_stmts()
+                self.expect_tok(TOK_RBRACE, "}")
+            } else {
+                let s_id = self.parse_stmt()
+                def_stmts.push(s_id)
+            }
+            res_id = self.add_stmt(Stmt {
+                kind: STMT_DEFER,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: 0usize,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: def_stmts,
                 stmt_line: tok_l,
                 stmt_col: tok_c,
             })
@@ -1497,7 +1527,7 @@ impl Parser {
                     let let_stmt = self.add_stmt(Stmt {
                         kind: STMT_LET,
                         name: String.from_str(bound_name.as_ptr() as str),
-                        type_name: String.from_str("i64"),
+                        type_name: String.new(),
                         expr_id: target_expr,
                         index_expr: 0usize,
                         then_stmts: Vec.new(),

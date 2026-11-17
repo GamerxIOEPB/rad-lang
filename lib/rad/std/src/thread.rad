@@ -1,4 +1,17 @@
+// ==============================================================================
 // Rad Standard Library: Thread Management and Execution
+// Native POSIX thread spawning, joining, yielding, and basic Mutex synchronization.
+// ==============================================================================
+
+extern "C" {
+    fn sched_yield() -> i32;
+    fn pthread_create(thread: *raw var u64, attr: *raw var u8, routine: *raw var u8, arg: *raw var u8) -> i32;
+    fn pthread_join(thread: u64, retval: *raw var u8) -> i32;
+    fn pthread_mutex_init(mutex: *raw var u8, attr: *raw var u8) -> i32;
+    fn pthread_mutex_lock(mutex: *raw var u8) -> i32;
+    fn pthread_mutex_unlock(mutex: *raw var u8) -> i32;
+    fn pthread_mutex_destroy(mutex: *raw var u8) -> i32;
+}
 
 pub struct JoinHandle {
     pub thread_id: u64,
@@ -11,7 +24,7 @@ impl JoinHandle {
         let p = ret_buf as *raw var *raw var u8
         let val = p[0]
         free(ret_buf)
-        val
+        return val
     }
 }
 
@@ -22,13 +35,59 @@ pub fn thread_spawn(func: *raw var u8, arg: *raw var u8) -> JoinHandle {
     let p = tid_buf as *raw var u64
     let tid = p[0]
     free(tid_buf)
-    JoinHandle { thread_id: tid }
+    return JoinHandle { thread_id: tid }
 }
 
 pub fn thread_yield() -> i32 {
-    sched_yield()
+    return sched_yield()
 }
 
 pub fn thread_sleep_ms(ms: u32) {
     sleep_ms(ms as u64)
+}
+
+pub struct Thread {}
+
+impl Thread {
+    pub fn spawn(func: *raw var u8, arg: *raw var u8) -> JoinHandle {
+        return thread_spawn(func, arg)
+    }
+
+    pub fn yield_now() -> i32 {
+        return thread_yield()
+    }
+
+    pub fn sleep(d: Duration) {
+        sleep(d)
+    }
+
+    pub fn sleep_ms(ms: u32) {
+        thread_sleep_ms(ms)
+    }
+}
+
+pub struct Mutex {
+    pub raw_ptr: *raw var u8,
+}
+
+impl Mutex {
+    pub fn new() -> Mutex {
+        let m = malloc(64usize)
+        let _ = pthread_mutex_init(m, 0usize as *raw var u8)
+        return Mutex { raw_ptr: m }
+    }
+
+    pub fn lock(self) -> i32 {
+        return pthread_mutex_lock(self.raw_ptr)
+    }
+
+    pub fn unlock(self) -> i32 {
+        return pthread_mutex_unlock(self.raw_ptr)
+    }
+
+    pub fn destroy(self) -> i32 {
+        let r = pthread_mutex_destroy(self.raw_ptr)
+        free(self.raw_ptr)
+        return r
+    }
 }

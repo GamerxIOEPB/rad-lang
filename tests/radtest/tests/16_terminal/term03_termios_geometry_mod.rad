@@ -195,6 +195,10 @@ impl TerminalSession {
         TerminalSize { cols: 80usize, rows: 24usize }
     }
 
+    pub fn end_session(var self) {
+        self.close()
+    }
+
     pub fn close(var self) {
         self.show_cursor()
         self.leave_alternate_screen()

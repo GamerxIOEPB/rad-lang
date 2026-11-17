@@ -20,6 +20,7 @@ struct Codegen {
     loop_cond_labels: Vec<i32>,
     loop_end_labels: Vec<i32>,
     current_func_idx: usize,
+    active_defers: Vec<usize>,
 }
 
 impl Codegen {
@@ -95,6 +96,27 @@ impl Codegen {
                     if self.parser.exprs.ptr[init_e].kind == EXPR_ARRAY_LITERAL {
                         return "[]i64"
                     }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_IDENT {
+                        let id_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        let raw_t = self.get_raw_var_type(id_name)
+                        if str_starts_with(raw_t, "Option<") {
+                            let plen = str_len(raw_t)
+                            if plen > 8usize {
+                                var inner = String.new()
+                                let cp = raw_t as *raw u8
+                                var ci = 7usize
+                                while ci < plen && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        }
+                        if str_len(raw_t) > 0usize {
+                            return raw_t
+                        }
+                    }
                     if self.parser.exprs.ptr[init_e].kind == EXPR_CAST {
                         let c_ty = self.parser.exprs.ptr[init_e].target_type.as_ptr() as str
                         if str_len(c_ty) > 0usize {
@@ -104,6 +126,42 @@ impl Codegen {
                     if self.parser.exprs.ptr[init_e].kind == EXPR_METHOD_CALL {
                         let recv_id = self.parser.exprs.ptr[init_e].left
                         let member = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        let struct_name = self.get_expr_struct_name(recv_id)
+                        if str_len(struct_name) > 0usize {
+                            if str_eq(member, "new") {
+                                return struct_name
+                            }
+                            var mangled = String.new()
+                            mangled.push_str(struct_name)
+                            mangled.push_str("__")
+                            mangled.push_str(member)
+                            mangled.push_byte(0u8)
+                            var fi = 0usize
+                            while fi < self.parser.functions.len {
+                                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, mangled.as_ptr() as str) {
+                                    let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                    if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                        if str_starts_with(raw_r, "Option<") {
+                                            let plen = str_len(raw_r)
+                                            if plen > 8usize {
+                                                var inner = String.new()
+                                                let cp = raw_r as *raw u8
+                                                var ci = 7usize
+                                                while ci < plen && cp[ci] != 62u8 {
+                                                    inner.push_byte(cp[ci])
+                                                    ci = ci + 1usize
+                                                }
+                                                inner.push_byte(0u8)
+                                                return inner.as_ptr() as str
+                                            }
+                                        }
+                                        return raw_r
+                                    }
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
+                        }
                         if self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
                             let rname = self.parser.exprs.ptr[recv_id].str_val.as_ptr() as str
                             if str_eq(rname, "Vec") {
@@ -120,10 +178,19 @@ impl Codegen {
                                 mangled.push_str(rname)
                                 mangled.push_str("__")
                                 mangled.push_str(member)
-                                let ret = self.get_func_ret_type(mangled.as_ptr() as str)
-                                if str_len(ret) > 0usize {
-                                    return ret
+                                mangled.push_byte(0u8)
+                                var fi = 0usize
+                                while fi < self.parser.functions.len {
+                                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, mangled.as_ptr() as str) {
+                                        let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                        if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                            return raw_r
+                                        }
+                                        break
+                                    }
+                                    fi = fi + 1usize
                                 }
+                                return rname
                             }
                         }
                     }
@@ -210,8 +277,81 @@ impl Codegen {
         }
         if k == STMT_FOR_IN {
             if str_eq(sp[stmt_id].name.as_ptr() as str, vname) {
+                let st_ty = sp[stmt_id].type_name.as_ptr() as str
+                if str_len(st_ty) > 0usize {
+                    return st_ty
+                }
+                let coll_id = sp[stmt_id].expr_id
+                if coll_id != 0usize && coll_id < self.parser.exprs.len {
+                    let ep = self.parser.exprs.ptr
+                    if ep[coll_id].kind == EXPR_IDENT {
+                        let cname = ep[coll_id].str_val.as_ptr() as str
+                        let raw_coll_ty = self.get_raw_var_type(cname)
+                        if str_starts_with(raw_coll_ty, "Vec<") {
+                            let plen = str_len(raw_coll_ty)
+                            if plen > 5usize {
+                                var inner = String.new()
+                                let cp = raw_coll_ty as *raw u8
+                                var ci = 4usize
+                                while ci < plen && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        } else if str_starts_with(raw_coll_ty, "[]") {
+                            return (raw_coll_ty as usize + 2usize) as str
+                        } else if str_eq(raw_coll_ty, "Vec") {
+                            if self.current_func_idx < self.parser.functions.len {
+                                let cur_fn = self.parser.functions.ptr[self.current_func_idx]
+                                var bi = 0usize
+                                while bi < cur_fn.body.len {
+                                    let bs = cur_fn.body.ptr[bi]
+                                    if sp[bs].kind == STMT_EXPR {
+                                        let eid = sp[bs].expr_id
+                                        if ep[eid].kind == EXPR_METHOD_CALL {
+                                            let recv = ep[eid].left
+                                            let mname = ep[eid].str_val.as_ptr() as str
+                                            if ep[recv].kind == EXPR_IDENT && str_eq(ep[recv].str_val.as_ptr() as str, cname) && str_eq(mname, "push") && ep[eid].args.len > 0usize {
+                                                let arg0 = ep[eid].args.ptr[0usize]
+                                                if ep[arg0].kind == EXPR_STR {
+                                                    return "String"
+                                                }
+                                                if ep[arg0].kind == EXPR_CALL {
+                                                    let c_callee = ep[arg0].left
+                                                    if ep[c_callee].kind == EXPR_IDENT {
+                                                        let cfn = ep[c_callee].str_val.as_ptr() as str
+                                                        if self.is_struct_name(cfn) {
+                                                            return cfn
+                                                        }
+                                                    }
+                                                }
+                                                if ep[arg0].kind == EXPR_METHOD_CALL {
+                                                    let mrecv = ep[arg0].left
+                                                    if ep[mrecv].kind == EXPR_IDENT && str_eq(ep[mrecv].str_val.as_ptr() as str, "String") {
+                                                        return "String"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    bi = bi + 1usize
+                                }
+                            }
+                        }
+                    }
+                }
                 return "i64"
             }
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                let ty = self.find_var_type_in_stmts(sp[stmt_id].body_stmts.ptr[i], vname)
+                if str_len(ty) > 0usize { return ty }
+                i = i + 1usize
+            }
+        }
+        if k == STMT_DEFER {
             var i = 0usize
             while i < sp[stmt_id].body_stmts.len {
                 let ty = self.find_var_type_in_stmts(sp[stmt_id].body_stmts.ptr[i], vname)
@@ -2193,7 +2333,15 @@ impl Codegen {
                     }
                 }
             } else {
-                let raw_ty = self.get_expr_struct_name(recv_id)
+                var raw_ty = self.get_expr_struct_name(recv_id)
+                if str_len(raw_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                    let vname = ep[recv_id].str_val.as_ptr() as str
+                    let vty = self.get_raw_var_type(vname)
+                    if self.is_struct_name(vty) {
+                        raw_ty = vty
+                    }
+                }
+                var found_mangled = false
                 if str_len(raw_ty) > 0usize && !str_eq(raw_ty, "String") && !str_eq(raw_ty, "Vec") {
                     var mangled = String.new()
                     mangled.push_str(raw_ty)
@@ -2205,9 +2353,44 @@ impl Codegen {
                     while fi < self.parser.functions.len {
                         if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, m_str) {
                             callee_name = m_str
+                            found_mangled = true
                             break
                         }
                         fi = fi + 1usize
+                    }
+                }
+                if !found_mangled {
+                    var standalone_found = false
+                    var fi = 0usize
+                    while fi < self.parser.functions.len {
+                        if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, member) {
+                            standalone_found = true
+                            break
+                        }
+                        fi = fi + 1usize
+                    }
+                    if !standalone_found {
+                        var candidate = ""
+                        var c_count = 0
+                        fi = 0usize
+                        while fi < self.parser.functions.len {
+                            let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+                            if str_ends_with(fn_str, member) {
+                                let flen = str_len(fn_str)
+                                let mlen = str_len(member)
+                                if flen > mlen + 2usize {
+                                    let p = fn_str as *raw u8
+                                    if p[flen - mlen - 1usize] == 95u8 && p[flen - mlen - 2usize] == 95u8 {
+                                        candidate = fn_str
+                                        c_count = c_count + 1
+                                    }
+                                }
+                            }
+                            fi = fi + 1usize
+                        }
+                        if c_count == 1 {
+                            callee_name = candidate
+                        }
                     }
                 }
             }
@@ -2724,6 +2907,23 @@ impl Codegen {
         return 0
     }
 
+    fn emit_defers_from(var self, from_idx: usize) {
+        if self.active_defers.len <= from_idx {
+            return
+        }
+        var i = self.active_defers.len
+        while i > from_idx {
+            i = i - 1usize
+            let def_stmt_id = self.active_defers.ptr[i]
+            let sp = self.parser.stmts.ptr
+            var di = 0usize
+            while di < sp[def_stmt_id].body_stmts.len {
+                self.emit_stmt(sp[def_stmt_id].body_stmts.ptr[di])
+                di = di + 1usize
+            }
+        }
+    }
+
     fn emit_stmt(var self, stmt_id: usize) {
         let sp = self.parser.stmts.ptr
         let k = sp[stmt_id].kind
@@ -2841,13 +3041,27 @@ impl Codegen {
                     self.ir.push_str(" to i32\n")
                     r = cvt
                 }
-                self.ir.push_str("  store ")
-                self.ir.push_str(llvm_ty)
-                self.ir.push_str(" %")
-                self.ir.push_str(int_to_str(r).as_ptr() as str)
-                self.ir.push_str(", ptr %")
-                self.ir.push_str(vname)
-                self.ir.push_str(".addr, align 8\n")
+                if r == 0 {
+                    self.ir.push_str("  store ")
+                    self.ir.push_str(llvm_ty)
+                    if str_eq(llvm_ty, "ptr") {
+                        self.ir.push_str(" null, ptr %")
+                    } else if str_eq(llvm_ty, "double") {
+                        self.ir.push_str(" 0.0, ptr %")
+                    } else {
+                        self.ir.push_str(" 0, ptr %")
+                    }
+                    self.ir.push_str(vname)
+                    self.ir.push_str(".addr, align 8\n")
+                } else {
+                    self.ir.push_str("  store ")
+                    self.ir.push_str(llvm_ty)
+                    self.ir.push_str(" %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(", ptr %")
+                    self.ir.push_str(vname)
+                    self.ir.push_str(".addr, align 8\n")
+                }
             }
         } else if k == STMT_ASSIGN {
             let vname = sp[stmt_id].name.as_ptr() as str
@@ -2927,13 +3141,27 @@ impl Codegen {
                 self.ir.push_str(" to i32\n")
                 r = cvt
             }
-            self.ir.push_str("  store ")
-            self.ir.push_str(llvm_ty)
-            self.ir.push_str(" %")
-            self.ir.push_str(int_to_str(r).as_ptr() as str)
-            self.ir.push_str(", ptr %")
-            self.ir.push_str(vname)
-            self.ir.push_str(".addr, align 8\n")
+            if r == 0 {
+                self.ir.push_str("  store ")
+                self.ir.push_str(llvm_ty)
+                if str_eq(llvm_ty, "ptr") {
+                    self.ir.push_str(" null, ptr %")
+                } else if str_eq(llvm_ty, "double") {
+                    self.ir.push_str(" 0.0, ptr %")
+                } else {
+                    self.ir.push_str(" 0, ptr %")
+                }
+                self.ir.push_str(vname)
+                self.ir.push_str(".addr, align 8\n")
+            } else {
+                self.ir.push_str("  store ")
+                self.ir.push_str(llvm_ty)
+                self.ir.push_str(" %")
+                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(vname)
+                self.ir.push_str(".addr, align 8\n")
+            }
         } else if k == STMT_ASSIGN_INDEX {
             let val_expr = sp[stmt_id].expr_id
             var val_reg = self.emit_expr(val_expr)
@@ -3308,6 +3536,7 @@ impl Codegen {
                 si = si + 1usize
             }
 
+            let prev_defers_then = self.active_defers.len
             var i = 0usize
             var then_terminates = false
             while i < sp[stmt_id].then_stmts.len {
@@ -3321,6 +3550,7 @@ impl Codegen {
                 i = i + 1usize
             }
             if !then_terminates {
+                self.emit_defers_from(prev_defers_then)
                 var ri = 0usize
                 while ri < shadowed_names.len {
                     let sname = shadowed_names.ptr[ri].as_ptr() as str
@@ -3339,10 +3569,14 @@ impl Codegen {
                 self.ir.push_str(int_to_str(lbl_merge).as_ptr() as str)
                 self.ir.push_str("\n")
             }
+            while self.active_defers.len > prev_defers_then {
+                let _pop_d = self.active_defers.pop()
+            }
 
             self.ir.push_str("if.else.")
             self.ir.push_str(int_to_str(lbl_else).as_ptr() as str)
             self.ir.push_str(":\n")
+            let prev_defers_else = self.active_defers.len
             var j = 0usize
             var else_terminates = false
             while j < sp[stmt_id].else_stmts.len {
@@ -3356,9 +3590,13 @@ impl Codegen {
                 j = j + 1usize
             }
             if !else_terminates {
+                self.emit_defers_from(prev_defers_else)
                 self.ir.push_str("  br label %if.merge.")
                 self.ir.push_str(int_to_str(lbl_merge).as_ptr() as str)
                 self.ir.push_str("\n")
+            }
+            while self.active_defers.len > prev_defers_else {
+                let _pop_d = self.active_defers.pop()
             }
 
             if !then_terminates || !else_terminates {
@@ -3399,6 +3637,7 @@ impl Codegen {
             self.ir.push_str("while.body.")
             self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
             self.ir.push_str(":\n")
+            let prev_defers_while = self.active_defers.len
             var i = 0usize
             var body_terminates = false
             while i < sp[stmt_id].body_stmts.len {
@@ -3412,9 +3651,13 @@ impl Codegen {
                 i = i + 1usize
             }
             if !body_terminates {
+                self.emit_defers_from(prev_defers_while)
                 self.ir.push_str("  br label %while.cond.")
                 self.ir.push_str(int_to_str(lbl_cond).as_ptr() as str)
                 self.ir.push_str("\n")
+            }
+            while self.active_defers.len > prev_defers_while {
+                let _pop_d = self.active_defers.pop()
             }
 
             self.ir.push_str("while.end.")
@@ -3477,6 +3720,7 @@ impl Codegen {
             self.ir.push_str("for.body.")
             self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
             self.ir.push_str(":\n")
+            let prev_defers_for = self.active_defers.len
             var bi = 0usize
             var body_terminates = false
             while bi < sp[stmt_id].body_stmts.len {
@@ -3490,9 +3734,13 @@ impl Codegen {
                 bi = bi + 1usize
             }
             if !body_terminates {
+                self.emit_defers_from(prev_defers_for)
                 self.ir.push_str("  br label %while.cond.")
                 self.ir.push_str(int_to_str(lbl_inc).as_ptr() as str)
                 self.ir.push_str("\n")
+            }
+            while self.active_defers.len > prev_defers_for {
+                let _pop_d = self.active_defers.pop()
             }
 
             self.ir.push_str("while.cond.")
@@ -3602,6 +3850,8 @@ impl Codegen {
             self.ir.push_str("for.body.")
             self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
             self.ir.push_str(":\n")
+            let elem_ty = self.get_var_type(vname)
+            let is_ptr = str_eq(elem_ty, "ptr")
             let buf_ptr = self.alloc_ssa()
             self.ir.push_str("  %")
             self.ir.push_str(int_to_str(buf_ptr).as_ptr() as str)
@@ -3611,7 +3861,11 @@ impl Codegen {
             let elem_gep = self.alloc_ssa()
             self.ir.push_str("  %")
             self.ir.push_str(int_to_str(elem_gep).as_ptr() as str)
-            self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+            if is_ptr {
+                self.ir.push_str(" = getelementptr inbounds ptr, ptr %")
+            } else {
+                self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+            }
             self.ir.push_str(int_to_str(buf_ptr).as_ptr() as str)
             self.ir.push_str(", i64 %")
             self.ir.push_str(int_to_str(cur_idx).as_ptr() as str)
@@ -3619,15 +3873,24 @@ impl Codegen {
             let elem_val = self.alloc_ssa()
             self.ir.push_str("  %")
             self.ir.push_str(int_to_str(elem_val).as_ptr() as str)
-            self.ir.push_str(" = load i64, ptr %")
+            if is_ptr {
+                self.ir.push_str(" = load ptr, ptr %")
+            } else {
+                self.ir.push_str(" = load i64, ptr %")
+            }
             self.ir.push_str(int_to_str(elem_gep).as_ptr() as str)
             self.ir.push_str(", align 8\n")
-            self.ir.push_str("  store i64 %")
+            if is_ptr {
+                self.ir.push_str("  store ptr %")
+            } else {
+                self.ir.push_str("  store i64 %")
+            }
             self.ir.push_str(int_to_str(elem_val).as_ptr() as str)
             self.ir.push_str(", ptr %")
             self.ir.push_str(vname)
             self.ir.push_str(".addr, align 8\n")
 
+            let prev_defers_for_in = self.active_defers.len
             var bi = 0usize
             var body_terminates = false
             while bi < sp[stmt_id].body_stmts.len {
@@ -3641,9 +3904,13 @@ impl Codegen {
                 bi = bi + 1usize
             }
             if !body_terminates {
+                self.emit_defers_from(prev_defers_for_in)
                 self.ir.push_str("  br label %while.cond.")
                 self.ir.push_str(int_to_str(lbl_inc).as_ptr() as str)
                 self.ir.push_str("\n")
+            }
+            while self.active_defers.len > prev_defers_for_in {
+                let _pop_d = self.active_defers.pop()
             }
 
             self.ir.push_str("while.cond.")
@@ -3693,6 +3960,7 @@ impl Codegen {
         } else if k == STMT_RETURN {
             if sp[stmt_id].expr_id != 0usize {
                 let r = self.emit_expr(sp[stmt_id].expr_id)
+                self.emit_defers_from(0usize)
                 let ret_ty = self.current_ret_type.as_ptr() as str
                 if str_eq(ret_ty, "void") {
                     self.ir.push_str("  ret void\n")
@@ -3758,8 +4026,11 @@ impl Codegen {
                     self.ir.push_str("\n")
                 }
             } else {
+                self.emit_defers_from(0usize)
                 self.ir.push_str("  ret void\n")
             }
+        } else if k == STMT_DEFER {
+            self.active_defers.push(stmt_id)
         } else if k == STMT_EXPR {
             self.emit_expr(sp[stmt_id].expr_id)
         }
@@ -3824,6 +4095,12 @@ impl Codegen {
             idx_name.push_str("_for_idx_")
             idx_name.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
             self.allocate_local_var(idx_name.as_ptr() as str)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_allocas_stmt(sp[stmt_id].body_stmts.ptr[i])
+                i = i + 1usize
+            }
+        } else if k == STMT_DEFER {
             var i = 0usize
             while i < sp[stmt_id].body_stmts.len {
                 self.collect_allocas_stmt(sp[stmt_id].body_stmts.ptr[i])
@@ -3946,6 +4223,12 @@ impl Codegen {
                 self.collect_mutated_vars(sp[stmt_id].body_stmts.ptr[i], mutated)
                 i = i + 1usize
             }
+        } else if k == STMT_DEFER {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_mutated_vars(sp[stmt_id].body_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
         }
     }
 
@@ -3986,7 +4269,7 @@ impl Codegen {
                 self.check_unused_var_mutability(sp[stmt_id].else_stmts.ptr[i], mutated)
                 i = i + 1usize
             }
-        } else if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN {
+        } else if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN || k == STMT_DEFER {
             var i = 0usize
             while i < sp[stmt_id].body_stmts.len {
                 self.check_unused_var_mutability(sp[stmt_id].body_stmts.ptr[i], mutated)
@@ -4270,6 +4553,7 @@ impl Codegen {
             // Emit function body statements
             self.current_ret_type = String.from_str(self.emit_llvm_type(func.ret_type.as_ptr() as str))
             self.ir = String.new()
+            self.active_defers = Vec.new()
             var si = 0usize
             var has_returned = false
             while si < func.body.len {
@@ -4279,6 +4563,7 @@ impl Codegen {
                 if !has_returned {
                     if is_last && !str_eq(func.ret_type.as_ptr() as str, "void") && sk == STMT_EXPR {
                         let r = self.emit_expr(self.parser.stmts.ptr[stmt_id].expr_id)
+                        self.emit_defers_from(0usize)
                         let ret_ty = self.current_ret_type.as_ptr() as str
                         if str_eq(ret_ty, "void") {
                             self.ir.push_str("  ret void\n")
@@ -4352,6 +4637,9 @@ impl Codegen {
                     }
                 }
                 si = si + 1usize
+            }
+            if !has_returned {
+                self.emit_defers_from(0usize)
             }
             if self.ir.len() > 0usize {
                 fn_ir.push_str(self.ir.as_ptr() as str)

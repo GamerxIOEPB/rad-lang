@@ -44,6 +44,7 @@ const STMT_CONTINUE: i32 = 10
 const STMT_ASSIGN_FIELD: i32 = 11
 const STMT_FOR_RANGE: i32 = 12
 const STMT_FOR_IN: i32 = 13
+const STMT_DEFER: i32 = 14
 
 struct Stmt {
     kind: i32,

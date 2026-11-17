@@ -15,51 +15,51 @@ pub struct Duration {
 
 impl Duration {
     pub fn zero() -> Duration {
-        Duration { secs: 0u64, nanos: 0u32 }
+        return Duration { secs: 0u64, nanos: 0u32 }
     }
 
     pub fn from_nanos(nanos: u64) -> Duration {
         let secs = nanos / 1000000000u64
         let rem_ns = nanos % 1000000000u64
-        Duration { secs: secs, nanos: rem_ns as u32 }
+        return Duration { secs: secs, nanos: rem_ns as u32 }
     }
 
     pub fn from_micros(micros: u64) -> Duration {
         let secs = micros / 1000000u64
         let rem_us = micros % 1000000u64
         let nanos = (rem_us as u32) * 1000u32
-        Duration { secs: secs, nanos: nanos }
+        return Duration { secs: secs, nanos: nanos }
     }
 
     pub fn from_millis(millis: u64) -> Duration {
         let secs = millis / 1000u64
         let rem_ms = millis % 1000u64
         let nanos = (rem_ms as u32) * 1000000u32
-        Duration { secs: secs, nanos: nanos }
+        return Duration { secs: secs, nanos: nanos }
     }
 
     pub fn from_secs(secs: u64) -> Duration {
-        Duration { secs: secs, nanos: 0u32 }
+        return Duration { secs: secs, nanos: 0u32 }
     }
 
     pub fn as_nanos(self) -> u64 {
-        (self.secs * 1000000000u64) + (self.nanos as u64)
+        return (self.secs * 1000000000u64) + (self.nanos as u64)
     }
 
     pub fn as_micros(self) -> u64 {
-        (self.secs * 1000000u64) + ((self.nanos as u64) / 1000u64)
+        return (self.secs * 1000000u64) + ((self.nanos as u64) / 1000u64)
     }
 
     pub fn as_millis(self) -> u64 {
-        (self.secs * 1000u64) + ((self.nanos as u64) / 1000000u64)
+        return (self.secs * 1000u64) + ((self.nanos as u64) / 1000000u64)
     }
 
     pub fn as_secs(self) -> u64 {
-        self.secs
+        return self.secs
     }
 
     pub fn as_secs_f64(self) -> f64 {
-        (self.secs as f64) + ((self.nanos as f64) / 1000000000.0)
+        return (self.secs as f64) + ((self.nanos as f64) / 1000000000.0)
     }
 
     pub fn add(self, other: Duration) -> Duration {
@@ -69,7 +69,7 @@ impl Duration {
             s = s + 1u64
             ns = ns - 1000000000u32
         }
-        Duration { secs: s, nanos: ns }
+        return Duration { secs: s, nanos: ns }
     }
 
     pub fn sub(self, other: Duration) -> Duration {
@@ -84,7 +84,7 @@ impl Duration {
             s = s - 1u64
             ns = (self.nanos + 1000000000u32) - other.nanos
         }
-        Duration { secs: s, nanos: ns }
+        return Duration { secs: s, nanos: ns }
     }
 
     pub fn cmp(self, other: Duration) -> i32 {
@@ -92,7 +92,7 @@ impl Duration {
         if self.secs > other.secs { return 1 }
         if self.nanos < other.nanos { return -1 }
         if self.nanos > other.nanos { return 1 }
-        0
+        return 0
     }
 }
 
@@ -106,12 +106,12 @@ impl Instant {
         let ts = TimeSpec { sec: 0i64, nsec: 0i64 }
         // SYS_clock_gettime = 228, CLOCK_MONOTONIC = 1
         let _ret = syscall2(228i64, 1i64, ts as *raw i64)
-        Instant { secs: ts.sec, nanos: ts.nsec }
+        return Instant { secs: ts.sec, nanos: ts.nsec }
     }
 
     pub fn elapsed(self) -> Duration {
         let current = Instant.now()
-        self.duration_since(current)
+        return self.duration_since(current)
     }
 
     pub fn duration_since(self, later: Instant) -> Duration {
@@ -124,7 +124,7 @@ impl Instant {
         if total_s < 0i64 {
             return Duration.zero()
         }
-        Duration {
+        return Duration {
             secs: total_s as u64,
             nanos: total_ns as u32,
         }
@@ -167,7 +167,7 @@ impl FrameTimer {
             frame_ns = 1000000000u64 / (target_fps as u64)
         }
         let now = Instant.now()
-        FrameTimer {
+        return FrameTimer {
             target_fps: target_fps,
             frame_dur: Duration.from_nanos(frame_ns),
             last_tick: now,
@@ -196,7 +196,7 @@ impl FrameTimer {
             self.fps_timer = now
         }
 
-        elapsed.as_secs_f64()
+        return elapsed.as_secs_f64()
     }
 
     pub fn pace(self) {
@@ -209,6 +209,6 @@ impl FrameTimer {
     }
 
     pub fn fps(self) -> f64 {
-        self.measured_fps
+        return self.measured_fps
     }
 }

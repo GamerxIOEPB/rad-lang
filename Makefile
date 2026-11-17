@@ -123,11 +123,6 @@ install: all
 	@echo "==> Installing Rad toolchain to $(PREFIX)..."
 	@mkdir -p $(PREFIX)/bin $(PREFIX)/lib/targets/$(TARGET_TRIPLE) $(PREFIX)/lib/rad $(PREFIX)/share/rad $(PREFIX)/packages
 	@find $(BIN_DIR) -maxdepth 1 -type f -exec cp -f {} $(PREFIX)/bin/ \;
-	@if [ -d "$(BIN_DIR)/arcade" ]; then \
-		mkdir -p $(PREFIX)/bin/arcade; \
-		cp -rf $(BIN_DIR)/arcade/* $(PREFIX)/bin/arcade/; \
-		cp -f $(BIN_DIR)/arcade/arcade $(PREFIX)/bin/rad-arcade; \
-	fi
 	cp -rf lib/rad/core lib/rad/alloc lib/rad/std lib/rad/rad-test $(PREFIX)/lib/rad/
 	cp -rf $(SYSROOT)/* $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/
 	@if [ -d "../rad-lib/packages" ]; then \

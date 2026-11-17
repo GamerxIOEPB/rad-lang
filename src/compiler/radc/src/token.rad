@@ -28,6 +28,7 @@ const TOK_MATCH: i32 = 25
 const TOK_ENUM: i32 = 26
 const TOK_FOR: i32 = 27
 const TOK_IN: i32 = 28
+const TOK_DEFER: i32 = 29
 
 // Delimiters
 const TOK_LPAREN: i32 = 30    // (
@@ -286,6 +287,8 @@ fn lex_source(src: String) -> Vec<Token> {
                     k = TOK_FOR
                 } else if str_eq(s, "in") {
                     k = TOK_IN
+                } else if str_eq(s, "defer") {
+                    k = TOK_DEFER
                 }
 
                 let tok_len = (cur_col - tok_col) as i64
@@ -300,27 +303,67 @@ fn lex_source(src: String) -> Vec<Token> {
             } else if is_digit(ch) {
                 var num_str = String.new()
                 var is_float = false
-                while i < len && is_digit(p[i]) {
-                    num_str.push_byte(p[i])
-                    i = i + 1usize
-                    cur_col = cur_col + 1i64
-                }
-                if i + 1usize < len && p[i] == 46u8 && is_digit(p[i + 1usize]) {
-                    is_float = true
-                    num_str.push_byte(46u8) // '.'
-                    i = i + 1usize
-                    cur_col = cur_col + 1i64
-                    while i < len && is_digit(p[i]) {
-                        num_str.push_byte(p[i])
+                var tok_val = 0i64
+
+                if ch == 48u8 && i + 1usize < len && (p[i + 1usize] == 120u8 || p[i + 1usize] == 88u8) {
+                    // Hexadecimal: 0x... or 0X...
+                    i = i + 2usize
+                    cur_col = cur_col + 2i64
+                    num_str.push_byte(48u8)
+                    num_str.push_byte(120u8)
+                    var hex_num = 0i64
+                    while i < len && (is_hex_digit(p[i]) || p[i] == 95u8) {
+                        if p[i] != 95u8 {
+                            hex_num = (hex_num * 16i64) + (hex_val(p[i]) as i64)
+                            num_str.push_byte(p[i])
+                        }
                         i = i + 1usize
                         cur_col = cur_col + 1i64
                     }
+                    tok_val = hex_num
+                } else if ch == 48u8 && i + 1usize < len && (p[i + 1usize] == 98u8 || p[i + 1usize] == 66u8) {
+                    // Binary: 0b... or 0B...
+                    i = i + 2usize
+                    cur_col = cur_col + 2i64
+                    num_str.push_byte(48u8)
+                    num_str.push_byte(98u8)
+                    var bin_val = 0i64
+                    while i < len && (p[i] == 48u8 || p[i] == 49u8 || p[i] == 95u8) {
+                        if p[i] != 95u8 {
+                            bin_val = (bin_val * 2i64) + ((p[i] - 48u8) as i64)
+                            num_str.push_byte(p[i])
+                        }
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    }
+                    tok_val = bin_val
+                } else {
+                    // Decimal
+                    while i < len && (is_digit(p[i]) || p[i] == 95u8) {
+                        if p[i] != 95u8 {
+                            num_str.push_byte(p[i])
+                        }
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                    }
+                    if i + 1usize < len && p[i] == 46u8 && is_digit(p[i + 1usize]) {
+                        is_float = true
+                        num_str.push_byte(46u8) // '.'
+                        i = i + 1usize
+                        cur_col = cur_col + 1i64
+                        while i < len && (is_digit(p[i]) || p[i] == 95u8) {
+                            if p[i] != 95u8 {
+                                num_str.push_byte(p[i])
+                            }
+                            i = i + 1usize
+                            cur_col = cur_col + 1i64
+                        }
+                    }
+                    if !is_float {
+                        tok_val = parse_int(num_str.as_ptr() as str)
+                    }
                 }
                 num_str.push_byte(0u8)
-                var tok_val = 0i64
-                if !is_float {
-                    tok_val = parse_int(num_str.as_ptr() as str)
-                }
 
                 // Consume optional type suffix
                 if i < len && (p[i] == 105u8 || p[i] == 117u8 || p[i] == 102u8) {

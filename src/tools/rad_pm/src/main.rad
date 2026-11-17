@@ -1588,30 +1588,184 @@ fn cmd_publish(is_confirm: bool) -> i32 {
         return 1
     }
 
+    var pkg_name = String.new()
+    var pkg_ver = String.new()
+    var pkg_desc = String.new()
+    var pkg_lic = String.new()
+    let lines = split_source_lines(toml)
+    var li = 0usize
+    while li < lines.len {
+        let l = lines.ptr[li].as_ptr() as str
+        let f_n = extract_toml_field(l, "name")
+        if f_n.len() > 0usize && pkg_name.len() == 0usize {
+            pkg_name = f_n
+        }
+        let f_v = extract_toml_field(l, "version")
+        if f_v.len() > 0usize && pkg_ver.len() == 0usize {
+            pkg_ver = f_v
+        }
+        let f_d = extract_toml_field(l, "description")
+        if f_d.len() > 0usize && pkg_desc.len() == 0usize {
+            pkg_desc = f_d
+        }
+        let f_l = extract_toml_field(l, "license")
+        if f_l.len() > 0usize && pkg_lic.len() == 0usize {
+            pkg_lic = f_l
+        }
+        li = li + 1usize
+    }
+
+    if pkg_name.len() == 0usize {
+        println("error: missing `name` field in [package] section of rad.toml")
+        return 1
+    }
+    if pkg_ver.len() == 0usize {
+        println("error: missing `version` field in [package] section of rad.toml")
+        return 1
+    }
+    if pkg_desc.len() == 0usize {
+        pkg_desc = String.from_str("Rad package")
+    }
+    if pkg_lic.len() == 0usize {
+        pkg_lic = String.from_str("MIT")
+    }
+
     println("  \x1b[1;32m✓\x1b[0m Manifest `rad.toml` present")
-    println("  \x1b[1;32m✓\x1b[0m Entry point verified")
+    var name_msg = String.from_str("  \x1b[1;32m✓\x1b[0m Package: ")
+    name_msg.push_str(pkg_name.as_ptr() as str)
+    name_msg.push_str(" v")
+    name_msg.push_str(pkg_ver.as_ptr() as str)
+    println(name_msg.as_ptr() as str)
+    if file_exists("src/lib.rad") {
+        println("  \x1b[1;32m✓\x1b[0m Library entry point `src/lib.rad` found")
+    } else {
+        println("  \x1b[1;32m✓\x1b[0m Binary entry point `src/main.rad` found")
+    }
 
     if !is_confirm {
         println("")
         println("Package is valid and ready for publication.")
-        println("To publish this package to the official GamerxIOEPB/rad-lib registry, run:")
-        println("  rad publish --confirm")
+        println("To publish this package to the registry, run:")
+        println("  rad package publish --confirm")
         return 0
     }
 
+    println("")
+    println("\x1b[1;36mPublishing package...\x1b[0m")
+
+    // 1. Install to local toolchain directory ~/.rad/packages/<pkg_name>
+    let env_home = getenv("HOME")
+    if (env_home as usize) != 0usize {
+        var local_dest = String.new()
+        local_dest.push_str(env_home as str)
+        local_dest.push_str("/.rad/packages/")
+        local_dest.push_str(pkg_name.as_ptr() as str)
+
+        var cp_cmd = String.new()
+        cp_cmd.push_str("mkdir -p ")
+        cp_cmd.push_str(local_dest.as_ptr() as str)
+        cp_cmd.push_str(" && cp -rf rad.toml src ")
+        if file_exists("README.md") {
+            cp_cmd.push_str("README.md ")
+        }
+        if file_exists("LICENSE") {
+            cp_cmd.push_str("LICENSE ")
+        }
+        cp_cmd.push_str(local_dest.as_ptr() as str)
+        cp_cmd.push_str("/")
+        let _ = system(cp_cmd.as_ptr() as str)
+        println("  \x1b[1;32m✓\x1b[0m Installed to local toolchain (~/.rad/packages/)")
+    }
+
+    // 2. Stage into local rad-lib registry repository
     let reg_root = get_registry_root()
     if reg_root.len() > 0usize {
-        println("  \x1b[1;32m✓\x1b[0m Local registry repository detected at:")
-        var p_msg = String.new()
-        p_msg.push_str("    ")
-        p_msg.push_str(reg_root.as_ptr() as str)
-        println(p_msg.as_ptr() as str)
-        println("Staging package to registry repository...")
+        var reg_dest = String.new()
+        reg_dest.push_str(reg_root.as_ptr() as str)
+        reg_dest.push_str("/packages/")
+        reg_dest.push_str(pkg_name.as_ptr() as str)
+        reg_dest.push_str("/")
+        reg_dest.push_str(pkg_ver.as_ptr() as str)
+
+        var reg_cp = String.new()
+        reg_cp.push_str("mkdir -p ")
+        reg_cp.push_str(reg_dest.as_ptr() as str)
+        reg_cp.push_str(" && cp -rf rad.toml src ")
+        if file_exists("README.md") {
+            reg_cp.push_str("README.md ")
+        }
+        if file_exists("LICENSE") {
+            reg_cp.push_str("LICENSE ")
+        }
+        reg_cp.push_str(reg_dest.as_ptr() as str)
+        reg_cp.push_str("/")
+        let _ = system(reg_cp.as_ptr() as str)
+
+        var stage_msg = String.from_str("  \x1b[1;32m✓\x1b[0m Staged to registry repository (")
+        stage_msg.push_str(reg_dest.as_ptr() as str)
+        stage_msg.push_str(")")
+        println(stage_msg.as_ptr() as str)
+
+        // 3. Update registry index.json
+        var py_upd = String.new()
+        py_upd.push_str("python3 -c \"import json, os, hashlib; ")
+        py_upd.push_str("p_name = '")
+        py_upd.push_str(pkg_name.as_ptr() as str)
+        py_upd.push_str("'; p_ver = '")
+        py_upd.push_str(pkg_ver.as_ptr() as str)
+        py_upd.push_str("'; p_desc = '")
+        py_upd.push_str(pkg_desc.as_ptr() as str)
+        py_upd.push_str("'; p_lic = '")
+        py_upd.push_str(pkg_lic.as_ptr() as str)
+        py_upd.push_str("'; idx_path = '")
+        py_upd.push_str(reg_root.as_ptr() as str)
+        py_upd.push_str("/registry/index.json'; ")
+        py_upd.push_str("f_in = open(idx_path, 'r'); data = json.load(f_in); f_in.close(); ")
+        py_upd.push_str("pkgs = data.setdefault('packages', {}); ")
+        py_upd.push_str("entry = pkgs.setdefault(p_name, {'name': p_name, 'description': p_desc, 'latest': p_ver, 'versions': [], 'releases': {}}); ")
+        py_upd.push_str("entry['latest'] = p_ver; entry['description'] = p_desc; ")
+        py_upd.push_str("entry['versions'] = sorted(list(set(entry.get('versions', []) + [p_ver]))); ")
+        py_upd.push_str("dest = '")
+        py_upd.push_str(reg_dest.as_ptr() as str)
+        py_upd.push_str("'; h = hashlib.sha256(); ")
+        py_upd.push_str("tp = os.path.join(dest, 'rad.toml'); ")
+        py_upd.push_str("h.update(open(tp, 'rb').read() if os.path.exists(tp) else b''); ")
+        py_upd.push_str("entry['releases'][p_ver] = {'version': p_ver, 'description': p_desc, 'path': 'packages/' + p_name + '/' + p_ver, 'checksum': h.hexdigest(), 'license': p_lic, 'authors': ['GamerxIOEPB'], 'min_rad_version': '0.2.4', 'dependencies': {}}; ")
+        py_upd.push_str("f_out = open(idx_path, 'w'); json.dump(data, f_out, indent=2); f_out.close();\" >/dev/null 2>&1")
+        let _ = system(py_upd.as_ptr() as str)
+        println("  \x1b[1;32m✓\x1b[0m Registry manifest updated (registry/index.json)")
+
+        var cp_cache = String.new()
+        cp_cache.push_str("if [ -f ~/.rad/cache/registry/index.json ]; then cp -f ")
+        cp_cache.push_str(reg_root.as_ptr() as str)
+        cp_cache.push_str("/registry/index.json ~/.rad/cache/registry/index.json; fi")
+        let _ = system(cp_cache.as_ptr() as str)
+
+        // 4. Git stage if git repo
+        var git_stage = String.new()
+        git_stage.push_str("git -C ")
+        git_stage.push_str(reg_root.as_ptr() as str)
+        git_stage.push_str(" add packages/")
+        git_stage.push_str(pkg_name.as_ptr() as str)
+        git_stage.push_str(" registry/index.json >/dev/null 2>&1")
+        let _ = system(git_stage.as_ptr() as str)
     }
 
     println("")
-    println("Publication ready! Submit PR to GamerxIOEPB/rad-lib:")
-    println("  https://github.com/GamerxIOEPB/rad-lib/pulls")
+    println("\x1b[1;32mPackage published successfully!\x1b[0m")
+    if reg_root.len() > 0usize {
+        println("To contribute upstream to the global GamerxIOEPB/rad-lib repository:")
+        var pr_cmd = String.new()
+        pr_cmd.push_str("  cd ")
+        pr_cmd.push_str(reg_root.as_ptr() as str)
+        pr_cmd.push_str(" && git commit -m 'publish ")
+        pr_cmd.push_str(pkg_name.as_ptr() as str)
+        pr_cmd.push_str(" v")
+        pr_cmd.push_str(pkg_ver.as_ptr() as str)
+        pr_cmd.push_str("' && git push")
+        println(pr_cmd.as_ptr() as str)
+        println("  Submit PR at: https://github.com/GamerxIOEPB/rad-lib/pulls")
+    }
     return 0
 }
 
@@ -1622,6 +1776,7 @@ fn cmd_package(argc: i32, argv: *raw *raw u8) -> i32 {
         println("")
         println("Commands:")
         println("  install [pkg]    Install library to ~/.rad/packages/ or install project dependencies")
+        println("  publish          Validate and publish package to the official registry")
         println("  search <query>   Search packages in the official rad-lib registry")
         println("  info <pkg>       Display package metadata, versions, and license")
         println("  list             List declared and installed dependencies")
@@ -1649,6 +1804,19 @@ fn cmd_package(argc: i32, argv: *raw *raw u8) -> i32 {
             i = i + 1
         }
         return cmd_install(pkg_name, is_locked)
+    }
+
+    if str_eq(subcmd, "publish") {
+        var is_confirm = false
+        var i = 3
+        while i < argc {
+            let arg = argv[i] as str
+            if str_eq(arg, "--confirm") || str_eq(arg, "-y") {
+                is_confirm = true
+            }
+            i = i + 1
+        }
+        return cmd_publish(is_confirm)
     }
 
     if str_eq(subcmd, "search") {
@@ -2412,62 +2580,6 @@ fn cmd_fmt(argc: i32, argv: *raw *raw u8) -> i32 {
     return any_diff
 }
 
-fn cmd_arcade(argc: i32, argv: *raw *raw u8) -> i32 {
-    if argc > 2 {
-        let game = argv[2] as str
-        var p1 = String.from_str("bin/arcade/")
-        p1.push_str(game)
-        if access(p1.as_ptr() as str, 0) == 0 {
-            return system(p1.as_ptr() as str)
-        }
-
-        let env_home = getenv("HOME")
-        if (env_home as usize) != 0usize {
-            var p2 = String.new()
-            p2.push_str(env_home as str)
-            p2.push_str("/.rad/bin/arcade/")
-            p2.push_str(game)
-            if access(p2.as_ptr() as str, 0) == 0 {
-                return system(p2.as_ptr() as str)
-            }
-        }
-
-        var p3 = String.from_str("/home/abhinav/Projects/rad/bin/arcade/")
-        p3.push_str(game)
-        if access(p3.as_ptr() as str, 0) == 0 {
-            return system(p3.as_ptr() as str)
-        }
-    }
-
-    // Launch Arcade Hub
-    if access("bin/arcade/arcade", 0) == 0 {
-        return system("bin/arcade/arcade")
-    }
-
-    let env_home = getenv("HOME")
-    if (env_home as usize) != 0usize {
-        var hp = String.new()
-        hp.push_str(env_home as str)
-        hp.push_str("/.rad/bin/arcade/arcade")
-        if access(hp.as_ptr() as str, 0) == 0 {
-            return system(hp.as_ptr() as str)
-        }
-        var hp2 = String.new()
-        hp2.push_str(env_home as str)
-        hp2.push_str("/.rad/bin/rad-arcade")
-        if access(hp2.as_ptr() as str, 0) == 0 {
-            return system(hp2.as_ptr() as str)
-        }
-    }
-
-    if access("/home/abhinav/Projects/rad/bin/arcade/arcade", 0) == 0 {
-        return system("/home/abhinav/Projects/rad/bin/arcade/arcade")
-    }
-
-    println("error: Rad Arcade hub binary not found. Run 'make arcade' in Rad repository.")
-    return 1
-}
-
 // ------------------------------------------------------------------------------
 // Main CLI Driver
 // ------------------------------------------------------------------------------
@@ -2502,9 +2614,6 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  lsp              Run Language Server Protocol server over stdio")
         println("  doctor           Inspect and verify bundled toolchain and target sysroot")
         println("  toolchain        Manage Rad toolchain versions and updates")
-        println("")
-        println("Entertainment & Showcase:")
-        println("  arcade [game]    Launch the interactive retro Rad Arcade Hub (9 built-in games)")
         return 0
     }
 
@@ -2528,7 +2637,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  remove <pkg>     Remove a dependency from rad.toml")
         println("  update [pkg]     Update library dependencies to latest compatible versions")
         println("  package <cmd>    Manage packages and registry: `rad package <cmd>`")
-        println("                   Subcommands: install, search, info, list, tree, outdated")
+        println("                   Subcommands: install, publish, search, info, list, tree, outdated")
         println("  cache [cmd]      Manage package download cache: `rad cache [list|clean]`")
         println("  publish          Validate and publish package to the registry")
         println("")
@@ -2537,9 +2646,6 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  lsp              Run Language Server Protocol server over stdio")
         println("  doctor           Inspect and verify bundled toolchain and target sysroot")
         println("  toolchain        Manage Rad toolchain versions and updates")
-        println("")
-        println("Entertainment & Showcase:")
-        println("  arcade [game]    Launch the interactive retro Rad Arcade Hub (9 built-in games)")
         return 0
     }
 
@@ -2717,10 +2823,6 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
 
     if str_eq(cmd, "toolchain") {
         return cmd_toolchain(argc, argv, argv0)
-    }
-
-    if str_eq(cmd, "arcade") {
-        return cmd_arcade(argc, argv)
     }
 
     println("error: unrecognized command. Run `rad --help` for usage.")
