@@ -22,7 +22,7 @@ fn string_last_byte(s: String) -> u8 {
 
 // Trim leading whitespace from a line
 fn trim_line_start(line: str) -> str {
-    var p: *raw u8 = line as *raw u8
+    let p: *raw u8 = line as *raw u8
     var i = 0usize
     let len = str_len(line)
     while i < len && is_whitespace_char(p[i]) {

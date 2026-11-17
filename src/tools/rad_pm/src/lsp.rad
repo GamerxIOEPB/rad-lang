@@ -711,9 +711,9 @@ fn handle_document_symbol(id: i64, doc_text: String) {
         let l = lines.ptr[li].as_ptr() as str
         let t = trim_line_start(l)
 
-        var is_fn = str_starts_with(t, "fn ")
-        var is_st = str_starts_with(t, "struct ")
-        var is_co = str_starts_with(t, "const ")
+        let is_fn = str_starts_with(t, "fn ")
+        let is_st = str_starts_with(t, "struct ")
+        let is_co = str_starts_with(t, "const ")
 
         if is_fn || is_st || is_co {
             var prefix_len = 3usize // "fn "
@@ -837,7 +837,7 @@ fn read_lsp_message_from_stdin() -> String {
     // Parse Content-Length: <n>
     let cl_tag = "Content-Length: "
     let tag_idx = json_find_field(h_str, "Content-Length")
-    var cl_ptr = str_starts_with(h_str, cl_tag)
+    let cl_ptr = str_starts_with(h_str, cl_tag)
     let p: *raw u8 = h_str as *raw u8
     var i = 0usize
     let hlen = str_len(h_str)

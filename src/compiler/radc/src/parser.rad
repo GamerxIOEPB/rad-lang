@@ -1981,14 +1981,14 @@ impl Parser {
                 self.advance()
                 if self.match_tok(TOK_LBRACKET) {
                     let attr_name = self.peek_text()
-                    if str_eq(attr_name, "test") {
+                    if str_eq(attr_name, "test") || str_eq(attr_name, "bench") {
                         is_test = true
                         self.advance()
                     } else if str_eq(attr_name, "cfg") {
                         self.advance()
                         if self.match_tok(TOK_LPAREN) {
                             let cfg_arg = self.peek_text()
-                            if str_eq(cfg_arg, "test") {
+                            if str_eq(cfg_arg, "test") || str_eq(cfg_arg, "bench") {
                                 cfg_test = true
                             }
                             self.advance()
@@ -2210,7 +2210,7 @@ impl Parser {
                     while self.peek_kind() == TOK_HASH {
                         self.advance()
                         if self.match_tok(TOK_LBRACKET) {
-                            if str_eq(self.peek_text(), "test") {
+                            if str_eq(self.peek_text(), "test") || str_eq(self.peek_text(), "bench") {
                                 inner_is_test = true
                             }
                             while self.peek_kind() != TOK_RBRACKET && self.peek_kind() != TOK_EOF {

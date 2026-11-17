@@ -1,0 +1,454 @@
+// ==============================================================================
+// rad bench — Native Benchmarking Framework for Rad
+// Discovers #[bench] functions, calibrates iterations, measures monotonic timing,
+// ops/sec, nanoseconds per iteration, and standard deviation.
+// ==============================================================================
+
+fn bench_extract_fn_name_from_line(line: str) -> String {
+    let p = line as *raw u8
+    let len = str_len(line)
+    var i = 0usize
+    while i + 3usize <= len {
+        if p[i] == 102u8 && p[i + 1usize] == 110u8 && p[i + 2usize] == 32u8 {
+            i = i + 3usize
+            break
+        }
+        i = i + 1usize
+    }
+    while i < len && p[i] == 32u8 {
+        i = i + 1usize
+    }
+    var name = String.new()
+    while i < len {
+        let c = p[i]
+        if (c >= 97u8 && c <= 122u8) || (c >= 65u8 && c <= 90u8) || (c >= 48u8 && c <= 57u8) || c == 95u8 {
+            name.push_byte(c)
+        } else {
+            break
+        }
+        i = i + 1usize
+    }
+    return name
+}
+
+fn bench_extract_mod_name_from_line(line: str) -> String {
+    let p = line as *raw u8
+    let len = str_len(line)
+    var i = 0usize
+    while i + 4usize <= len {
+        if p[i] == 109u8 && p[i + 1usize] == 111u8 && p[i + 2usize] == 100u8 && p[i + 3usize] == 32u8 {
+            i = i + 4usize
+            break
+        }
+        i = i + 1usize
+    }
+    while i < len && p[i] == 32u8 {
+        i = i + 1usize
+    }
+    var name = String.new()
+    while i < len {
+        let c = p[i]
+        if (c >= 97u8 && c <= 122u8) || (c >= 65u8 && c <= 90u8) || (c >= 48u8 && c <= 57u8) || c == 95u8 {
+            name.push_byte(c)
+        } else {
+            break
+        }
+        i = i + 1usize
+    }
+    return name
+}
+
+fn parse_benchmarks_in_file(fpath: str, var symbols: Vec<String>, var displays: Vec<String>) {
+    let content = read_file_str(fpath)
+    if content.len() == 0usize {
+        return
+    }
+    let lines = split_source_lines(content)
+    var cur_mod = String.new()
+    var mod_depth = 0
+    var next_is_bench = false
+
+    var li = 0usize
+    while li < lines.len {
+        let line = lines.ptr[li].as_ptr() as str
+        if str_contains(line, "mod ") && str_contains(line, "{") {
+            cur_mod = bench_extract_mod_name_from_line(line)
+            mod_depth = 1
+        } else if mod_depth > 0 {
+            let p = line as *raw u8
+            let llen = str_len(line)
+            var idx = 0usize
+            while idx < llen {
+                if p[idx] == 123u8 {
+                    mod_depth = mod_depth + 1
+                } else if p[idx] == 125u8 {
+                    mod_depth = mod_depth - 1
+                    if mod_depth == 0 {
+                        cur_mod = String.new()
+                    }
+                }
+                idx = idx + 1usize
+            }
+        }
+
+        if str_contains(line, "#[bench]") {
+            next_is_bench = true
+        } else if next_is_bench {
+            if str_contains(line, "fn ") {
+                let fname = bench_extract_fn_name_from_line(line)
+                if fname.len() > 0usize {
+                    var sym = String.new()
+                    var disp = String.new()
+                    if cur_mod.len() > 0usize {
+                        sym.push_str(cur_mod.as_ptr() as str)
+                        sym.push_str("__")
+                        sym.push_str(fname.as_ptr() as str)
+
+                        disp.push_str(cur_mod.as_ptr() as str)
+                        disp.push_str("::")
+                        disp.push_str(fname.as_ptr() as str)
+                    } else {
+                        sym.push_str(fname.as_ptr() as str)
+                        disp.push_str(fname.as_ptr() as str)
+                    }
+                    symbols.push(sym)
+                    displays.push(disp)
+                }
+                next_is_bench = false
+            } else if !str_contains(line, "//") && str_len(line) > 0usize {
+                next_is_bench = false
+            }
+        }
+        li = li + 1usize
+    }
+}
+
+fn bench_int_to_str(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0")
+    }
+    var v = val
+    var is_neg = false
+    if v < 0i64 {
+        is_neg = true
+        v = -v
+    }
+    var rev = String.new()
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8
+        rev.push_byte(48u8 + digit)
+        v = v / 10i64
+    }
+    if is_neg {
+        rev.push_byte(45u8)
+    }
+    var res = String.new()
+    var len = rev.len()
+    let p = rev.as_ptr()
+    while len > 0usize {
+        len = len - 1usize
+        res.push_byte(p[len])
+    }
+    return res
+}
+
+fn write_bench_runner(out_path: str, symbols: Vec<String>, displays: Vec<String>) -> bool {
+    var s = String.new()
+
+    s.push_str("struct TimeSpec {\n")
+    s.push_str("    sec: i64,\n")
+    s.push_str("    nsec: i64,\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_bench_time_ns() -> i64 {\n")
+    s.push_str("    let ts = TimeSpec { sec: 0i64, nsec: 0i64 };\n")
+    s.push_str("    let _ret = syscall2(228i64, 1i64, ts as *raw i64);\n")
+    s.push_str("    return (ts.sec * 1000000000i64) + ts.nsec;\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_bench_sqrt(val: f64) -> f64 {\n")
+    s.push_str("    if val <= 0.0 { return 0.0; }\n")
+    s.push_str("    var x = val;\n")
+    s.push_str("    var i = 0;\n")
+    s.push_str("    while i < 20 {\n")
+    s.push_str("        x = 0.5 * (x + (val / x));\n")
+    s.push_str("        i = i + 1;\n")
+    s.push_str("    }\n")
+    s.push_str("    return x;\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_bench_print_num(val: i64) {\n")
+    s.push_str("    if val == 0i64 {\n")
+    s.push_str("        print(\"0\");\n")
+    s.push_str("        return;\n")
+    s.push_str("    }\n")
+    s.push_str("    var v = val;\n")
+    s.push_str("    var is_neg = false;\n")
+    s.push_str("    if v < 0i64 {\n")
+    s.push_str("        is_neg = true;\n")
+    s.push_str("        v = -v;\n")
+    s.push_str("    }\n")
+    s.push_str("    var rev = String.new();\n")
+    s.push_str("    while v > 0i64 {\n")
+    s.push_str("        let digit = (v % 10i64) as u8;\n")
+    s.push_str("        rev.push_byte(48u8 + digit);\n")
+    s.push_str("        v = v / 10i64;\n")
+    s.push_str("    }\n")
+    s.push_str("    if is_neg {\n")
+    s.push_str("        rev.push_byte(45u8);\n")
+    s.push_str("    }\n")
+    s.push_str("    var res = String.new();\n")
+    s.push_str("    var len = rev.len();\n")
+    s.push_str("    let p = rev.as_ptr();\n")
+    s.push_str("    while len > 0usize {\n")
+    s.push_str("        len = len - 1usize;\n")
+    s.push_str("        res.push_byte(p[len]);\n")
+    s.push_str("    }\n")
+    s.push_str("    print(res.as_ptr() as str);\n")
+    s.push_str("}\n\n")
+
+    s.push_str("fn rad_bench_print_grouped(val: i64) {\n")
+    s.push_str("    if val < 0i64 {\n")
+    s.push_str("        print(\"-\");\n")
+    s.push_str("        rad_bench_print_grouped(-val);\n")
+    s.push_str("        return;\n")
+    s.push_str("    }\n")
+    s.push_str("    if val < 1000i64 {\n")
+    s.push_str("        rad_bench_print_num(val);\n")
+    s.push_str("        return;\n")
+    s.push_str("    }\n")
+    s.push_str("    rad_bench_print_grouped(val / 1000i64);\n")
+    s.push_str("    print(\",\");\n")
+    s.push_str("    let rem = val % 1000i64;\n")
+    s.push_str("    if rem < 10i64 {\n")
+    s.push_str("        print(\"00\");\n")
+    s.push_str("    } else if rem < 100i64 {\n")
+    s.push_str("        print(\"0\");\n")
+    s.push_str("    }\n")
+    s.push_str("    rad_bench_print_num(rem);\n")
+    s.push_str("}\n\n")
+
+    // Dispatcher
+    s.push_str("fn rad_bench_call_fn(id: i32, b: *raw var Bencher) {\n")
+    var i = 0usize
+    while i < symbols.len {
+        s.push_str("    if id == ")
+        s.push_str(bench_int_to_str(i as i64).as_ptr() as str)
+        s.push_str(" { ")
+        s.push_str(symbols.ptr[i].as_ptr() as str)
+        s.push_str("(b); return; }\n")
+        i = i + 1usize
+    }
+    s.push_str("}\n\n")
+
+    // Single Benchmark Executor
+    s.push_str("fn rad_bench_run_one(name: str, id: i32) {\n")
+    s.push_str("    print(\"benchmark \");\n")
+    s.push_str("    print(name);\n")
+    s.push_str("    print(\" ... \");\n\n")
+
+    s.push_str("    var b = Bencher.new();\n")
+    s.push_str("    b.n = 100i64;\n")
+    s.push_str("    let t0 = rad_bench_time_ns();\n")
+    s.push_str("    rad_bench_call_fn(id, &b);\n")
+    s.push_str("    let t1 = rad_bench_time_ns();\n")
+    s.push_str("    let warmup_ns = t1 - t0;\n\n")
+
+    s.push_str("    if warmup_ns > 0i64 {\n")
+    s.push_str("        let ns_per_one = warmup_ns / 100i64;\n")
+    s.push_str("        if ns_per_one > 0i64 {\n")
+    s.push_str("            b.n = 50000000i64 / ns_per_one;\n")
+    s.push_str("            if b.n < 10i64 { b.n = 10i64; }\n")
+    s.push_str("            if b.n > 5000000i64 { b.n = 5000000i64; }\n")
+    s.push_str("        } else {\n")
+    s.push_str("            b.n = 100000i64;\n")
+    s.push_str("        }\n")
+    s.push_str("    } else {\n")
+    s.push_str("        b.n = 100000i64;\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    var s0 = 0.0;\n")
+    s.push_str("    var s1 = 0.0;\n")
+    s.push_str("    var s2 = 0.0;\n")
+    s.push_str("    var s3 = 0.0;\n")
+    s.push_str("    var s4 = 0.0;\n\n")
+
+    s.push_str("    var s_idx = 0;\n")
+    s.push_str("    var total_ns_sum = 0.0;\n")
+    s.push_str("    while s_idx < 5 {\n")
+    s.push_str("        let start = rad_bench_time_ns();\n")
+    s.push_str("        rad_bench_call_fn(id, &b);\n")
+    s.push_str("        let end = rad_bench_time_ns();\n")
+    s.push_str("        let diff_ns = (end - start) as f64;\n")
+    s.push_str("        let ns_per_op = diff_ns / (b.n as f64);\n")
+    s.push_str("        if s_idx == 0 { s0 = ns_per_op; }\n")
+    s.push_str("        else if s_idx == 1 { s1 = ns_per_op; }\n")
+    s.push_str("        else if s_idx == 2 { s2 = ns_per_op; }\n")
+    s.push_str("        else if s_idx == 3 { s3 = ns_per_op; }\n")
+    s.push_str("        else if s_idx == 4 { s4 = ns_per_op; }\n")
+    s.push_str("        total_ns_sum = total_ns_sum + ns_per_op;\n")
+    s.push_str("        s_idx = s_idx + 1;\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    let mean_ns = total_ns_sum / 5.0;\n")
+    s.push_str("    var variance_sum = 0.0;\n")
+    s.push_str("    let d0 = s0 - mean_ns; variance_sum = variance_sum + (d0 * d0);\n")
+    s.push_str("    let d1 = s1 - mean_ns; variance_sum = variance_sum + (d1 * d1);\n")
+    s.push_str("    let d2 = s2 - mean_ns; variance_sum = variance_sum + (d2 * d2);\n")
+    s.push_str("    let d3 = s3 - mean_ns; variance_sum = variance_sum + (d3 * d3);\n")
+    s.push_str("    let d4 = s4 - mean_ns; variance_sum = variance_sum + (d4 * d4);\n\n")
+
+    s.push_str("    let std_dev = rad_bench_sqrt(variance_sum / 5.0);\n")
+    s.push_str("    var ops_per_sec = 0i64;\n")
+    s.push_str("    if mean_ns > 0.0 {\n")
+    s.push_str("        ops_per_sec = (1000000000.0 / mean_ns) as i64;\n")
+    s.push_str("    }\n\n")
+
+    s.push_str("    print(\"bench: \\x1b[1;32m\");\n")
+    s.push_str("    rad_bench_print_grouped(mean_ns as i64);\n")
+    s.push_str("    print(\" ns/iter\\x1b[0m (+/- \");\n")
+    s.push_str("    rad_bench_print_num(std_dev as i64);\n")
+    s.push_str("    print(\") [\");\n")
+    s.push_str("    rad_bench_print_grouped(ops_per_sec);\n")
+    s.push_str("    println(\" ops/s]\");\n")
+    s.push_str("}\n\n")
+
+    // Main Runner
+    s.push_str("fn main() -> i32 {\n")
+    s.push_str("    println(\"\");\n")
+    s.push_str("    print(\"running \");\n")
+    s.push_str("    rad_bench_print_num(")
+    s.push_str(bench_int_to_str(symbols.len as i64).as_ptr() as str)
+    s.push_str("i64);\n")
+    s.push_str("    println(\" benchmarks\");\n\n")
+
+    i = 0usize
+    while i < symbols.len {
+        s.push_str("    rad_bench_run_one(\"")
+        s.push_str(displays.ptr[i].as_ptr() as str)
+        s.push_str("\", ")
+        s.push_str(bench_int_to_str(i as i64).as_ptr() as str)
+        s.push_str(");\n")
+        i = i + 1usize
+    }
+
+    s.push_str("    println(\"\");\n")
+    s.push_str("    print(\"benchmark result: \\x1b[32mok\\x1b[0m. \");\n")
+    s.push_str("    rad_bench_print_num(")
+    s.push_str(bench_int_to_str(symbols.len as i64).as_ptr() as str)
+    s.push_str("i64);\n")
+    s.push_str("    println(\" finished; 0 failed\");\n")
+    s.push_str("    return 0;\n")
+    s.push_str("}\n")
+
+    return write_file_str(out_path, s.as_ptr() as str)
+}
+
+pub fn cmd_bench(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
+    let has_toml = file_exists("rad.toml")
+    let has_src = file_exists("src")
+    let has_benches = file_exists("benches")
+    if !has_toml && !has_src && !has_benches {
+        println("error: could not find 'rad.toml', 'src/', or 'benches/' in current directory.")
+        return 1
+    }
+
+    var filter_str = ""
+    var i = 2
+    while i < argc {
+        let arg = argv[i] as str
+        if !str_starts_with(arg, "-") {
+            filter_str = arg
+        }
+        i = i + 1
+    }
+
+    let _d = system("mkdir -p target")
+
+    let radc_bin = find_radc_compiler(argv0)
+    if !is_executable_radc(radc_bin.as_ptr() as str) {
+        println("error: radc compiler not found or not executable.")
+        return 1
+    }
+
+    var bench_symbols = Vec.new()
+    var bench_displays = Vec.new()
+
+    // 1. Scan src/ for #[bench] functions
+    if file_exists("src") {
+        let _f = system("find src -type f -name '*.rad' > /tmp/rad_src_bench_list.txt 2>/dev/null")
+        let src_flist = read_file_str("/tmp/rad_src_bench_list.txt")
+        let _rm = remove("/tmp/rad_src_bench_list.txt")
+        let src_lines = split_source_lines(src_flist)
+
+        var fi = 0usize
+        while fi < src_lines.len {
+            let fpath = src_lines.ptr[fi].as_ptr() as str
+            if str_len(fpath) > 0usize {
+                parse_benchmarks_in_file(fpath, bench_symbols, bench_displays)
+            }
+            fi = fi + 1usize
+        }
+    }
+
+    // 2. Scan benches/ for #[bench] functions or standalone benchmark files
+    if file_exists("benches") {
+        let _bf = system("find benches -type f -name '*.rad' > /tmp/rad_benches_list.txt 2>/dev/null")
+        let b_flist = read_file_str("/tmp/rad_benches_list.txt")
+        let _rmb = remove("/tmp/rad_benches_list.txt")
+        let b_lines = split_source_lines(b_flist)
+
+        var bi = 0usize
+        while bi < b_lines.len {
+            let fpath = b_lines.ptr[bi].as_ptr() as str
+            if str_len(fpath) > 0usize {
+                parse_benchmarks_in_file(fpath, bench_symbols, bench_displays)
+            }
+            bi = bi + 1usize
+        }
+    }
+
+    // Filter by name
+    var filtered_symbols = Vec.new()
+    var filtered_displays = Vec.new()
+    if str_len(filter_str) > 0usize {
+        var ui = 0usize
+        while ui < bench_displays.len {
+            if str_contains(bench_displays.ptr[ui].as_ptr() as str, filter_str) {
+                filtered_symbols.push(bench_symbols.ptr[ui])
+                filtered_displays.push(bench_displays.ptr[ui])
+            }
+            ui = ui + 1usize
+        }
+    } else {
+        filtered_symbols = bench_symbols
+        filtered_displays = bench_displays
+    }
+
+    if filtered_symbols.len == 0usize {
+        println("No benchmarks found (functions tagged with #[bench]).")
+        return 0
+    }
+
+    println("   Compiling benchmarks...")
+    let bench_runner_path = "target/.rad_bench_runner.rad"
+    write_bench_runner(bench_runner_path, filtered_symbols, filtered_displays)
+
+    var compile_cmd = String.new()
+    compile_cmd.push_str(radc_bin.as_ptr() as str)
+    if file_exists("src") {
+        compile_cmd.push_str(" src/*.rad")
+    }
+    if file_exists("benches") {
+        compile_cmd.push_str(" benches/*.rad")
+    }
+    compile_cmd.push_str(" target/.rad_bench_runner.rad --bench -o target/bench_bin")
+
+    let build_status = system(compile_cmd.as_ptr() as str)
+    if build_status != 0 {
+        println("\x1b[31merror: failed to compile benchmarks\x1b[0m")
+        return 1
+    }
+
+    return system("target/bench_bin")
+}

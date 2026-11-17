@@ -83,7 +83,7 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
         opt_num = 3i32
     }
 
-    var err_buf = malloc(2048usize) as *raw var u8
+    let err_buf = malloc(2048usize) as *raw var u8
     var llc_status = 1i32
 
     // Primary: In-process LLVM code generation

@@ -319,7 +319,7 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
     fi
     if [ -n "$RAD_LIB_DIR" ]; then
-        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx; do
+        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml; do
             if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
                 cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$STAGE_DIR/packages/$pkg"
             fi
@@ -334,10 +334,13 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         ln -sfn rad-kv "$STAGE_DIR/packages/kv" 2>/dev/null || true
         ln -sfn rad-sqlite "$STAGE_DIR/packages/sqlite" 2>/dev/null || true
         ln -sfn rad-gfx "$STAGE_DIR/packages/gfx" 2>/dev/null || true
+        ln -sfn rad-toml "$STAGE_DIR/packages/toml" 2>/dev/null || true
     fi
 
     # Preserve metadata & licenses
-    if [ -d "$RAD_HOME/share/rad" ]; then
+    if [ -d "$LOCAL_REPO/share/rad" ]; then
+        cp -rf "$LOCAL_REPO/share/rad"/* "$STAGE_DIR/share/rad/" 2>/dev/null || true
+    elif [ -d "$RAD_HOME/share/rad" ]; then
         cp -r "$RAD_HOME/share/rad" "$STAGE_DIR/share/"
     else
         cat << EOF > "$STAGE_DIR/share/rad/VERSION"

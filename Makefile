@@ -50,7 +50,9 @@ RADC_SRCS := \
 RAD_SRCS := \
     $(RADPM_DIR)/fmt.rad \
     $(RADPM_DIR)/lsp.rad \
+    $(RADPM_DIR)/toml.rad \
     $(RADPM_DIR)/test.rad \
+    $(RADPM_DIR)/bench.rad \
     $(RADPM_DIR)/main.rad
 
 # Output binaries
@@ -125,9 +127,10 @@ install: all
 	@find $(BIN_DIR) -maxdepth 1 -type f -exec cp -f {} $(PREFIX)/bin/ \;
 	cp -rf lib/rad/core lib/rad/alloc lib/rad/std lib/rad/rad-test $(PREFIX)/lib/rad/
 	cp -rf $(SYSROOT)/* $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/
+	@if [ -d "share/rad" ]; then cp -rf share/rad/* $(PREFIX)/share/rad/; fi
 	@if [ -d "../rad-lib/packages" ]; then \
 		echo "==> Pre-installing Rad ecosystem libraries to $(PREFIX)/packages..."; \
-		for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx; do \
+		for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml; do \
 			if [ -d "../rad-lib/packages/$$pkg/0.1.0" ]; then \
 				rm -rf $(PREFIX)/packages/$$pkg; \
 				cp -rf ../rad-lib/packages/$$pkg/0.1.0 $(PREFIX)/packages/$$pkg; \
@@ -143,6 +146,7 @@ install: all
 		ln -sfn rad-kv $(PREFIX)/packages/kv; \
 		ln -sfn rad-sqlite $(PREFIX)/packages/sqlite; \
 		ln -sfn rad-gfx $(PREFIX)/packages/gfx; \
+		ln -sfn rad-toml $(PREFIX)/packages/toml; \
 		echo "    [✓] Ecosystem libraries installed to $(PREFIX)/packages"; \
 	fi
 	@echo "[✓] Rad installed successfully to $(PREFIX)/bin"

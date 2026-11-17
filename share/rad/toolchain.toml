@@ -1,0 +1,13 @@
+[toolchain]
+version = "0.2.4"
+channel = "stable"
+host = "x86_64-unknown-linux-musl"
+default_target = "x86_64-unknown-linux-musl"
+
+[components]
+rad = { path = "bin/rad", role = "package_manager" }
+radc = { path = "bin/radc", role = "compiler" }
+
+[llvm]
+version = "embedded-llvm-21-x86"
+components = ["embedded-backend-x86", "embedded-lld"]

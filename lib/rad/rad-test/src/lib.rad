@@ -276,3 +276,19 @@ fn rad_test_int_to_string(val: i64) -> String {
     }
     return res;
 }
+
+pub struct Bencher {
+    pub n: i64,
+    pub iters: i64,
+    pub elapsed_ns: i64,
+}
+
+impl Bencher {
+    pub fn new() -> Bencher {
+        return Bencher {
+            n: 1000i64,
+            iters: 0i64,
+            elapsed_ns: 0i64,
+        };
+    }
+}

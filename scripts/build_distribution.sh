@@ -114,7 +114,7 @@ echo "==> [1/4] Building hermetic musl toolchain binaries..."
 bash "$SCRIPT_DIR/build_musl_compiler.sh"
 
 # 1.2 Compile static-pie rad package manager using the new radc
-"$ROOT_DIR/bin/radc" "$ROOT_DIR/src/tools/rad_pm/src/fmt.rad" "$ROOT_DIR/src/tools/rad_pm/src/lsp.rad" "$ROOT_DIR/src/tools/rad_pm/src/test.rad" "$ROOT_DIR/src/tools/rad_pm/src/main.rad" -o "$ROOT_DIR/bin/rad" -O2
+"$ROOT_DIR/bin/radc" "$ROOT_DIR/src/tools/rad_pm/src/fmt.rad" "$ROOT_DIR/src/tools/rad_pm/src/lsp.rad" "$ROOT_DIR/src/tools/rad_pm/src/toml.rad" "$ROOT_DIR/src/tools/rad_pm/src/test.rad" "$ROOT_DIR/src/tools/rad_pm/src/bench.rad" "$ROOT_DIR/src/tools/rad_pm/src/main.rad" -o "$ROOT_DIR/bin/rad" -O2
 strip "$ROOT_DIR/bin/rad"
 
 # 1.3 Rigorous ELF verification of core binaries
@@ -167,7 +167,7 @@ elif [ -d "$HOME/Projects/rad-lib/packages" ]; then
     RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
 fi
 if [ -n "$RAD_LIB_DIR" ]; then
-    for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx; do
+    for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml; do
         if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
             cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$DIST_ROOT/packages/$pkg"
         fi
@@ -182,6 +182,7 @@ if [ -n "$RAD_LIB_DIR" ]; then
     ln -sfn rad-kv "$DIST_ROOT/packages/kv" 2>/dev/null || true
     ln -sfn rad-sqlite "$DIST_ROOT/packages/sqlite" 2>/dev/null || true
     ln -sfn rad-gfx "$DIST_ROOT/packages/gfx" 2>/dev/null || true
+    ln -sfn rad-toml "$DIST_ROOT/packages/toml" 2>/dev/null || true
 fi
 
 # Documentation & top-level files

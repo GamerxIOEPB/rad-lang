@@ -960,7 +960,7 @@ impl Codegen {
         if k == EXPR_METHOD_CALL {
             let recv_id = ep[id].left
             let member = ep[id].str_val.as_ptr() as str
-            if str_eq(member, "as_ptr") || str_eq(member, "new") || str_eq(member, "from_str") {
+            if str_eq(member, "as_ptr") || str_eq(member, "new") || str_eq(member, "from_str") || str_eq(member, "as_str") || str_eq(member, "to_string") {
                 return true
             }
             var is_static = false
@@ -1000,6 +1000,23 @@ impl Codegen {
             }
             if str_eq(self.get_func_ret_type(member), "ptr") {
                 return true
+            }
+            var fi = 0usize
+            while fi < self.parser.functions.len {
+                let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+                if str_ends_with(fn_str, member) {
+                    let flen = str_len(fn_str)
+                    let mlen = str_len(member)
+                    if flen > mlen + 2usize {
+                        let p = fn_str as *raw u8
+                        if p[flen - mlen - 1usize] == 95u8 && p[flen - mlen - 2usize] == 95u8 {
+                            if str_eq(self.get_func_ret_type(fn_str), "ptr") {
+                                return true
+                            }
+                        }
+                    }
+                }
+                fi = fi + 1usize
             }
         }
         if k == EXPR_FIELD_ACCESS {
@@ -1721,7 +1738,7 @@ impl Codegen {
             }
         }
         if k == EXPR_CALL {
-            var ep_sub = self.parser.exprs.ptr
+            let ep_sub = self.parser.exprs.ptr
             let callee_id = ep_sub[expr_id].left
             var callee_name = "unknown"
             if ep_sub[callee_id].kind == EXPR_IDENT {
@@ -4562,7 +4579,7 @@ impl Codegen {
                 continue
             }
 
-            var mutated = Vec.new()
+            let mutated = Vec.new()
             var mi = 0usize
             while mi < func.body.len {
                 self.collect_mutated_vars(func.body.ptr[mi], mutated)

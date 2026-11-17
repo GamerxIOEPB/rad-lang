@@ -79,7 +79,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
             } else {
                 color_mode = 0i32
             }
-        } else if str_eq(arg, "--test") {
+        } else if str_eq(arg, "--test") || str_eq(arg, "--bench") {
             test_mode = true
         } else if str_starts_with(arg, "-O") {
             let p = arg as *raw u8
@@ -112,7 +112,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
             if str_ends_with(arg, ".o") || str_ends_with(arg, ".a") || str_ends_with(arg, ".so") {
                 extra_objects.push(String.from_str(arg))
             } else {
-                var path_str = normalize_path(arg)
+                let path_str = normalize_path(arg)
                 input_paths.push(path_str)
             }
         }
@@ -824,7 +824,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         } else {
             obj_out.push_str("output.o")
         }
-        var err_buf = malloc(2048usize) as *raw var u8
+        let err_buf = malloc(2048usize) as *raw var u8
         var opt_num = 2i32
         let opt_s = opts.opt_level.as_ptr() as str
         if str_eq(opt_s, "0") {
