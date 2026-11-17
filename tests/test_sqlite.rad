@@ -1,3 +1,4 @@
+// link: -lsqlite3
 import rad_sqlite
 
 fn main() -> i32 {

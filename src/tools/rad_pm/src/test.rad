@@ -367,6 +367,24 @@ pub fn cmd_test(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
                         comp_integ.push_str(" src/lib.rad")
                     }
 
+                    // Extract test-specific linker/compiler directives (e.g. "// link: -lsqlite3")
+                    let t_content = read_file_str(tpath)
+                    let t_lines = split_source_lines(t_content)
+                    var tli = 0usize
+                    while tli < t_lines.len && tli < 15usize {
+                        let tline = t_lines.ptr[tli].as_ptr() as str
+                        if str_starts_with(tline, "// link: ") {
+                            let flag_str = (tline as usize + 9usize) as str
+                            comp_integ.push_str(" ")
+                            comp_integ.push_str(flag_str)
+                        } else if str_starts_with(tline, "// radc: ") {
+                            let flag_str = (tline as usize + 9usize) as str
+                            comp_integ.push_str(" ")
+                            comp_integ.push_str(flag_str)
+                        }
+                        tli = tli + 1usize
+                    }
+
                     comp_integ.push_str(" --test -o ")
                     comp_integ.push_str(out_bin.as_ptr() as str)
 
