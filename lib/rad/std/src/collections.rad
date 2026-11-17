@@ -1,0 +1,132 @@
+// ==============================================================================
+// Rad Standard Library: Advanced Collections (std::collections)
+// Doubly-linked lists, re-exports of HashSet, Queue, Deque, Stack.
+// ==============================================================================
+
+pub struct ListNode<T> {
+    pub val: T,
+    pub prev: *raw var ListNode<T>,
+    pub next: *raw var ListNode<T>,
+}
+
+pub struct LinkedList<T> {
+    pub head: *raw var ListNode<T>,
+    pub tail: *raw var ListNode<T>,
+    pub count: usize,
+}
+
+impl<T> LinkedList<T> {
+    pub fn new() -> LinkedList<T> {
+        return LinkedList {
+            head: 0 as *raw var ListNode<T>,
+            tail: 0 as *raw var ListNode<T>,
+            count: 0usize,
+        }
+    }
+
+    pub fn len(self) -> usize {
+        return self.count
+    }
+
+    pub fn is_empty(self) -> bool {
+        return (self.count == 0usize)
+    }
+
+    pub fn push_back(var self, val: T) {
+        let node: *raw var ListNode<T> = malloc(24usize) as *raw var ListNode<T>
+        node.val = val
+        node.next = 0 as *raw var ListNode<T>
+        node.prev = self.tail
+
+        if (self.tail as usize) != 0usize {
+            self.tail.next = node
+        } else {
+            self.head = node
+        }
+        self.tail = node
+        self.count = self.count + 1usize
+    }
+
+    pub fn push_front(var self, val: T) {
+        let node: *raw var ListNode<T> = malloc(24usize) as *raw var ListNode<T>
+        node.val = val
+        node.prev = 0 as *raw var ListNode<T>
+        node.next = self.head
+
+        if (self.head as usize) != 0usize {
+            self.head.prev = node
+        } else {
+            self.tail = node
+        }
+        self.head = node
+        self.count = self.count + 1usize
+    }
+
+    pub fn pop_front(var self) -> Option<T> {
+        if (self.head as usize) == 0usize {
+            return Option.None
+        }
+        let node: *raw var ListNode<T> = self.head
+        let val = node.val
+        self.head = node.next
+
+        if (self.head as usize) != 0usize {
+            self.head.prev = 0 as *raw var ListNode<T>
+        } else {
+            self.tail = 0 as *raw var ListNode<T>
+        }
+
+        free(node as *raw var u8)
+        self.count = self.count - 1usize
+        return Option.Some(val)
+    }
+
+    pub fn pop_back(var self) -> Option<T> {
+        if (self.tail as usize) == 0usize {
+            return Option.None
+        }
+        let node: *raw var ListNode<T> = self.tail
+        let val = node.val
+        self.tail = node.prev
+
+        if (self.tail as usize) != 0usize {
+            self.tail.next = 0 as *raw var ListNode<T>
+        } else {
+            self.head = 0 as *raw var ListNode<T>
+        }
+
+        free(node as *raw var u8)
+        self.count = self.count - 1usize
+        return Option.Some(val)
+    }
+
+    pub fn peek_front(self) -> Option<T> {
+        if (self.head as usize) == 0usize {
+            return Option.None
+        }
+        return Option.Some(self.head.val)
+    }
+
+    pub fn peek_back(self) -> Option<T> {
+        if (self.tail as usize) == 0usize {
+            return Option.None
+        }
+        return Option.Some(self.tail.val)
+    }
+
+    pub fn clear(var self) {
+        var cur: *raw var ListNode<T> = self.head
+        while (cur as usize) != 0usize {
+            let next_node: *raw var ListNode<T> = cur.next
+            free(cur as *raw var u8)
+            cur = next_node
+        }
+        self.head = 0 as *raw var ListNode<T>
+        self.tail = 0 as *raw var ListNode<T>
+        self.count = 0usize
+    }
+
+    pub fn destroy(var self) {
+        self.clear()
+    }
+}

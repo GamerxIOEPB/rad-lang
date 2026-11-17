@@ -140,7 +140,7 @@ impl Path {
             return String.from_str(".")
         }
         let ptr = p as *raw u8
-        var is_abs = ptr[0usize] == 47u8
+        let is_abs = ptr[0usize] == 47u8
 
         // Split by '/'
         var parts = Vec.new()

@@ -123,6 +123,27 @@ impl Codegen {
                             return c_ty
                         }
                     }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_FIELD_ACCESS {
+                        let fname = self.parser.exprs.ptr[init_e].field_name.as_ptr() as str
+                        let recv_id = self.parser.exprs.ptr[init_e].left
+                        let parent_struct = self.get_expr_struct_name(recv_id)
+                        if str_len(parent_struct) > 0usize {
+                            var si = 0usize
+                            while si < self.parser.structs.len {
+                                let sdef = self.parser.structs.ptr[si]
+                                if self.match_struct_name(sdef.struct_name.as_ptr() as str, parent_struct) {
+                                    var fi = 0usize
+                                    while fi < sdef.field_names.len {
+                                        if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                            return sdef.field_types.ptr[fi].as_ptr() as str
+                                        }
+                                        fi = fi + 1usize
+                                    }
+                                }
+                                si = si + 1usize
+                            }
+                        }
+                    }
                     if self.parser.exprs.ptr[init_e].kind == EXPR_METHOD_CALL {
                         let recv_id = self.parser.exprs.ptr[init_e].left
                         let member = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
@@ -429,16 +450,28 @@ impl Codegen {
             return ""
         }
         var s = ty
-        while str_starts_with(s, "*raw ") {
-            s = (s as usize + 5usize) as str
+        var changed = true
+        while changed {
+            changed = false
+            while str_starts_with(s, " ") {
+                s = (s as usize + 1usize) as str
+                changed = true
+            }
+            if str_starts_with(s, "*") || str_starts_with(s, "&") {
+                s = (s as usize + 1usize) as str
+                changed = true
+            } else if str_starts_with(s, "raw ") {
+                s = (s as usize + 4usize) as str
+                changed = true
+            } else if str_starts_with(s, "const ") {
+                s = (s as usize + 6usize) as str
+                changed = true
+            } else if str_starts_with(s, "var ") {
+                s = (s as usize + 4usize) as str
+                changed = true
+            }
         }
-        while str_starts_with(s, "var ") {
-            s = (s as usize + 4usize) as str
-        }
-        while str_starts_with(s, "*") {
-            s = (s as usize + 1usize) as str
-        }
-        while str_starts_with(s, "&") {
+        while str_starts_with(s, " ") {
             s = (s as usize + 1usize) as str
         }
         var i = 0usize
@@ -583,6 +616,36 @@ impl Codegen {
                     fi = fi + 1usize
                 }
                 si = si + 1usize
+            }
+        }
+        if k == EXPR_INDEX {
+            let left_id = ep[id].left
+            if ep[left_id].kind == EXPR_IDENT {
+                let raw_ty = self.get_raw_var_type(ep[left_id].str_val.as_ptr() as str)
+                if str_ends_with(raw_ty, "f64") || str_ends_with(raw_ty, "f32") {
+                    return true
+                }
+            } else if ep[left_id].kind == EXPR_FIELD_ACCESS {
+                let fname = ep[left_id].field_name.as_ptr() as str
+                let recv_id = ep[left_id].left
+                let s_type = self.get_expr_struct_name(recv_id)
+                var si = 0usize
+                while si < self.parser.structs.len {
+                    let sdef = self.parser.structs.ptr[si]
+                    if str_len(s_type) == 0usize || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                        var fi = 0usize
+                        while fi < sdef.field_names.len {
+                            if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                                if str_ends_with(fty, "f64") || str_ends_with(fty, "f32") {
+                                    return true
+                                }
+                            }
+                            fi = fi + 1usize
+                        }
+                    }
+                    si = si + 1usize
+                }
             }
         }
         if k == EXPR_CALL {
@@ -1206,15 +1269,29 @@ impl Codegen {
             while ei < n_elems {
                 let e_id = ep[expr_id].args.ptr[ei]
                 let v_reg = self.emit_expr(e_id)
+                let is_fl = self.is_expr_float(e_id)
+                let is_pt = self.is_expr_ptr(e_id)
                 let gep = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(gep).as_ptr() as str)
-                self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+                if is_fl {
+                    self.ir.push_str(" = getelementptr inbounds double, ptr %")
+                } else if is_pt {
+                    self.ir.push_str(" = getelementptr inbounds ptr, ptr %")
+                } else {
+                    self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+                }
                 self.ir.push_str(int_to_str(buf_reg).as_ptr() as str)
                 self.ir.push_str(", i64 ")
                 self.ir.push_str(int_to_str(ei as i32).as_ptr() as str)
                 self.ir.push_str("\n")
-                self.ir.push_str("  store i64 %")
+                if is_fl {
+                    self.ir.push_str("  store double %")
+                } else if is_pt {
+                    self.ir.push_str("  store ptr %")
+                } else {
+                    self.ir.push_str("  store i64 %")
+                }
                 self.ir.push_str(int_to_str(v_reg).as_ptr() as str)
                 self.ir.push_str(", ptr %")
                 self.ir.push_str(int_to_str(gep).as_ptr() as str)
@@ -2566,12 +2643,8 @@ impl Codegen {
             }
 
             var f_idx = -1i64
-            var s_type = ""
-            if ep[recv_id].kind == EXPR_IDENT {
-                let vname = ep[recv_id].str_val.as_ptr() as str
-                s_type = self.get_raw_var_type(vname)
-            }
-            if str_len(s_type) > 0usize && !str_starts_with(s_type, "*") {
+            let s_type = self.get_expr_struct_name(recv_id)
+            if str_len(s_type) > 0usize {
                 var si = 0usize
                 while si < self.parser.structs.len {
                     let sdef = self.parser.structs.ptr[si]
@@ -2651,8 +2724,12 @@ impl Codegen {
             var is_ptr_elem = false
             var is_byte = false
             var is_vec = false
+            var is_float_elem = false
             if ep[left_id].kind == EXPR_IDENT {
                 let raw_ty = self.get_raw_var_type(ep[left_id].str_val.as_ptr() as str)
+                if str_ends_with(raw_ty, "f64") || str_ends_with(raw_ty, "f32") {
+                    is_float_elem = true
+                }
                 if str_starts_with(raw_ty, "Vec") || str_starts_with(raw_ty, "[]") || str_starts_with(raw_ty, "var []") || str_starts_with(raw_ty, "[") {
                     is_vec = true
                 } else if str_starts_with(raw_ty, "*raw *raw") || str_starts_with(raw_ty, "**") {
@@ -2664,24 +2741,26 @@ impl Codegen {
                 is_vec = true
             } else if ep[left_id].kind == EXPR_CAST {
                 let tgt = ep[left_id].target_type.as_ptr() as str
-                if str_ends_with(tgt, "u8") || str_ends_with(tgt, "i8") || str_eq(tgt, "str") {
+                if str_ends_with(tgt, "f64") || str_ends_with(tgt, "f32") {
+                    is_float_elem = true
+                } else if str_ends_with(tgt, "u8") || str_ends_with(tgt, "i8") || str_eq(tgt, "str") {
                     is_byte = true
                 }
             } else if ep[left_id].kind == EXPR_FIELD_ACCESS {
                 let fname = ep[left_id].field_name.as_ptr() as str
                 let recv_id = ep[left_id].left
-                var s_type = ""
-                if ep[recv_id].kind == EXPR_IDENT {
-                    s_type = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
-                }
+                let s_type = self.get_expr_struct_name(recv_id)
                 var si = 0usize
                 while si < self.parser.structs.len {
                     let sdef = self.parser.structs.ptr[si]
-                    if str_len(s_type) == 0usize || str_starts_with(s_type, "*") || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                    if str_len(s_type) == 0usize || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
                         var fi = 0usize
                         while fi < sdef.field_names.len {
                             if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
                                 let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                                if str_ends_with(fty, "f64") || str_ends_with(fty, "f32") {
+                                    is_float_elem = true
+                                }
                                 if str_starts_with(fty, "Vec") || str_starts_with(fty, "[]") || str_starts_with(fty, "var []") || str_starts_with(fty, "[") {
                                     is_vec = true
                                 } else if str_starts_with(fty, "*raw *raw") || str_starts_with(fty, "**") {
@@ -2769,7 +2848,24 @@ impl Codegen {
                 arr_reg = buf_load
             }
 
-            if is_ptr_elem {
+            if is_float_elem {
+                let gep = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(gep).as_ptr() as str)
+                self.emit_str(" = getelementptr inbounds double, ptr %")
+                self.emit_str(int_to_str(arr_reg).as_ptr() as str)
+                self.emit_str(", i64 %")
+                self.emit_str(int_to_str(idx_reg).as_ptr() as str)
+                self.emit_str("\n")
+
+                let load_reg = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(load_reg).as_ptr() as str)
+                self.emit_str(" = load double, ptr %")
+                self.emit_str(int_to_str(gep).as_ptr() as str)
+                self.emit_str(", align 8\n")
+                return load_reg
+            } else if is_ptr_elem {
                 let gep = self.alloc_ssa()
                 self.emit_str("  %")
                 self.emit_str(int_to_str(gep).as_ptr() as str)
@@ -3338,6 +3434,21 @@ impl Codegen {
                 self.ir.push_str(", ptr %")
                 self.ir.push_str(int_to_str(gep).as_ptr() as str)
                 self.ir.push_str(", align 1\n")
+            } else if self.is_expr_float(val_expr) {
+                let gep = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(" = getelementptr inbounds double, ptr %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(", i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                self.ir.push_str("  store double %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
             } else {
                 let gep = self.alloc_ssa()
                 self.ir.push_str("  %")
@@ -3372,12 +3483,8 @@ impl Codegen {
             var val_reg = self.emit_expr(val_expr)
 
             var f_idx = -1i64
-            var s_type = ""
-            if self.parser.exprs.ptr[recv_expr].kind == EXPR_IDENT {
-                let vname = self.parser.exprs.ptr[recv_expr].str_val.as_ptr() as str
-                s_type = self.get_raw_var_type(vname)
-            }
-            if str_len(s_type) > 0usize && !str_starts_with(s_type, "*") {
+            let s_type = self.get_expr_struct_name(recv_expr)
+            if str_len(s_type) > 0usize {
                 var si = 0usize
                 while si < self.parser.structs.len {
                     let sdef = self.parser.structs.ptr[si]
@@ -4152,6 +4259,9 @@ impl Codegen {
             self.collect_mutations_in_expr(ep[expr_id].left, mutated)
             self.collect_mutations_in_expr(ep[expr_id].right, mutated)
         } else if k == EXPR_UNARY || k == EXPR_CAST || k == EXPR_FIELD_ACCESS {
+            if k == EXPR_FIELD_ACCESS && ep[ep[expr_id].left].kind == EXPR_IDENT {
+                mutated.push(ep[ep[expr_id].left].str_val)
+            }
             self.collect_mutations_in_expr(ep[expr_id].left, mutated)
         } else if k == EXPR_INDEX {
             self.collect_mutations_in_expr(ep[expr_id].left, mutated)
@@ -4178,6 +4288,9 @@ impl Codegen {
             mutated.push(sp[stmt_id].name)
             self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
             self.collect_mutations_in_expr(sp[stmt_id].index_expr, mutated)
+            if sp[stmt_id].then_stmts.len > 0usize {
+                self.collect_mutations_in_expr(sp[stmt_id].then_stmts.ptr[0usize], mutated)
+            }
         } else if k == STMT_ASSIGN_FIELD {
             let recv = sp[stmt_id].index_expr
             if self.parser.exprs.ptr[recv].kind == EXPR_IDENT {

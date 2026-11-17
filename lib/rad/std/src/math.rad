@@ -1,0 +1,217 @@
+// ==============================================================================
+// Rad Standard Library: Math & Geometry Primitives (std::math)
+// Trigonometry, exponential, vector algebra, and linear transformations.
+// ==============================================================================
+
+extern "C" {
+    fn sin(x: f64) -> f64;
+    fn cos(x: f64) -> f64;
+    fn tan(x: f64) -> f64;
+    fn asin(x: f64) -> f64;
+    fn acos(x: f64) -> f64;
+    fn atan2(y: f64, x: f64) -> f64;
+    fn sqrt(x: f64) -> f64;
+    fn pow(base: f64, exp: f64) -> f64;
+    fn floor(x: f64) -> f64;
+    fn ceil(x: f64) -> f64;
+    fn fabs(x: f64) -> f64;
+    fn log(x: f64) -> f64;
+    fn exp(x: f64) -> f64;
+}
+
+pub fn math_sin(x: f64) -> f64 { return sin(x) }
+pub fn math_cos(x: f64) -> f64 { return cos(x) }
+pub fn math_tan(x: f64) -> f64 { return tan(x) }
+pub fn math_asin(x: f64) -> f64 { return asin(x) }
+pub fn math_acos(x: f64) -> f64 { return acos(x) }
+pub fn math_atan2(y: f64, x: f64) -> f64 { return atan2(y, x) }
+pub fn math_sqrt(x: f64) -> f64 { return sqrt(x) }
+pub fn math_pow(base: f64, exp_val: f64) -> f64 { return pow(base, exp_val) }
+pub fn math_floor(x: f64) -> f64 { return floor(x) }
+pub fn math_ceil(x: f64) -> f64 { return ceil(x) }
+pub fn math_abs_f64(x: f64) -> f64 { return fabs(x) }
+pub fn math_log(x: f64) -> f64 { return log(x) }
+pub fn math_exp(x: f64) -> f64 { return exp(x) }
+
+pub fn pi() -> f64 { return 3.14159265358979323846 }
+pub fn tau() -> f64 { return 6.28318530717958647692 }
+pub fn euler() -> f64 { return 2.71828182845904523536 }
+
+pub fn deg_to_rad(deg: f64) -> f64 {
+    return deg * (pi() / 180.0)
+}
+
+pub fn rad_to_deg(rad: f64) -> f64 {
+    return rad * (180.0 / pi())
+}
+
+pub fn clamp_f64(val: f64, min_v: f64, max_v: f64) -> f64 {
+    if val < min_v { return min_v }
+    if val > max_v { return max_v }
+    return val
+}
+
+pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
+    return a + ((b - a) * t)
+}
+
+// ------------------------------------------------------------------------------
+// Vec2 (2D Vector)
+// ------------------------------------------------------------------------------
+
+pub struct Vec2 {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Vec2 {
+    pub fn new(x: f64, y: f64) -> Vec2 {
+        return Vec2 { x: x, y: y }
+    }
+
+    pub fn zero() -> Vec2 {
+        return Vec2 { x: 0.0, y: 0.0 }
+    }
+
+    pub fn add(self, other: Vec2) -> Vec2 {
+        return Vec2 { x: self.x + other.x, y: self.y + other.y }
+    }
+
+    pub fn sub(self, other: Vec2) -> Vec2 {
+        return Vec2 { x: self.x - other.x, y: self.y - other.y }
+    }
+
+    pub fn scale(self, s: f64) -> Vec2 {
+        return Vec2 { x: self.x * s, y: self.y * s }
+    }
+
+    pub fn dot(self, other: Vec2) -> f64 {
+        return (self.x * other.x) + (self.y * other.y)
+    }
+
+    pub fn length_squared(self) -> f64 {
+        return (self.x * self.x) + (self.y * self.y)
+    }
+
+    pub fn length(self) -> f64 {
+        return math_sqrt(self.length_squared())
+    }
+
+    pub fn normalize(self) -> Vec2 {
+        let l = self.length()
+        if l > 0.0000000001 {
+            return Vec2 { x: self.x / l, y: self.y / l }
+        }
+        return Vec2.zero()
+    }
+
+    pub fn distance_to(self, other: Vec2) -> f64 {
+        return self.sub(other).length()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Vec3 (3D Vector)
+// ------------------------------------------------------------------------------
+
+pub struct Vec3 {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+impl Vec3 {
+    pub fn new(x: f64, y: f64, z: f64) -> Vec3 {
+        return Vec3 { x: x, y: y, z: z }
+    }
+
+    pub fn zero() -> Vec3 {
+        return Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    }
+
+    pub fn add(self, other: Vec3) -> Vec3 {
+        return Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z }
+    }
+
+    pub fn sub(self, other: Vec3) -> Vec3 {
+        return Vec3 { x: self.x - other.x, y: self.y - other.y, z: self.z - other.z }
+    }
+
+    pub fn scale(self, s: f64) -> Vec3 {
+        return Vec3 { x: self.x * s, y: self.y * s, z: self.z * s }
+    }
+
+    pub fn dot(self, other: Vec3) -> f64 {
+        return (self.x * other.x) + (self.y * other.y) + (self.z * other.z)
+    }
+
+    pub fn cross(self, other: Vec3) -> Vec3 {
+        return Vec3 {
+            x: (self.y * other.z) - (self.z * other.y),
+            y: (self.z * other.x) - (self.x * other.z),
+            z: (self.x * other.y) - (self.y * other.x),
+        }
+    }
+
+    pub fn length_squared(self) -> f64 {
+        return (self.x * self.x) + (self.y * self.y) + (self.z * self.z)
+    }
+
+    pub fn length(self) -> f64 {
+        return math_sqrt(self.length_squared())
+    }
+
+    pub fn normalize(self) -> Vec3 {
+        let l = self.length()
+        if l > 0.0000000001 {
+            return Vec3 { x: self.x / l, y: self.y / l, z: self.z / l }
+        }
+        return Vec3.zero()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Mat4 (4x4 Transform Matrix, flat row-major array of 16 f64)
+// ------------------------------------------------------------------------------
+
+pub struct Mat4 {
+    pub m: [16]f64,
+}
+
+impl Mat4 {
+    pub fn identity() -> Mat4 {
+        let mat = Mat4 {
+            m: [
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, 0.0, 0.0, 1.0
+            ],
+        }
+        return mat
+    }
+
+    pub fn translation(tx: f64, ty: f64, tz: f64) -> Mat4 {
+        var mat = Mat4.identity()
+        mat.m[3usize] = tx
+        mat.m[7usize] = ty
+        mat.m[11usize] = tz
+        return mat
+    }
+
+    pub fn scaling(sx: f64, sy: f64, sz: f64) -> Mat4 {
+        var mat = Mat4.identity()
+        mat.m[0usize] = sx
+        mat.m[5usize] = sy
+        mat.m[10usize] = sz
+        return mat
+    }
+
+    pub fn get(self, row: usize, col: usize) -> f64 {
+        return self.m[(row * 4usize) + col]
+    }
+
+    pub fn set(var self, row: usize, col: usize, val: f64) {
+        self.m[(row * 4usize) + col] = val
+    }
+}

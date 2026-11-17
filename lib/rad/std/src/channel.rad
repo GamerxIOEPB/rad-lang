@@ -1,0 +1,140 @@
+// ==============================================================================
+// Rad Standard Library: Thread-Safe Channels (std::channel)
+// Thread-safe Multi-Producer Single-Consumer FIFO queues over POSIX condition variables.
+// ==============================================================================
+
+extern "C" {
+    fn pthread_mutex_init(mutex: *raw var u8, attr: *raw var u8) -> i32;
+    fn pthread_mutex_lock(mutex: *raw var u8) -> i32;
+    fn pthread_mutex_unlock(mutex: *raw var u8) -> i32;
+    fn pthread_mutex_destroy(mutex: *raw var u8) -> i32;
+    fn pthread_cond_init(cond: *raw var u8, attr: *raw var u8) -> i32;
+    fn pthread_cond_wait(cond: *raw var u8, mutex: *raw var u8) -> i32;
+    fn pthread_cond_signal(cond: *raw var u8) -> i32;
+    fn pthread_cond_broadcast(cond: *raw var u8) -> i32;
+    fn pthread_cond_destroy(cond: *raw var u8) -> i32;
+}
+
+pub struct Channel<T> {
+    pub mutex: *raw var u8,
+    pub cond: *raw var u8,
+    pub buffer: *raw var T,
+    pub cap: usize,
+    pub head: usize,
+    pub tail: usize,
+    pub count: usize,
+    pub is_closed: bool,
+}
+
+impl<T> Channel<T> {
+    pub fn new() -> Channel<T> {
+        let init_cap = 32usize
+        let m = malloc(64usize)
+        let c = malloc(64usize)
+        let _ = pthread_mutex_init(m, 0 as *raw var u8)
+        let _ = pthread_cond_init(c, 0 as *raw var u8)
+        let buf = malloc(init_cap * 8usize) as *raw var T
+
+        return Channel {
+            mutex: m,
+            cond: c,
+            buffer: buf,
+            cap: init_cap,
+            head: 0usize,
+            tail: 0usize,
+            count: 0usize,
+            is_closed: false,
+        }
+    }
+
+    pub fn send(var self, val: T) -> bool {
+        let _l = pthread_mutex_lock(self.mutex)
+        if self.is_closed {
+            let _u = pthread_mutex_unlock(self.mutex)
+            return false
+        }
+
+        // Expand buffer if full
+        if self.count >= self.cap {
+            let new_cap = self.cap * 2usize
+            let new_buf = malloc(new_cap * 8usize) as *raw var T
+            var i = 0usize
+            while i < self.count {
+                let idx = (self.head + i) % self.cap
+                new_buf[i] = self.buffer[idx]
+                i = i + 1usize
+            }
+            free(self.buffer as *raw var u8)
+            self.buffer = new_buf
+            self.head = 0usize
+            self.tail = self.count
+            self.cap = new_cap
+        }
+
+        self.buffer[self.tail] = val
+        self.tail = (self.tail + 1usize) % self.cap
+        self.count = self.count + 1usize
+
+        let _s = pthread_cond_signal(self.cond)
+        let _u = pthread_mutex_unlock(self.mutex)
+        return true
+    }
+
+    pub fn recv(var self) -> Option<T> {
+        let _l = pthread_mutex_lock(self.mutex)
+        while self.count == 0usize && !self.is_closed {
+            let _w = pthread_cond_wait(self.cond, self.mutex)
+        }
+
+        if self.count == 0usize && self.is_closed {
+            let _u = pthread_mutex_unlock(self.mutex)
+            return Option.None
+        }
+
+        let val = self.buffer[self.head]
+        self.head = (self.head + 1usize) % self.cap
+        self.count = self.count - 1usize
+
+        let _u = pthread_mutex_unlock(self.mutex)
+        return Option.Some(val)
+    }
+
+    pub fn try_recv(var self) -> Option<T> {
+        let _l = pthread_mutex_lock(self.mutex)
+        if self.count == 0usize {
+            let _u = pthread_mutex_unlock(self.mutex)
+            return Option.None
+        }
+
+        let val = self.buffer[self.head]
+        self.head = (self.head + 1usize) % self.cap
+        self.count = self.count - 1usize
+
+        let _u = pthread_mutex_unlock(self.mutex)
+        return Option.Some(val)
+    }
+
+    pub fn len(self) -> usize {
+        return self.count
+    }
+
+    pub fn close(var self) {
+        let _l = pthread_mutex_lock(self.mutex)
+        self.is_closed = true
+        let _b = pthread_cond_broadcast(self.cond)
+        let _u = pthread_mutex_unlock(self.mutex)
+    }
+
+    pub fn destroy(var self) {
+        let _ = pthread_mutex_destroy(self.mutex)
+        let _ = pthread_cond_destroy(self.cond)
+        free(self.mutex)
+        free(self.cond)
+        if (self.buffer as usize) != 0usize {
+            free(self.buffer as *raw var u8)
+            self.buffer = 0 as *raw var T
+        }
+        self.cap = 0usize
+        self.count = 0usize
+    }
+}

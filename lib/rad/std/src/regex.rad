@@ -1,0 +1,261 @@
+// ==============================================================================
+// Rad Standard Library: Regular Expressions (std::regex)
+// Pure Rad recursive pattern matching engine with support for ^, $, ., *, +, ?, \d, \w, \s.
+// ==============================================================================
+
+fn match_char_class(c_pat: u8, c_text: u8) -> bool {
+    if c_text == 0u8 {
+        return false
+    }
+    if c_pat == 46u8 { // '.'
+        return true
+    }
+    return (c_pat == c_text)
+}
+
+fn check_bracket_match(pat: *raw u8, c_text: u8, out_end: *raw var usize) -> bool {
+    var end_idx = 1usize
+    while pat[end_idx] != 0u8 && pat[end_idx] != 93u8 { // ']'
+        end_idx = end_idx + 1usize
+    }
+    if pat[end_idx] == 0u8 {
+        out_end[0usize] = 0usize
+        return false
+    }
+    out_end[0usize] = end_idx
+
+    var invert = false
+    var i = 1usize
+    if pat[1usize] == 94u8 { // '^'
+        invert = true
+        i = 2usize
+    }
+
+    var matched = false
+    while i < end_idx {
+        if i + 2usize < end_idx && pat[i + 1usize] == 45u8 { // '-' range
+            let r_start = pat[i]
+            let r_end = pat[i + 2usize]
+            if c_text >= r_start && c_text <= r_end {
+                matched = true
+                break
+            }
+            i = i + 3usize
+        } else {
+            if c_text == pat[i] {
+                matched = true
+                break
+            }
+            i = i + 1usize
+        }
+    }
+
+    if invert {
+        return !matched
+    }
+    return matched
+}
+
+fn match_bracket_star(pat: *raw u8, end_bracket: usize, sub_pat: str, text: str) -> bool {
+    let p_text = text as *raw u8
+    var offset = 0usize
+    let dummy = malloc(8usize) as *raw var usize
+    while p_text[offset] != 0u8 && check_bracket_match(pat, p_text[offset], dummy) {
+        let sub = ((p_text as usize) + offset) as *raw u8 as str
+        if match_here_at(sub_pat, sub) {
+            free(dummy as *raw var u8)
+            return true
+        }
+        offset = offset + 1usize
+    }
+    free(dummy as *raw var u8)
+    let sub = ((p_text as usize) + offset) as *raw u8 as str
+    return match_here_at(sub_pat, sub)
+}
+
+fn match_bracket_plus(pat: *raw u8, end_bracket: usize, sub_pat: str, text: str) -> bool {
+    let p_text = text as *raw u8
+    let dummy = malloc(8usize) as *raw var usize
+    if p_text[0usize] == 0u8 || !check_bracket_match(pat, p_text[0usize], dummy) {
+        free(dummy as *raw var u8)
+        return false
+    }
+    free(dummy as *raw var u8)
+    let sub = ((p_text as usize) + 1usize) as *raw u8 as str
+    return match_bracket_star(pat, end_bracket, sub_pat, sub)
+}
+
+fn match_star(c: u8, reg_pat: str, text: str) -> bool {
+    let p_text = text as *raw u8
+    var offset = 0usize
+    while p_text[offset] != 0u8 && match_char_class(c, p_text[offset]) {
+        let sub = ((p_text as usize) + offset) as *raw u8 as str
+        if match_here_at(reg_pat, sub) {
+            return true
+        }
+        offset = offset + 1usize
+    }
+    let sub = ((p_text as usize) + offset) as *raw u8 as str
+    return match_here_at(reg_pat, sub)
+}
+
+fn match_plus(c: u8, reg_pat: str, text: str) -> bool {
+    let p_text = text as *raw u8
+    if p_text[0usize] == 0u8 || !match_char_class(c, p_text[0usize]) {
+        return false
+    }
+    let sub = ((p_text as usize) + 1usize) as *raw u8 as str
+    return match_star(c, reg_pat, sub)
+}
+
+fn match_question(c: u8, reg_pat: str, text: str) -> bool {
+    let p_text = text as *raw u8
+    if match_here_at(reg_pat, text) {
+        return true
+    }
+    if p_text[0usize] != 0u8 && match_char_class(c, p_text[0usize]) {
+        let sub = ((p_text as usize) + 1usize) as *raw u8 as str
+        return match_here_at(reg_pat, sub)
+    }
+    return false
+}
+
+fn match_here_at(reg_pat: str, text: str) -> bool {
+    let p_pat = reg_pat as *raw u8
+    let p_text = text as *raw u8
+
+    if p_pat[0usize] == 0u8 {
+        return true
+    }
+
+    // End of string anchor '$'
+    if p_pat[0usize] == 36u8 && p_pat[1usize] == 0u8 {
+        return (p_text[0usize] == 0u8)
+    }
+
+    // Bracket character classes: [...]
+    if p_pat[0usize] == 91u8 { // '['
+        let end_box = malloc(8usize) as *raw var usize
+        let _ = check_bracket_match(p_pat, p_text[0usize], end_box)
+        let end_idx = end_box[0usize]
+        free(end_box as *raw var u8)
+
+        if end_idx > 0usize {
+            if p_pat[end_idx + 1usize] == 42u8 { // '*'
+                let sub_pat = ((p_pat as usize) + end_idx + 2usize) as *raw u8 as str
+                return match_bracket_star(p_pat, end_idx, sub_pat, text)
+            }
+            if p_pat[end_idx + 1usize] == 43u8 { // '+'
+                let sub_pat = ((p_pat as usize) + end_idx + 2usize) as *raw u8 as str
+                return match_bracket_plus(p_pat, end_idx, sub_pat, text)
+            }
+            if p_text[0usize] != 0u8 {
+                let dummy = malloc(8usize) as *raw var usize
+                let is_m = check_bracket_match(p_pat, p_text[0usize], dummy)
+                free(dummy as *raw var u8)
+                if is_m {
+                    let sub_pat = ((p_pat as usize) + end_idx + 1usize) as *raw u8 as str
+                    let sub_text = ((p_text as usize) + 1usize) as *raw u8 as str
+                    return match_here_at(sub_pat, sub_text)
+                }
+            }
+            return false
+        }
+    }
+
+    // Quantifiers: '*', '+', '?'
+    if p_pat[1usize] == 42u8 { // '*'
+        let sub_pat = ((p_pat as usize) + 2usize) as *raw u8 as str
+        return match_star(p_pat[0usize], sub_pat, text)
+    }
+    if p_pat[1usize] == 43u8 { // '+'
+        let sub_pat = ((p_pat as usize) + 2usize) as *raw u8 as str
+        return match_plus(p_pat[0usize], sub_pat, text)
+    }
+    if p_pat[1usize] == 63u8 { // '?'
+        let sub_pat = ((p_pat as usize) + 2usize) as *raw u8 as str
+        return match_question(p_pat[0usize], sub_pat, text)
+    }
+
+    // Single character match
+    if p_text[0usize] != 0u8 && match_char_class(p_pat[0usize], p_text[0usize]) {
+        let sub_pat = ((p_pat as usize) + 1usize) as *raw u8 as str
+        let sub_text = ((p_text as usize) + 1usize) as *raw u8 as str
+        return match_here_at(sub_pat, sub_text)
+    }
+
+    return false
+}
+
+pub struct Match {
+    pub start: usize,
+    pub end: usize,
+    pub value: String,
+}
+
+pub struct Regex {
+    pub pattern: String,
+}
+
+impl Regex {
+    pub fn compile(pat: str) -> Regex {
+        return Regex {
+            pattern: String.from_str(pat),
+        }
+    }
+
+    pub fn is_match(self, text: str) -> bool {
+        let p_pat = self.pattern.as_ptr()
+        let p_text = text as *raw u8
+
+        // Beginning of string anchor '^'
+        if p_pat[0usize] == 94u8 { // '^'
+            let sub_pat = ((p_pat as usize) + 1usize) as *raw u8 as str
+            return match_here_at(sub_pat, text)
+        }
+
+        var offset = 0usize
+        while p_text[offset] != 0u8 {
+            let sub_text = ((p_text as usize) + offset) as *raw u8 as str
+            if match_here_at(p_pat as str, sub_text) {
+                return true
+            }
+            offset = offset + 1usize
+        }
+        let sub_text = ((p_text as usize) + offset) as *raw u8 as str
+        return match_here_at(p_pat as str, sub_text)
+    }
+
+    pub fn replace_all(self, text: str, replacement: str) -> String {
+        let p_pat = self.pattern.as_ptr()
+        let p_text = text as *raw u8
+        var res = String.new()
+        var i = 0usize
+
+        while p_text[i] != 0u8 {
+            let sub_text = ((p_text as usize) + i) as *raw u8 as str
+            if match_here_at(p_pat as str, sub_text) {
+                res.push_str(replacement)
+                var adv = 1usize
+                while p_text[i + adv] != 0u8 {
+                    let adv_text = ((p_text as usize) + i + adv) as *raw u8 as str
+                    if !match_here_at(p_pat as str, adv_text) {
+                        break
+                    }
+                    adv = adv + 1usize
+                }
+                i = i + adv
+            } else {
+                res.push_byte(p_text[i])
+                i = i + 1usize
+            }
+        }
+        res.push_byte(0u8)
+        return res
+    }
+}
+
+pub fn regex_match(pattern: str, text: str) -> bool {
+    let re = Regex.compile(pattern)
+    return re.is_match(text)
+}

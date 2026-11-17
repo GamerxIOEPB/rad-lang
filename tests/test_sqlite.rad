@@ -1,0 +1,58 @@
+import rad_sqlite
+
+fn main() -> i32 {
+    printf("1. Opening SQLite in-memory database...\n")
+    let db_opt = SqliteDb.open_memory()
+    match db_opt {
+        Option.Some(db) => {
+            var d = db
+            printf("2. Creating table heroes...\n")
+            let ok1 = d.execute("CREATE TABLE heroes (id INTEGER PRIMARY KEY, name TEXT, power REAL);")
+            if !ok1 {
+                printf("CREATE TABLE failed: %s\n", d.last_error().as_ptr() as str)
+                return 1
+            }
+
+            printf("3. Inserting records...\n")
+            let _ = d.execute("INSERT INTO heroes VALUES (1, 'Superman', 99.5);")
+            let _ = d.execute("INSERT INTO heroes VALUES (2, 'Batman', 85.0);")
+
+            printf("4. Querying scalar value...\n")
+            let s_val = d.query_value("SELECT name FROM heroes WHERE id = 1;")
+            match s_val {
+                Option.Some(name) => printf("  Hero 1: %s\n", name.as_ptr() as str),
+                _ => { printf("Scalar query failed\n"); return 1; }
+            }
+
+            printf("5. Preparing statement and stepping rows...\n")
+            let stmt_opt = d.prepare("SELECT id, name, power FROM heroes ORDER BY id ASC;")
+            match stmt_opt {
+                Option.Some(stmt) => {
+                    var s = stmt
+                    var count = 0
+                    while s.step() {
+                        let id = s.column_i64(0i32)
+                        let name = s.column_text(1i32)
+                        let pwr = s.column_f64(2i32)
+                        printf("  Row: id=%ld, name=%s, power=%f\n", id, name.as_ptr() as str, pwr)
+                        count = count + 1
+                    }
+                    s.finalize()
+                    if count != 2 {
+                        printf("Expected 2 rows, got %d\n", count)
+                        return 1
+                    }
+                },
+                _ => { printf("Prepare failed: %s\n", d.last_error().as_ptr() as str); return 1; }
+            }
+
+            d.close()
+            printf("rad-sqlite tests PASSED successfully!\n")
+            return 0
+        },
+        _ => {
+            printf("Failed to open SQLite database\n")
+            return 1
+        }
+    }
+}

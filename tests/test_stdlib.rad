@@ -6,9 +6,16 @@
 import std::path;
 import std::fs;
 import std::net;
+import std::random;
+import std::math;
+import std::arena;
+import std::channel;
+import std::collections;
+import std::regex;
+import std::log;
 
 fn main() -> i32 {
-    var suite = TestSuite.new("Standard Library (std::path, std::fs, std::net)");
+    var suite = TestSuite.new("Standard Library (Phase 1 & System Primitives)");
 
     // 1. std::path::Path
     let joined = Path.join("home/user", "projects/rad");
@@ -87,6 +94,67 @@ fn main() -> i32 {
         }
     }
     suite.check_true("UdpSocket verified", bind_ok);
+
+    // 4. std::random
+    var rng = Rng.new();
+    let r_i64 = rng.gen_range_i64(10i64, 50i64);
+    suite.check_true("Rng.gen_range_i64 >= 10", r_i64 >= 10i64);
+    suite.check_true("Rng.gen_range_i64 <= 50", r_i64 <= 50i64);
+
+    // 5. std::math
+    let v1 = Vec2.new(3.0, 4.0);
+    let v_len = v1.length();
+    suite.check_true("Vec2.length == 5.0", v_len >= 4.99 && v_len <= 5.01);
+    let id_mat = Mat4.identity();
+    suite.check_true("Mat4[0,0] == 1.0", id_mat.get(0usize, 0usize) == 1.0);
+
+    // 6. std::arena
+    var arena = Arena.new();
+    let a_ptr = arena.alloc(128usize);
+    suite.check_true("Arena alloc succeeded", (a_ptr as usize) != 0usize);
+    arena.reset();
+    arena.destroy();
+    suite.check_true("Arena reset and destroy OK", true);
+
+    // 7. std::channel
+    var ch: Channel<i64> = Channel.new();
+    let _s1 = ch.send(42i64);
+    let c_val = ch.recv();
+    var ch_ok = false;
+    match c_val {
+        Option::Some(v) => {
+            if v == 42i64 { ch_ok = true; }
+        },
+        Option::None => {}
+    }
+    suite.check_true("Channel send/recv 42", ch_ok);
+    ch.close();
+    ch.destroy();
+
+    // 8. std::collections::LinkedList
+    var list: LinkedList<i64> = LinkedList.new();
+    list.push_back(100i64);
+    list.push_front(50i64);
+    suite.check_eq_i64("LinkedList.len == 2", list.len() as i64, 2i64);
+    let l_val = list.pop_front();
+    var list_ok = false;
+    match l_val {
+        Option::Some(v) => {
+            if v == 50i64 { list_ok = true; }
+        },
+        Option::None => {}
+    }
+    suite.check_true("LinkedList pop_front == 50", list_ok);
+    list.destroy();
+
+    // 9. std::regex
+    let re = Regex.compile("^user_[0-9]+$");
+    suite.check_true("Regex match user_123", re.is_match("user_123"));
+    suite.check_false("Regex match user_abc", re.is_match("user_abc"));
+
+    // 10. std::log
+    log_info("STDLIB_TEST", "Logging std::log test message");
+    suite.check_true("std::log executed without panic", true);
 
     return suite.print_summary();
 }

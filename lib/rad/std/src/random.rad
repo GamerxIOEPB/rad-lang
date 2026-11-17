@@ -1,0 +1,122 @@
+// ==============================================================================
+// Rad Standard Library: Random Number Generation (std::random)
+// High-performance PCG / XorShift PRNG with OS entropy initialization.
+// Pure Linux syscalls: SYS_getrandom (318), fallback to SYS_clock_gettime (228).
+// ==============================================================================
+
+pub fn sys_random(buf: *raw var u8, len: usize) -> bool {
+    // SYS_getrandom = 318: getrandom(buf, buflen, flags)
+    let ret = syscall3(318i64, buf, len as i64, 0i64)
+    if ret > 0i64 {
+        return true
+    }
+    // Fallback: use SYS_open (2) on /dev/urandom
+    let urandom_path = "/dev/urandom\0" as *raw u8
+    let fd = syscall3(2i64, urandom_path, 0i64, 0i64)
+    if fd >= 0i64 {
+        let n = syscall3(0i64, fd, buf, len as i64)
+        let _ = syscall1(3i64, fd)
+        if n == (len as i64) {
+            return true
+        }
+    }
+    return false
+}
+
+pub struct Rng {
+    pub state: u64,
+    pub inc: u64,
+}
+
+impl Rng {
+    pub fn new() -> Rng {
+        let buf = malloc(16usize) as *raw var u8
+        var s = 0x853c49e6748fea9bu64
+        var i = 0xda3e39cb94b95bdbu64
+        if sys_random(buf, 16usize) {
+            let p = buf as *raw var u64
+            s = p[0usize]
+            i = p[1usize]
+        } else {
+            // Timestamp fallback
+            let ts = malloc(16usize) as *raw var i64
+            let _ = syscall2(228i64, 1i64, ts as *raw i64)
+            s = (ts[0usize] as u64) ^ 0x517cc1b727220a95u64
+            i = (ts[1usize] as u64) | 1u64
+            free(ts as *raw var u8)
+        }
+        free(buf)
+        if (i & 1u64) == 0u64 {
+            i = i | 1u64
+        }
+        var rng = Rng { state: s, inc: i }
+        let _ = rng.next_u32()
+        return rng
+    }
+
+    pub fn from_seed(seed: u64) -> Rng {
+        let inc = (seed ^ 0xda3e39cb94b95bdbu64) | 1u64
+        var rng = Rng {
+            state: seed,
+            inc: inc,
+        }
+        let _ = rng.next_u32()
+        return rng
+    }
+
+    pub fn next_u32(var self) -> u32 {
+        let oldstate = self.state
+        self.state = (oldstate * 6364136223846793005u64) + self.inc
+        let xorshifted = (((oldstate >> 18u64) ^ oldstate) >> 27u64) as u32
+        let rot = (oldstate >> 59u64) as u32
+        let rot_mask = (32u32 - rot) & 31u32
+        return (xorshifted >> rot) | (xorshifted << rot_mask)
+    }
+
+    pub fn next_u64(var self) -> u64 {
+        let hi = self.next_u32() as u64
+        let lo = self.next_u32() as u64
+        return (hi << 32u64) | lo
+    }
+
+    pub fn next_f64(var self) -> f64 {
+        let val = self.next_u32() as f64
+        return val / 4294967296.0
+    }
+
+    pub fn gen_bool(var self) -> bool {
+        return ((self.next_u32() & 1u32) == 1u32)
+    }
+
+    pub fn gen_range_i64(var self, min_val: i64, max_val: i64) -> i64 {
+        if min_val >= max_val {
+            return min_val
+        }
+        let diff = (max_val - min_val) as u64
+        let raw = (self.next_u64() & 0x7fffffffffffffffu64)
+        let rem = raw % diff
+        return min_val + (rem as i64)
+    }
+
+    pub fn gen_range_f64(var self, min_val: f64, max_val: f64) -> f64 {
+        if min_val >= max_val {
+            return min_val
+        }
+        return min_val + (self.next_f64() * (max_val - min_val))
+    }
+}
+
+pub fn random_u64() -> u64 {
+    var r = Rng.new()
+    return r.next_u64()
+}
+
+pub fn random_i64(min_val: i64, max_val: i64) -> i64 {
+    var r = Rng.new()
+    return r.gen_range_i64(min_val, max_val)
+}
+
+pub fn random_f64() -> f64 {
+    var r = Rng.new()
+    return r.next_f64()
+}

@@ -1,0 +1,51 @@
+import rad_gfx
+
+fn main() -> i32 {
+    printf("1. Creating 100x100 canvas...\n")
+    var canvas = Canvas.new(100usize, 100usize)
+
+    printf("2. Testing set_pixel and get_pixel...\n")
+    canvas.set_pixel(10usize, 10usize, Color.red())
+    let p1 = canvas.get_pixel(10usize, 10usize)
+    if p1.r != 255u8 || p1.g != 0u8 || p1.b != 0u8 {
+        printf("Pixel test failed\n")
+        return 1
+    }
+
+    printf("3. Testing fill_rect...\n")
+    canvas.fill_rect(20usize, 20usize, 30usize, 30usize, Color.blue())
+    let p2 = canvas.get_pixel(35usize, 35usize)
+    if p2.b != 255u8 {
+        printf("Fill rect test failed\n")
+        return 1
+    }
+
+    printf("4. Testing fill_circle...\n")
+    canvas.fill_circle(70i64, 70i64, 15i64, Color.green())
+    let p3 = canvas.get_pixel(70usize, 70usize)
+    if p3.g != 255u8 {
+        printf("Fill circle test failed\n")
+        return 1
+    }
+
+    printf("5. Testing draw_line...\n")
+    canvas.draw_line(0i64, 0i64, 99i64, 99i64, Color.white())
+    let p4 = canvas.get_pixel(50usize, 50usize)
+    if p4.r != 255u8 {
+        printf("Draw line test failed\n")
+        return 1
+    }
+
+    printf("6. Exporting to PPM image...\n")
+    let ppm_path = "/tmp/test_render.ppm"
+    let ok = canvas.save_ppm(ppm_path)
+    if !ok {
+        printf("PPM export failed\n")
+        return 1
+    }
+
+    canvas.destroy()
+    let _ = syscall1(87i64, ppm_path as *raw u8) // SYS_unlink
+    printf("rad-gfx tests PASSED successfully!\n")
+    return 0
+}

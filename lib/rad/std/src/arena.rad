@@ -1,0 +1,86 @@
+// ==============================================================================
+// Rad Standard Library: Arena Allocator (std::arena)
+// High-performance chunked bump allocator for bulk allocation and zero-cost resets.
+// ==============================================================================
+
+pub struct Chunk {
+    pub mem: *raw var u8,
+    pub cap: usize,
+    pub used: usize,
+    pub next: *raw var Chunk,
+}
+
+pub struct Arena {
+    pub head: *raw var Chunk,
+    pub default_chunk_size: usize,
+    pub total_allocated: usize,
+}
+
+impl Arena {
+    pub fn new() -> Arena {
+        return Arena.with_chunk_size(65536usize) // 64 KB default
+    }
+
+    pub fn with_chunk_size(chunk_size: usize) -> Arena {
+        let raw_c = malloc(32usize) as *raw var Chunk
+        let mem = malloc(chunk_size) as *raw var u8
+        raw_c.mem = mem
+        raw_c.cap = chunk_size
+        raw_c.used = 0usize
+        raw_c.next = 0 as *raw var Chunk
+        return Arena {
+            head: raw_c,
+            default_chunk_size: chunk_size,
+            total_allocated: chunk_size,
+        }
+    }
+
+    pub fn alloc(var self, size: usize) -> *raw var u8 {
+        if size == 0usize {
+            return 0 as *raw var u8
+        }
+        // Align up to 8 bytes
+        let aligned = (size + 7usize) & (~7usize)
+        var cur = self.head
+        if cur.used + aligned <= cur.cap {
+            let ptr = ((cur.mem as usize) + cur.used) as *raw var u8
+            cur.used = cur.used + aligned
+            return ptr
+        }
+
+        // Current chunk full; allocate new chunk
+        var req = self.default_chunk_size
+        if aligned > req {
+            req = aligned
+        }
+        let new_c = malloc(32usize) as *raw var Chunk
+        let new_mem = malloc(req) as *raw var u8
+        new_c.mem = new_mem
+        new_c.cap = req
+        new_c.used = aligned
+        new_c.next = self.head
+        self.head = new_c
+        self.total_allocated = self.total_allocated + req
+        return new_mem
+    }
+
+    pub fn reset(var self) {
+        var cur = self.head
+        while (cur as usize) != 0usize {
+            cur.used = 0usize
+            cur = cur.next
+        }
+    }
+
+    pub fn destroy(var self) {
+        var cur = self.head
+        while (cur as usize) != 0usize {
+            let next_c = cur.next
+            free(cur.mem)
+            free(cur as *raw var u8)
+            cur = next_c
+        }
+        self.head = 0 as *raw var Chunk
+        self.total_allocated = 0usize
+    }
+}
