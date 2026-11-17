@@ -16,7 +16,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ALPINE_IMAGE="${ALPINE_IMAGE:-alpine:3.23}"
 TEST_IMAGE_TAG="rad-alpine-test:3.23"
 DIST_DIR="$ROOT_DIR/bin/dist"
-ARCHIVE_NAME="rad-0.2.3-linux-x86_64.tar.gz"
+ARCHIVE_NAME="rad-0.2.4-linux-x86_64.tar.gz"
 
 BOLD="\033[1m"
 GREEN="\033[32m"
@@ -92,7 +92,7 @@ docker run --rm \
 
         # Run installer
         sh /workspace/install.sh \
-            -v 0.2.3 \
+            -v 0.2.4 \
             -y \
             --no-modify-path
 

@@ -299,8 +299,10 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
     chmod 755 "$STAGE_DIR/bin"/*
 
     log_step "Staging Rad standard library..."
-    if [ -d "$LOCAL_REPO/library" ]; then
-        cp -r "$LOCAL_REPO/library"/* "$STAGE_DIR/lib/rad/"
+    if [ -d "$LOCAL_REPO/lib/rad" ]; then
+        cp -rf "$LOCAL_REPO/lib/rad"/* "$STAGE_DIR/lib/rad/"
+    elif [ -d "$LOCAL_REPO/library" ]; then
+        cp -rf "$LOCAL_REPO/library"/* "$STAGE_DIR/lib/rad/"
     fi
 
     log_step "Staging canonical target sysroot..."
@@ -317,14 +319,21 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
     fi
     if [ -n "$RAD_LIB_DIR" ]; then
-        if [ -d "$RAD_LIB_DIR/rad-tui/0.1.0" ]; then
-            cp -rf "$RAD_LIB_DIR/rad-tui/0.1.0" "$STAGE_DIR/packages/rad-tui"
-            ln -sfn rad-tui "$STAGE_DIR/packages/tui" 2>/dev/null || true
-        fi
-        if [ -d "$RAD_LIB_DIR/rad-json/0.1.0" ]; then
-            cp -rf "$RAD_LIB_DIR/rad-json/0.1.0" "$STAGE_DIR/packages/rad-json"
-            ln -sfn rad-json "$STAGE_DIR/packages/json" 2>/dev/null || true
-        fi
+        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx; do
+            if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
+                cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$STAGE_DIR/packages/$pkg"
+            fi
+        done
+        ln -sfn rad-tui "$STAGE_DIR/packages/tui" 2>/dev/null || true
+        ln -sfn rad-json "$STAGE_DIR/packages/json" 2>/dev/null || true
+        ln -sfn rad-http "$STAGE_DIR/packages/http" 2>/dev/null || true
+        ln -sfn rad-args "$STAGE_DIR/packages/args" 2>/dev/null || true
+        ln -sfn rad-test "$STAGE_DIR/packages/test" 2>/dev/null || true
+        ln -sfn rad-math "$STAGE_DIR/packages/math" 2>/dev/null || true
+        ln -sfn rad-log "$STAGE_DIR/packages/log" 2>/dev/null || true
+        ln -sfn rad-kv "$STAGE_DIR/packages/kv" 2>/dev/null || true
+        ln -sfn rad-sqlite "$STAGE_DIR/packages/sqlite" 2>/dev/null || true
+        ln -sfn rad-gfx "$STAGE_DIR/packages/gfx" 2>/dev/null || true
     fi
 
     # Preserve metadata & licenses
@@ -485,6 +494,17 @@ fi
 
 if mv "$STAGE_DIR" "$RAD_HOME"; then
     if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
+        if [ -d "$BACKUP_DIR/packages" ]; then
+            mkdir -p "$RAD_HOME/packages"
+            for item in "$BACKUP_DIR/packages"/*; do
+                if [ -e "$item" ] || [ -L "$item" ]; then
+                    bname="$(basename "$item")"
+                    if [ ! -e "$RAD_HOME/packages/$bname" ] && [ ! -L "$RAD_HOME/packages/$bname" ]; then
+                        cp -rf "$item" "$RAD_HOME/packages/" 2>/dev/null || true
+                    fi
+                fi
+            done
+        fi
         rm -rf "$BACKUP_DIR"
     fi
     log_success "Installed Rad toolchain to $RAD_HOME"
