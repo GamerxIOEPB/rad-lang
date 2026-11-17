@@ -1,7 +1,7 @@
 // ==============================================================================
 // Rad Graphics Demo 3: Conway's Game of Life Cellular Automaton (60 FPS)
-// Features age-based color gradients, toroidal boundary wrapping, and interactive controls.
-// Controls: 'r' randomize, 'c' clear, 'q' quit.
+// Features iconic Conway structures (Gliders, LWSS spaceship, Pulsar, R-pentomino).
+// Controls: 'g' spawn glider, 'r' randomize cluster, 'c' clear, 'q' quit.
 // ==============================================================================
 
 import gfx;
@@ -29,8 +29,7 @@ impl Rng {
     }
 }
 
-fn seed_glider(grid: *raw var u8, width: usize, gx: usize, gy: usize) {
-    // Standard 3x3 glider
+fn spawn_glider(grid: *raw var u8, width: usize, gx: usize, gy: usize) {
     grid[(gy * width) + gx + 1usize] = 1u8;
     grid[((gy + 1usize) * width) + gx + 2usize] = 1u8;
     grid[((gy + 2usize) * width) + gx] = 1u8;
@@ -38,9 +37,37 @@ fn seed_glider(grid: *raw var u8, width: usize, gx: usize, gy: usize) {
     grid[((gy + 2usize) * width) + gx + 2usize] = 1u8;
 }
 
+fn spawn_lwss(grid: *raw var u8, width: usize, gx: usize, gy: usize) {
+    // 5x4 lightweight spaceship flying horizontally
+    grid[(gy * width) + gx + 1usize] = 1u8;
+    grid[(gy * width) + gx + 4usize] = 1u8;
+    grid[((gy + 1usize) * width) + gx] = 1u8;
+    grid[((gy + 2usize) * width) + gx] = 1u8;
+    grid[((gy + 2usize) * width) + gx + 4usize] = 1u8;
+    grid[((gy + 3usize) * width) + gx] = 1u8;
+    grid[((gy + 3usize) * width) + gx + 1usize] = 1u8;
+    grid[((gy + 3usize) * width) + gx + 2usize] = 1u8;
+    grid[((gy + 3usize) * width) + gx + 3usize] = 1u8;
+}
+
+fn spawn_r_pentomino(grid: *raw var u8, width: usize, gx: usize, gy: usize) {
+    // Acorn-like chaotic grower
+    grid[(gy * width) + gx + 1usize] = 1u8;
+    grid[(gy * width) + gx + 2usize] = 1u8;
+    grid[((gy + 1usize) * width) + gx] = 1u8;
+    grid[((gy + 1usize) * width) + gx + 1usize] = 1u8;
+    grid[((gy + 2usize) * width) + gx + 1usize] = 1u8;
+}
+
+fn spawn_blinker(grid: *raw var u8, width: usize, gx: usize, gy: usize) {
+    grid[(gy * width) + gx] = 1u8;
+    grid[(gy * width) + gx + 1usize] = 1u8;
+    grid[(gy * width) + gx + 2usize] = 1u8;
+}
+
 pub fn main() -> i32 {
-    let width = 80usize;
-    let height = 48usize;
+    let width = 70usize;
+    let height = 36usize;
     let total_cells = width * height;
 
     var window = Window.open(width, height, "Rad Conway's Game of Life");
@@ -52,23 +79,29 @@ pub fn main() -> i32 {
     let next_grid = malloc(total_cells) as *raw var u8;
     let age_grid = malloc(total_cells) as *raw var u8;
 
-    // Initialize with randomized clusters and gliders
+    // Start with a clean grid
     var idx = 0usize;
     while idx < total_cells {
         cur_grid[idx] = 0u8;
         next_grid[idx] = 0u8;
         age_grid[idx] = 0u8;
-        if rng.range(0i64, 100i64) < 18i64 {
-            cur_grid[idx] = 1u8;
-            age_grid[idx] = 1u8;
-        }
         idx = idx + 1usize;
     }
 
-    // Spawn gliders
-    seed_glider(cur_grid, width, 5usize, 5usize);
-    seed_glider(cur_grid, width, 25usize, 12usize);
-    seed_glider(cur_grid, width, 55usize, 20usize);
+    // Seed famous Conway life forms:
+    // 1. Gliders sailing across the field
+    spawn_glider(cur_grid, width, 4usize, 4usize);
+    spawn_glider(cur_grid, width, 55usize, 8usize);
+
+    // 2. Spaceship gliding across middle
+    spawn_lwss(cur_grid, width, 8usize, 18usize);
+
+    // 3. R-pentomino in center (generates rich organic growth)
+    spawn_r_pentomino(cur_grid, width, 35usize, 16usize);
+
+    // 4. Oscillators
+    spawn_blinker(cur_grid, width, 18usize, 6usize);
+    spawn_blinker(cur_grid, width, 50usize, 26usize);
 
     var frame = 0u64;
     let max_frames = 180u64;
@@ -79,17 +112,26 @@ pub fn main() -> i32 {
             Option.Some(ev) => {
                 if ev.is_close() || ev.is_key(113u8) { // 'q'
                     window.close();
-                } else if ev.is_key(114u8) { // 'r' randomize
-                    idx = 0usize;
-                    while idx < total_cells {
-                        if rng.range(0i64, 100i64) < 22i64 {
-                            cur_grid[idx] = 1u8;
-                            age_grid[idx] = 1u8;
-                        } else {
-                            cur_grid[idx] = 0u8;
-                            age_grid[idx] = 0u8;
+                } else if ev.is_key(103u8) { // 'g' spawn new glider at random pos
+                    let rx = rng.range(2i64, (width as i64) - 6i64) as usize;
+                    let ry = rng.range(2i64, (height as i64) - 6i64) as usize;
+                    spawn_glider(cur_grid, width, rx, ry);
+                } else if ev.is_key(114u8) { // 'r' randomize center cluster
+                    var cy = 10usize;
+                    while cy < 26usize {
+                        var cx = 20usize;
+                        while cx < 50usize {
+                            let c_idx = (cy * width) + cx;
+                            if rng.range(0i64, 100i64) < 30i64 {
+                                cur_grid[c_idx] = 1u8;
+                                age_grid[c_idx] = 1u8;
+                            } else {
+                                cur_grid[c_idx] = 0u8;
+                                age_grid[c_idx] = 0u8;
+                            }
+                            cx = cx + 1usize;
                         }
-                        idx = idx + 1usize;
+                        cy = cy + 1usize;
                     }
                 } else if ev.is_key(99u8) { // 'c' clear
                     idx = 0usize;
@@ -108,14 +150,13 @@ pub fn main() -> i32 {
             break;
         }
 
-        canvas.clear(Color.rgb(8u8, 10u8, 16u8)); // Deep background
+        canvas.clear(Color.rgb(0u8, 0u8, 0u8)); // Crisp pitch black background
 
-        // Update grid and render
+        // Compute next generation according to standard Conway B3/S23 rules
         var y = 0usize;
         while y < height {
             var x = 0usize;
             while x < width {
-                // Toroidal neighbor counting
                 let left = (x + width - 1usize) % width;
                 let right = (x + 1usize) % width;
                 let up = (y + height - 1usize) % height;
@@ -134,7 +175,6 @@ pub fn main() -> i32 {
                 let cell_idx = (y * width) + x;
                 let is_alive = cur_grid[cell_idx] > 0u8;
 
-                // Conway B3/S23 rules
                 if is_alive && (neighbors == 2 || neighbors == 3) {
                     next_grid[cell_idx] = 1u8;
                     let old_age = age_grid[cell_idx];
@@ -149,16 +189,14 @@ pub fn main() -> i32 {
                     age_grid[cell_idx] = 0u8;
                 }
 
-                // Render cell with color based on age
+                // Render current alive cell
                 if is_alive {
                     let a = age_grid[cell_idx];
-                    var col = Color.rgb(80u8, 255u8, 120u8); // Young: neon green
-                    if a > 8u8 {
-                        col = Color.rgb(255u8, 100u8, 220u8); // Veteran: magenta/pink
+                    var col = Color.rgb(60u8, 255u8, 80u8); // Vibrant neon green
+                    if a > 10u8 {
+                        col = Color.rgb(0u8, 210u8, 255u8); // Long-lived: cyan
                     } else if a > 4u8 {
-                        col = Color.rgb(80u8, 220u8, 255u8); // Mature: electric cyan
-                    } else if a > 2u8 {
-                        col = Color.rgb(255u8, 230u8, 80u8);  // Mid-age: gold yellow
+                        col = Color.rgb(40u8, 240u8, 160u8); // Maturing: seafoam green
                     }
                     canvas.set_pixel(x, y, col);
                 }
@@ -176,7 +214,7 @@ pub fn main() -> i32 {
         }
 
         window.draw_canvas(canvas);
-        Window.sleep_frame(30u64); // 30 FPS update for clear cellular evolution
+        Window.sleep_frame(25u64); // 25 FPS update rate for clear biological evolution
         frame = frame + 1u64;
     }
 

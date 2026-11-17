@@ -6,13 +6,6 @@
 
 import gfx;
 
-struct Star {
-    pub x: i64,
-    pub y: i64,
-    pub z: i64,
-    pub pz: i64,
-}
-
 struct Rng {
     pub state: u64,
 }
@@ -37,32 +30,36 @@ impl Rng {
 }
 
 pub fn main() -> i32 {
-    let width = 80usize;
-    let height = 48usize;
+    let width = 70usize;
+    let height = 36usize;
     let cx = (width as i64) / 2i64;
     let cy = (height as i64) / 2i64;
 
     var window = Window.open(width, height, "Rad 3D Warp Starfield");
     var canvas = Canvas.new(width, height);
 
-    let num_stars = 120usize;
+    let num_stars = 100usize;
     let max_depth = 1000i64;
-    var speed = 18i64;
+    var speed = 20i64;
 
     var rng = Rng.new(8817264546332525288u64);
 
-    let stars = malloc(num_stars * 32usize) as *raw var Star;
+    let star_x = malloc(num_stars * 8usize) as *raw var i64;
+    let star_y = malloc(num_stars * 8usize) as *raw var i64;
+    let star_z = malloc(num_stars * 8usize) as *raw var i64;
+    let star_pz = malloc(num_stars * 8usize) as *raw var i64;
+
     var i = 0usize;
     while i < num_stars {
-        stars[i].x = rng.range(-1000i64, 1000i64);
-        stars[i].y = rng.range(-600i64, 600i64);
-        stars[i].z = rng.range(100i64, max_depth);
-        stars[i].pz = stars[i].z;
+        star_x[i] = rng.range(-600i64, 600i64);
+        star_y[i] = rng.range(-300i64, 300i64);
+        star_z[i] = rng.range(50i64, max_depth);
+        star_pz[i] = star_z[i];
         i = i + 1usize;
     }
 
     var frame = 0u64;
-    let max_frames = 180u64; // Runs 180 frames or until 'q'
+    let max_frames = 180u64; // Runs 180 frames (~3 sec) or until 'q'
 
     while window.is_open() && frame < max_frames {
         // Poll user events
@@ -71,7 +68,7 @@ pub fn main() -> i32 {
             Option.Some(ev) => {
                 if ev.is_close() || ev.is_key(113u8) { // 'q'
                     window.close();
-                } else if ev.is_key(43u8) || ev.is_key(61u8) { // '+'
+                } else if ev.is_key(43u8) || ev.is_key(61u8) { // '+' or '='
                     speed = speed + 4i64;
                 } else if ev.is_key(45u8) && speed > 4i64 { // '-'
                     speed = speed - 4i64;
@@ -85,28 +82,28 @@ pub fn main() -> i32 {
             break;
         }
 
-        canvas.clear(Color.rgb(5u8, 5u8, 15u8)); // Deep space blue
+        canvas.clear(Color.rgb(4u8, 4u8, 12u8)); // Deep space blue
 
         // Update and draw stars
         i = 0usize;
         while i < num_stars {
-            stars[i].pz = stars[i].z;
-            stars[i].z = stars[i].z - speed;
+            star_pz[i] = star_z[i];
+            star_z[i] = star_z[i] - speed;
 
-            if stars[i].z <= 10i64 {
-                stars[i].x = rng.range(-1000i64, 1000i64);
-                stars[i].y = rng.range(-600i64, 600i64);
-                stars[i].z = max_depth;
-                stars[i].pz = max_depth;
+            if star_z[i] <= 15i64 {
+                star_x[i] = rng.range(-600i64, 600i64);
+                star_y[i] = rng.range(-300i64, 300i64);
+                star_z[i] = max_depth;
+                star_pz[i] = max_depth;
             }
 
-            let z = stars[i].z;
-            let pz = stars[i].pz;
+            let z = star_z[i];
+            let pz = star_pz[i];
 
-            let sx = cx + ((stars[i].x * 50i64) / z);
-            let sy = cy + ((stars[i].y * 25i64) / z);
-            let psx = cx + ((stars[i].x * 50i64) / pz);
-            let psy = cy + ((stars[i].y * 25i64) / pz);
+            let sx = cx + ((star_x[i] * 40i64) / z);
+            let sy = cy + ((star_y[i] * 20i64) / z);
+            let psx = cx + ((star_x[i] * 40i64) / pz);
+            let psy = cy + ((star_y[i] * 20i64) / pz);
 
             // Brightness scales as star gets closer
             let factor = ((max_depth - z) * 230i64) / max_depth;
@@ -114,7 +111,7 @@ pub fn main() -> i32 {
             let star_col = Color.rgb(b, b, 255u8);
 
             if sx >= 0i64 && sx < (width as i64) && sy >= 0i64 && sy < (height as i64) {
-                if sx != psx || sy != psy {
+                if speed > 15i64 && (sx != psx || sy != psy) {
                     canvas.draw_line(psx, psy, sx, sy, star_col);
                 } else {
                     canvas.set_pixel(sx as usize, sy as usize, star_col);
@@ -129,7 +126,10 @@ pub fn main() -> i32 {
         frame = frame + 1u64;
     }
 
-    free(stars as *raw var u8);
+    free(star_x as *raw var u8);
+    free(star_y as *raw var u8);
+    free(star_z as *raw var u8);
+    free(star_pz as *raw var u8);
     canvas.destroy();
     window.close();
 

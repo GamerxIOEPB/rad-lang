@@ -29,39 +29,37 @@ impl Rng {
     }
 }
 
-struct Ball {
-    pub px: i64,      // Fixed-point (scaled by 100)
-    pub py: i64,
-    pub vx: i64,
-    pub vy: i64,
-    pub radius: i64,
-    pub col: Color,
-}
-
 pub fn main() -> i32 {
-    let width = 80usize;
-    let height = 48usize;
+    let width = 70usize;
+    let height = 36usize;
 
     var window = Window.open(width, height, "Rad 2D Physics Demo");
     var canvas = Canvas.new(width, height);
 
     var rng = Rng.new(12345678901234567u64);
-    let num_balls = 16usize;
-    let balls = malloc(num_balls * 48usize) as *raw var Ball;
+    let num_balls = 12usize;
+
+    let ball_px = malloc(num_balls * 8usize) as *raw var i64;
+    let ball_py = malloc(num_balls * 8usize) as *raw var i64;
+    let ball_vx = malloc(num_balls * 8usize) as *raw var i64;
+    let ball_vy = malloc(num_balls * 8usize) as *raw var i64;
+    let ball_rad = malloc(num_balls * 8usize) as *raw var i64;
+    let ball_cr = malloc(num_balls) as *raw var u8;
+    let ball_cg = malloc(num_balls) as *raw var u8;
+    let ball_cb = malloc(num_balls) as *raw var u8;
 
     // Initialize colored balls
     var i = 0usize;
     while i < num_balls {
-        let r_val = (rng.range(50i64, 255i64)) as u8;
-        let g_val = (rng.range(50i64, 255i64)) as u8;
-        let b_val = (rng.range(50i64, 255i64)) as u8;
+        ball_cr[i] = (rng.range(60i64, 255i64)) as u8;
+        ball_cg[i] = (rng.range(60i64, 255i64)) as u8;
+        ball_cb[i] = (rng.range(60i64, 255i64)) as u8;
 
-        balls[i].px = rng.range(10i64, (width as i64) - 10i64) * 100i64;
-        balls[i].py = rng.range(5i64, 25i64) * 100i64;
-        balls[i].vx = rng.range(-150i64, 150i64);
-        balls[i].vy = rng.range(-50i64, 100i64);
-        balls[i].radius = rng.range(2i64, 4i64);
-        balls[i].col = Color.rgb(r_val, g_val, b_val);
+        ball_px[i] = rng.range(8i64, (width as i64) - 8i64) * 100i64;
+        ball_py[i] = rng.range(4i64, 18i64) * 100i64;
+        ball_vx[i] = rng.range(-140i64, 140i64);
+        ball_vy[i] = rng.range(-50i64, 80i64);
+        ball_rad[i] = rng.range(2i64, 3i64);
         i = i + 1usize;
     }
 
@@ -80,8 +78,8 @@ pub fn main() -> i32 {
                 } else if ev.is_key(114u8) { // 'r' scramble
                     i = 0usize;
                     while i < num_balls {
-                        balls[i].vx = rng.range(-200i64, 200i64);
-                        balls[i].vy = rng.range(-250i64, -50i64);
+                        ball_vx[i] = rng.range(-180i64, 180i64);
+                        ball_vy[i] = rng.range(-220i64, -40i64);
                         i = i + 1usize;
                     }
                 }
@@ -94,49 +92,50 @@ pub fn main() -> i32 {
             break;
         }
 
-        canvas.clear(Color.rgb(10u8, 12u8, 20u8)); // Dark navy background
+        canvas.clear(Color.rgb(8u8, 10u8, 18u8)); // Dark navy background
 
         // Draw boundary box
-        canvas.draw_rect(0usize, 0usize, width, height, Color.rgb(40u8, 60u8, 90u8));
+        canvas.draw_rect(0usize, 0usize, width, height, Color.rgb(50u8, 70u8, 110u8));
 
         // Physics step & rendering
         i = 0usize;
         while i < num_balls {
             // Apply gravity
-            balls[i].vy = balls[i].vy + gravity;
+            ball_vy[i] = ball_vy[i] + gravity;
 
             // Update position
-            balls[i].px = balls[i].px + balls[i].vx;
-            balls[i].py = balls[i].py + balls[i].vy;
+            ball_px[i] = ball_px[i] + ball_vx[i];
+            ball_py[i] = ball_py[i] + ball_vy[i];
 
-            let cur_x = balls[i].px / 100i64;
-            let cur_y = balls[i].py / 100i64;
-            let rad = balls[i].radius;
+            let cur_x = ball_px[i] / 100i64;
+            let cur_y = ball_py[i] / 100i64;
+            let rad = ball_rad[i];
 
             // Left / right wall bounce with restitution damping
             if cur_x - rad < 1i64 {
-                balls[i].px = (1i64 + rad) * 100i64;
-                balls[i].vx = (-balls[i].vx * 85i64) / 100i64;
+                ball_px[i] = (1i64 + rad) * 100i64;
+                ball_vx[i] = (-ball_vx[i] * 85i64) / 100i64;
             } else if cur_x + rad >= (width as i64) - 1i64 {
-                balls[i].px = ((width as i64) - 2i64 - rad) * 100i64;
-                balls[i].vx = (-balls[i].vx * 85i64) / 100i64;
+                ball_px[i] = ((width as i64) - 2i64 - rad) * 100i64;
+                ball_vx[i] = (-ball_vx[i] * 85i64) / 100i64;
             }
 
             // Floor / ceiling bounce
             if cur_y - rad < 1i64 {
-                balls[i].py = (1i64 + rad) * 100i64;
-                balls[i].vy = -balls[i].vy;
+                ball_py[i] = (1i64 + rad) * 100i64;
+                ball_vy[i] = -ball_vy[i];
             } else if cur_y + rad >= (height as i64) - 1i64 {
-                balls[i].py = ((height as i64) - 2i64 - rad) * 100i64;
-                balls[i].vy = (-balls[i].vy * 82i64) / 100i64;
+                ball_py[i] = ((height as i64) - 2i64 - rad) * 100i64;
+                ball_vy[i] = (-ball_vy[i] * 82i64) / 100i64;
                 // Floor friction
-                balls[i].vx = (balls[i].vx * 96i64) / 100i64;
+                ball_vx[i] = (ball_vx[i] * 96i64) / 100i64;
             }
 
             // Render ball
-            let draw_x = balls[i].px / 100i64;
-            let draw_y = balls[i].py / 100i64;
-            canvas.fill_circle(draw_x, draw_y, rad, balls[i].col);
+            let draw_x = ball_px[i] / 100i64;
+            let draw_y = ball_py[i] / 100i64;
+            let ball_col = Color.rgb(ball_cr[i], ball_cg[i], ball_cb[i]);
+            canvas.fill_circle(draw_x, draw_y, rad, ball_col);
 
             // Glowing center highlight
             canvas.set_pixel(draw_x as usize, draw_y as usize, Color.white());
@@ -149,7 +148,14 @@ pub fn main() -> i32 {
         frame = frame + 1u64;
     }
 
-    free(balls as *raw var u8);
+    free(ball_px as *raw var u8);
+    free(ball_py as *raw var u8);
+    free(ball_vx as *raw var u8);
+    free(ball_vy as *raw var u8);
+    free(ball_rad as *raw var u8);
+    free(ball_cr);
+    free(ball_cg);
+    free(ball_cb);
     canvas.destroy();
     window.close();
 

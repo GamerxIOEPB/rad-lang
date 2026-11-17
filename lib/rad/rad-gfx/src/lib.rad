@@ -312,11 +312,54 @@ pub struct Window {
     pub frame_count: u64,
 }
 
+fn gfx_str_len(s: str) -> usize {
+    let p = s as *raw u8;
+    var len = 0usize;
+    while p[len] != 0u8 {
+        len = len + 1usize;
+    }
+    return len;
+}
+
+fn push_u8_str(out: var String, val: u8) {
+    let v = val as i32;
+    if v >= 100 {
+        out.push_byte((48 + (v / 100)) as u8);
+        out.push_byte((48 + ((v / 10) % 10)) as u8);
+        out.push_byte((48 + (v % 10)) as u8);
+    } else if v >= 10 {
+        out.push_byte((48 + (v / 10)) as u8);
+        out.push_byte((48 + (v % 10)) as u8);
+    } else {
+        out.push_byte((48 + v) as u8);
+    }
+}
+
+fn emit_fg(out: var String, r: u8, g: u8, b: u8) {
+    out.push_str("\x1b[38;2;");
+    push_u8_str(out, r);
+    out.push_byte(59u8);
+    push_u8_str(out, g);
+    out.push_byte(59u8);
+    push_u8_str(out, b);
+    out.push_byte(109u8);
+}
+
+fn emit_bg(out: var String, r: u8, g: u8, b: u8) {
+    out.push_str("\x1b[48;2;");
+    push_u8_str(out, r);
+    out.push_byte(59u8);
+    push_u8_str(out, g);
+    out.push_byte(59u8);
+    push_u8_str(out, b);
+    out.push_byte(109u8);
+}
+
 impl Window {
     pub fn open(width: usize, height: usize, title: str) -> Window {
         // Clear screen and hide cursor: \x1b[2J\x1b[H\x1b[?25l
         let init_seq = "\x1b[2J\x1b[H\x1b[?25l";
-        let _ = syscall3(1i64, 1i64, init_seq as *raw u8, 10i64);
+        let _ = syscall3(1i64, 1i64, init_seq as *raw u8, gfx_str_len(init_seq) as i64);
 
         // Set stdin non-blocking:
         let flags = syscall3(72i64, 0i64, 3i64, 0i64); // F_GETFL = 3
@@ -349,6 +392,13 @@ impl Window {
         var out = String.new();
         out.push_str("\x1b[H"); // Cursor home
 
+        var last_fg_r = -1i32;
+        var last_fg_g = -1i32;
+        var last_fg_b = -1i32;
+        var last_bg_r = -1i32;
+        var last_bg_g = -1i32;
+        var last_bg_b = -1i32;
+
         var y = 0usize;
         while y < canvas.height {
             var x = 0usize;
@@ -359,34 +409,63 @@ impl Window {
                     bot_col = canvas.get_pixel(x, y + 1usize);
                 }
 
-                out.push_str("\x1b[38;2;");
-                out.push_str(gfx_int_to_str(top_col.r as usize).as_ptr() as str);
-                out.push_byte(59u8);
-                out.push_str(gfx_int_to_str(top_col.g as usize).as_ptr() as str);
-                out.push_byte(59u8);
-                out.push_str(gfx_int_to_str(top_col.b as usize).as_ptr() as str);
-                out.push_byte(109u8);
+                let tr = top_col.r as i32;
+                let tg = top_col.g as i32;
+                let tb = top_col.b as i32;
+                let br = bot_col.r as i32;
+                let bg = bot_col.g as i32;
+                let bb = bot_col.b as i32;
 
-                out.push_str("\x1b[48;2;");
-                out.push_str(gfx_int_to_str(bot_col.r as usize).as_ptr() as str);
-                out.push_byte(59u8);
-                out.push_str(gfx_int_to_str(bot_col.g as usize).as_ptr() as str);
-                out.push_byte(59u8);
-                out.push_str(gfx_int_to_str(bot_col.b as usize).as_ptr() as str);
-                out.push_byte(109u8);
-
-                // Upper half-block: ▀
-                out.push_byte(226u8);
-                out.push_byte(150u8);
-                out.push_byte(128u8);
+                if tr == br && tg == bg && tb == bb {
+                    if br != last_bg_r || bg != last_bg_g || bb != last_bg_b {
+                        emit_bg(out, bot_col.r, bot_col.g, bot_col.b);
+                        last_bg_r = br;
+                        last_bg_g = bg;
+                        last_bg_b = bb;
+                    }
+                    out.push_byte(32u8); // ' '
+                } else {
+                    if tr != last_fg_r || tg != last_fg_g || tb != last_fg_b {
+                        emit_fg(out, top_col.r, top_col.g, top_col.b);
+                        last_fg_r = tr;
+                        last_fg_g = tg;
+                        last_fg_b = tb;
+                    }
+                    if br != last_bg_r || bg != last_bg_g || bb != last_bg_b {
+                        emit_bg(out, bot_col.r, bot_col.g, bot_col.b);
+                        last_bg_r = br;
+                        last_bg_g = bg;
+                        last_bg_b = bb;
+                    }
+                    // Upper half-block: ▀
+                    out.push_byte(226u8);
+                    out.push_byte(150u8);
+                    out.push_byte(128u8);
+                }
 
                 x = x + 1usize;
             }
-            out.push_str("\x1b[0m\n");
+            out.push_str("\x1b[0m\r\n");
+            last_fg_r = -1i32;
+            last_fg_g = -1i32;
+            last_fg_b = -1i32;
+            last_bg_r = -1i32;
+            last_bg_g = -1i32;
+            last_bg_b = -1i32;
             y = y + 2usize;
         }
 
-        let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
+        var written = 0i64;
+        let total = out.len() as i64;
+        let p_val = (out.as_ptr() as usize);
+        while written < total {
+            let cur_ptr = (p_val + (written as usize)) as *raw u8;
+            let n = syscall3(1i64, 1i64, cur_ptr, total - written);
+            if n <= 0i64 {
+                break;
+            }
+            written = written + n;
+        }
         self.frame_count = self.frame_count + 1u64;
     }
 
@@ -422,8 +501,8 @@ impl Window {
 
     pub fn close(var self) {
         self.open = false;
-        let exit_seq = "\x1b[?25h\x1b[0m\n";
-        let _ = syscall3(1i64, 1i64, exit_seq as *raw u8, 9i64);
+        let exit_seq = "\x1b[?25h\x1b[0m\r\n";
+        let _ = syscall3(1i64, 1i64, exit_seq as *raw u8, gfx_str_len(exit_seq) as i64);
 
         let termios_buf = malloc(64usize) as *raw var u8;
         let r_tc = syscall3(16i64, 0i64, 21505i64, termios_buf);
