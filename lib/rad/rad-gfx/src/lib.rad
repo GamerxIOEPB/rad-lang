@@ -64,6 +64,59 @@ fn gfx_int_to_str(val: usize) -> String {
     return res
 }
 
+fn gfx_get_char_bits(ch: u8) -> i32 {
+    var c = ch;
+    if c >= 97u8 && c <= 122u8 { c = c - 32u8; } // uppercase
+    if c == 65u8 { return 23530; }
+    if c == 66u8 { return 15083; }
+    if c == 67u8 { return 29263; }
+    if c == 68u8 { return 15211; }
+    if c == 69u8 { return 29391; }
+    if c == 70u8 { return 4815; }
+    if c == 71u8 { return 31567; }
+    if c == 72u8 { return 23533; }
+    if c == 73u8 { return 29847; }
+    if c == 74u8 { return 31524; }
+    if c == 75u8 { return 23277; }
+    if c == 76u8 { return 29257; }
+    if c == 77u8 { return 23421; }
+    if c == 78u8 { return 23549; }
+    if c == 79u8 { return 31599; }
+    if c == 80u8 { return 5103; }
+    if c == 81u8 { return 18927; }
+    if c == 82u8 { return 23279; }
+    if c == 83u8 { return 31183; }
+    if c == 84u8 { return 9367; }
+    if c == 85u8 { return 31597; }
+    if c == 86u8 { return 11117; }
+    if c == 87u8 { return 24429; }
+    if c == 88u8 { return 23213; }
+    if c == 89u8 { return 31213; }
+    if c == 90u8 { return 29351; }
+    if c == 48u8 { return 31599; }
+    if c == 49u8 { return 29850; }
+    if c == 50u8 { return 29671; }
+    if c == 51u8 { return 31207; }
+    if c == 52u8 { return 18925; }
+    if c == 53u8 { return 31183; }
+    if c == 54u8 { return 31695; }
+    if c == 55u8 { return 18727; }
+    if c == 56u8 { return 31727; }
+    if c == 57u8 { return 31215; }
+    if c == 58u8 { return 1040; }
+    if c == 45u8 { return 448; }
+    if c == 43u8 { return 1488; }
+    if c == 37u8 { return 21157; }
+    if c == 62u8 { return 5393; }
+    if c == 60u8 { return 17492; }
+    if c == 91u8 { return 12875; }
+    if c == 93u8 { return 26918; }
+    if c == 47u8 { return 4772; }
+    if c == 46u8 { return 8192; }
+    if c == 32u8 { return 0; }
+    return 0;
+}
+
 impl Canvas {
     pub fn new(width: usize, height: usize) -> Canvas {
         let total_bytes = width * height * 4usize
@@ -231,6 +284,29 @@ impl Canvas {
         }
     }
 
+    pub fn draw_char(var self, x: usize, y: usize, ch: u8, color: Color) {
+        let bits = gfx_get_char_bits(ch);
+        var r = 0usize;
+        while r < 5usize {
+            let r_bits = (bits >> ((r * 3usize) as i32)) & 7;
+            if (r_bits & 1) != 0 { self.set_pixel(x, y + r, color); }
+            if (r_bits & 2) != 0 { self.set_pixel(x + 1usize, y + r, color); }
+            if (r_bits & 4) != 0 { self.set_pixel(x + 2usize, y + r, color); }
+            r = r + 1usize;
+        }
+    }
+
+    pub fn draw_text(var self, x: usize, y: usize, text: str, color: Color) {
+        let p = text as *raw u8;
+        var i = 0usize;
+        var cx = x;
+        while p[i] != 0u8 {
+            self.draw_char(cx, y, p[i], color);
+            cx = cx + 4usize;
+            i = i + 1usize;
+        }
+    }
+
     pub fn save_ppm(self, path: str) -> bool {
         // Open O_WRONLY | O_CREAT | O_TRUNC (1 | 64 | 512 = 577), mode 0644 (420)
         let fd = syscall3(2i64, path as *raw u8, 577i64, 420i64)
@@ -287,6 +363,12 @@ pub const EVENT_KEY: i32 = 1;
 pub const EVENT_MOUSE: i32 = 2;
 pub const EVENT_CLOSE: i32 = 3;
 
+pub const KEY_UP: u8 = 65u8;
+pub const KEY_DOWN: u8 = 66u8;
+pub const KEY_RIGHT: u8 = 67u8;
+pub const KEY_LEFT: u8 = 68u8;
+pub const KEY_ESC: u8 = 27u8;
+
 pub struct Event {
     pub kind: i32,
     pub key: u8,
@@ -301,6 +383,22 @@ impl Event {
 
     pub fn is_close(self) -> bool {
         return self.kind == EVENT_CLOSE;
+    }
+
+    pub fn is_up(self) -> bool {
+        return self.kind == EVENT_KEY && self.key == KEY_UP;
+    }
+
+    pub fn is_down(self) -> bool {
+        return self.kind == EVENT_KEY && self.key == KEY_DOWN;
+    }
+
+    pub fn is_left(self) -> bool {
+        return self.kind == EVENT_KEY && self.key == KEY_LEFT;
+    }
+
+    pub fn is_right(self) -> bool {
+        return self.kind == EVENT_KEY && self.key == KEY_RIGHT;
     }
 }
 
@@ -548,9 +646,31 @@ impl Window {
         let n = syscall3(0i64, 0i64, buf, 1i64);
         if n > 0i64 {
             let ch = buf[0usize];
-            free(buf);
-            if ch == 113u8 || ch == 81u8 || ch == 27u8 { // 'q', 'Q', ESC
+            if ch == 27u8 {
+                // Check for escape sequence (arrow keys: ESC [ A/B/C/D)
+                let p2 = (buf as usize) + 1usize;
+                let n2 = syscall3(0i64, 0i64, p2 as *raw u8, 2i64);
+                if n2 >= 2i64 && buf[1usize] == 91u8 {
+                    let code = buf[2usize];
+                    free(buf);
+                    return Option.Some(Event {
+                        kind: EVENT_KEY,
+                        key: code,
+                        mouse_x: 0,
+                        mouse_y: 0,
+                    });
+                }
+                free(buf);
+                return Option.Some(Event {
+                    kind: EVENT_KEY,
+                    key: KEY_ESC,
+                    mouse_x: 0,
+                    mouse_y: 0,
+                });
+            }
+            if ch == 113u8 || ch == 81u8 { // 'q', 'Q'
                 self.open = false;
+                free(buf);
                 return Option.Some(Event {
                     kind: EVENT_CLOSE,
                     key: ch,
@@ -558,6 +678,7 @@ impl Window {
                     mouse_y: 0,
                 });
             }
+            free(buf);
             return Option.Some(Event {
                 kind: EVENT_KEY,
                 key: ch,

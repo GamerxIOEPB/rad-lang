@@ -1,7 +1,8 @@
 // ==============================================================================
 // Rad Graphics Demo 2: 2D Multi-Body Particle Physics Simulation (60 FPS)
-// Dynamically adjusts to terminal/display resolution and runs continuously.
-// Controls: 'g' toggle gravity, 'r' reset/scramble, 'q' quit.
+// Features elastic ball-to-ball collisions, restitution decay & resting state.
+// Interactive TUI Settings Menu (press 's'): navigate with Up/Down, adjust with Left/Right.
+// Controls: 's' settings menu, 'g' toggle gravity, 'r' scramble, 'q' quit.
 // ==============================================================================
 
 import gfx;
@@ -29,8 +30,49 @@ impl Rng {
     }
 }
 
+fn int_sqrt(val: i64) -> i64 {
+    if val <= 0i64 {
+        return 0i64;
+    }
+    var x = val;
+    var y = (x + 1i64) / 2i64;
+    while y < x {
+        x = y;
+        y = (x + (val / x)) / 2i64;
+    }
+    return x;
+}
+
+fn int_to_s(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0");
+    }
+    var v = val;
+    var is_neg = false;
+    if v < 0i64 {
+        is_neg = true;
+        v = -v;
+    }
+    var buf = String.new();
+    while v > 0i64 {
+        let rem = (v % 10i64) as u8;
+        buf.push_byte(48u8 + rem);
+        v = v / 10i64;
+    }
+    if is_neg {
+        buf.push_byte(45u8); // '-'
+    }
+    var res = String.new();
+    var i = buf.len();
+    while i > 0usize {
+        i = i - 1usize;
+        res.push_byte((buf.as_ptr() as *raw u8)[i]);
+    }
+    return res;
+}
+
 pub fn main() -> i32 {
-    // Dynamically auto-detect terminal resolution:
+    // Auto-detect display/terminal resolution
     var window = Window.open_autores("Rad 2D Physics Demo");
     var width = window.width;
     var height = window.height;
@@ -39,56 +81,102 @@ pub fn main() -> i32 {
 
     var rng = Rng.new(12345678901234567u64);
 
-    // Number of particles scaled to resolution
-    var num_balls = (width * height) / 180usize;
-    if num_balls < 12usize {
-        num_balls = 12usize;
+    let max_balls = 80usize;
+    var active_balls = (width * height) / 100usize;
+    if active_balls < 16usize {
+        active_balls = 16usize;
     }
-    if num_balls > 40usize {
-        num_balls = 40usize;
+    if active_balls > 50usize {
+        active_balls = 50usize;
     }
 
-    let ball_px = malloc(num_balls * 8usize) as *raw var i64;
-    let ball_py = malloc(num_balls * 8usize) as *raw var i64;
-    let ball_vx = malloc(num_balls * 8usize) as *raw var i64;
-    let ball_vy = malloc(num_balls * 8usize) as *raw var i64;
-    let ball_rad = malloc(num_balls * 8usize) as *raw var i64;
-    let ball_cr = malloc(num_balls) as *raw var u8;
-    let ball_cg = malloc(num_balls) as *raw var u8;
-    let ball_cb = malloc(num_balls) as *raw var u8;
+    let ball_px = malloc(max_balls * 8usize) as *raw var i64;
+    let ball_py = malloc(max_balls * 8usize) as *raw var i64;
+    let ball_vx = malloc(max_balls * 8usize) as *raw var i64;
+    let ball_vy = malloc(max_balls * 8usize) as *raw var i64;
+    let ball_rad = malloc(max_balls * 8usize) as *raw var i64;
+    let ball_cr = malloc(max_balls) as *raw var u8;
+    let ball_cg = malloc(max_balls) as *raw var u8;
+    let ball_cb = malloc(max_balls) as *raw var u8;
 
-    // Initialize colored balls
+    // Initialize colored balls (smaller radius: 1 to 2 pixels)
     var i = 0usize;
-    while i < num_balls {
+    while i < max_balls {
         ball_cr[i] = (rng.range(60i64, 255i64)) as u8;
         ball_cg[i] = (rng.range(60i64, 255i64)) as u8;
         ball_cb[i] = (rng.range(60i64, 255i64)) as u8;
 
-        ball_px[i] = rng.range(8i64, (width as i64) - 8i64) * 100i64;
+        ball_px[i] = rng.range(6i64, (width as i64) - 6i64) * 100i64;
         ball_py[i] = rng.range(4i64, (height as i64) / 2i64) * 100i64;
-        ball_vx[i] = rng.range(-150i64, 150i64);
+        ball_vx[i] = rng.range(-140i64, 140i64);
         ball_vy[i] = rng.range(-60i64, 80i64);
-        ball_rad[i] = rng.range(2i64, 3i64);
+        ball_rad[i] = rng.range(1i64, 2i64);
         i = i + 1usize;
     }
 
-    var gravity = 25i64;
+    // Configurable Physics Parameters
+    var gravity = 25i64;            // Gravitational downward acceleration
+    var restitution = 80i64;        // Bounciness elasticity percentage (0-100%)
+    var floor_friction = 96i64;     // Kinetic floor friction percentage
+    var ball_collisions = true;     // Ball-to-ball elastic collision toggle
+    let wall_restitution = 85i64;   // Side wall bounce elasticity
 
-    // Runs continuously until user presses 'q' / 'Q' / ESC
+    // TUI Settings Menu State
+    var show_menu = false;
+    var selected_item = 0usize;
+    let total_menu_items = 5usize;
+
+    // Continuous loop until 'q' or close
     while window.is_open() {
         let ev_opt = window.poll_event();
         match ev_opt {
             Option.Some(ev) => {
-                if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) || ev.is_key(27u8) { // 'q', 'Q', ESC
+                if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) { // 'q', 'Q'
                     window.close();
-                } else if ev.is_key(103u8) { // 'g' toggle gravity
-                    if gravity > 0i64 { gravity = 0i64; } else { gravity = 25i64; }
-                } else if ev.is_key(114u8) { // 'r' scramble
-                    i = 0usize;
-                    while i < num_balls {
-                        ball_vx[i] = rng.range(-180i64, 180i64);
-                        ball_vy[i] = rng.range(-220i64, -40i64);
-                        i = i + 1usize;
+                } else if ev.is_key(115u8) || ev.is_key(83u8) { // 's', 'S': Toggle settings menu
+                    show_menu = !show_menu;
+                } else if ev.is_key(27u8) { // ESC: Close menu or quit
+                    if show_menu {
+                        show_menu = false;
+                    } else {
+                        window.close();
+                    }
+                } else if show_menu {
+                    // Menu navigation with arrow keys
+                    if ev.is_up() {
+                        if selected_item == 0usize {
+                            selected_item = total_menu_items - 1usize;
+                        } else {
+                            selected_item = selected_item - 1usize;
+                        }
+                    } else if ev.is_down() {
+                        selected_item = (selected_item + 1usize) % total_menu_items;
+                    } else if ev.is_left() {
+                        // Decrease current parameter
+                        if selected_item == 0usize && gravity >= 5i64 { gravity = gravity - 5i64; }
+                        else if selected_item == 1usize && restitution >= 5i64 { restitution = restitution - 5i64; }
+                        else if selected_item == 2usize && floor_friction >= 50i64 { floor_friction = floor_friction - 2i64; }
+                        else if selected_item == 3usize { ball_collisions = !ball_collisions; }
+                        else if selected_item == 4usize && active_balls > 8usize { active_balls = active_balls - 4usize; }
+                    } else if ev.is_right() {
+                        // Increase current parameter
+                        if selected_item == 0usize && gravity <= 60i64 { gravity = gravity + 5i64; }
+                        else if selected_item == 1usize && restitution <= 95i64 { restitution = restitution + 5i64; }
+                        else if selected_item == 2usize && floor_friction <= 98i64 { floor_friction = floor_friction + 2i64; }
+                        else if selected_item == 3usize { ball_collisions = !ball_collisions; }
+                        else if selected_item == 4usize && active_balls + 4usize <= max_balls { active_balls = active_balls + 4usize; }
+                    }
+                } else {
+                    // Quick hotkeys in game mode
+                    if ev.is_key(103u8) { // 'g' quick toggle gravity
+                        if gravity > 0i64 { gravity = 0i64; } else { gravity = 25i64; }
+                    } else if ev.is_key(114u8) { // 'r' scramble
+                        i = 0usize;
+                        while i < active_balls {
+                            ball_vx[i] = rng.range(-180i64, 180i64);
+                            ball_vy[i] = rng.range(-220i64, -40i64);
+                            i = i + 1usize;
+                        }
                     }
                 }
             },
@@ -108,14 +196,14 @@ pub fn main() -> i32 {
             canvas = Canvas.new(width, height);
         }
 
-        canvas.clear(Color.rgb(8u8, 10u8, 18u8)); // Dark navy background
+        canvas.clear(Color.rgb(8u8, 10u8, 18u8)); // Dark navy arena background
 
-        // Draw boundary box around arena
+        // Draw arena boundary
         canvas.draw_rect(0usize, 0usize, width, height, Color.rgb(50u8, 70u8, 110u8));
 
-        // Physics step & rendering
+        // Physics step: ball positions & boundary collisions
         i = 0usize;
-        while i < num_balls {
+        while i < active_balls {
             // Apply gravity
             ball_vy[i] = ball_vy[i] + gravity;
 
@@ -130,33 +218,174 @@ pub fn main() -> i32 {
             // Left / right wall bounce with restitution damping
             if cur_x - rad < 1i64 {
                 ball_px[i] = (1i64 + rad) * 100i64;
-                ball_vx[i] = (-ball_vx[i] * 85i64) / 100i64;
+                ball_vx[i] = (-ball_vx[i] * wall_restitution) / 100i64;
             } else if cur_x + rad >= (width as i64) - 1i64 {
                 ball_px[i] = ((width as i64) - 2i64 - rad) * 100i64;
-                ball_vx[i] = (-ball_vx[i] * 85i64) / 100i64;
+                ball_vx[i] = (-ball_vx[i] * wall_restitution) / 100i64;
             }
 
-            // Floor / ceiling bounce
+            // Ceiling bounce
             if cur_y - rad < 1i64 {
                 ball_py[i] = (1i64 + rad) * 100i64;
-                ball_vy[i] = -ball_vy[i];
+                ball_vy[i] = (-ball_vy[i] * wall_restitution) / 100i64;
             } else if cur_y + rad >= (height as i64) - 1i64 {
-                ball_py[i] = ((height as i64) - 2i64 - rad) * 100i64;
-                ball_vy[i] = (-ball_vy[i] * 82i64) / 100i64;
-                // Floor friction
-                ball_vx[i] = (ball_vx[i] * 96i64) / 100i64;
+                // Floor bounce with restitution
+                ball_py[i] = ((height as i64) - 1i64 - rad) * 100i64;
+
+                // Resting state: zero out micro-bounces when vertical velocity is small
+                if gravity > 0i64 && gfx_int_abs(ball_vy[i]) < 45i64 {
+                    ball_vy[i] = 0i64;
+                } else {
+                    ball_vy[i] = (-ball_vy[i] * restitution) / 100i64;
+                }
+
+                // Floor kinetic friction
+                ball_vx[i] = (ball_vx[i] * floor_friction) / 100i64;
+                if gfx_int_abs(ball_vx[i]) < 8i64 {
+                    ball_vx[i] = 0i64;
+                }
             }
 
-            // Render ball
+            i = i + 1usize;
+        }
+
+        // Ball-to-ball elastic collisions
+        if ball_collisions {
+            var bi = 0usize;
+            while bi < active_balls {
+                var bj = bi + 1usize;
+                while bj < active_balls {
+                    let dx = (ball_px[bj] - ball_px[bi]) / 100i64;
+                    let dy = (ball_py[bj] - ball_py[bi]) / 100i64;
+                    let dist_sq = (dx * dx) + (dy * dy);
+                    let min_dist = ball_rad[bi] + ball_rad[bj];
+
+                    if dist_sq < (min_dist * min_dist) {
+                        var dist = int_sqrt(dist_sq);
+                        if dist == 0i64 { dist = 1i64; }
+                        let nx = (dx * 100i64) / dist;
+                        let ny = (dy * 100i64) / dist;
+
+                        // Separate overlapping particles
+                        let overlap = min_dist - dist;
+                        ball_px[bi] = ball_px[bi] - ((nx * overlap * 50i64) / 100i64);
+                        ball_py[bi] = ball_py[bi] - ((ny * overlap * 50i64) / 100i64);
+                        ball_px[bj] = ball_px[bj] + ((nx * overlap * 50i64) / 100i64);
+                        ball_py[bj] = ball_py[bj] + ((ny * overlap * 50i64) / 100i64);
+
+                        // Velocity momentum exchange
+                        let dvx = ball_vx[bj] - ball_vx[bi];
+                        let dvy = ball_vy[bj] - ball_vy[bi];
+                        let vel_along_norm = ((dvx * nx) + (dvy * ny)) / 100i64;
+
+                        if vel_along_norm < 0i64 {
+                            let impulse = -((100i64 + restitution) * vel_along_norm) / 200i64;
+                            let imp_x = (impulse * nx) / 100i64;
+                            let imp_y = (impulse * ny) / 100i64;
+                            ball_vx[bi] = ball_vx[bi] - imp_x;
+                            ball_vy[bi] = ball_vy[bi] - imp_y;
+                            ball_vx[bj] = ball_vx[bj] + imp_x;
+                            ball_vy[bj] = ball_vy[bj] + imp_y;
+                        }
+                    }
+
+                    bj = bj + 1usize;
+                }
+                bi = bi + 1usize;
+            }
+        }
+
+        // Render all balls
+        i = 0usize;
+        while i < active_balls {
             let draw_x = ball_px[i] / 100i64;
             let draw_y = ball_py[i] / 100i64;
+            let rad = ball_rad[i];
             let ball_col = Color.rgb(ball_cr[i], ball_cg[i], ball_cb[i]);
             canvas.fill_circle(draw_x, draw_y, rad, ball_col);
 
             // Glowing center highlight
-            canvas.set_pixel(draw_x as usize, draw_y as usize, Color.white());
+            if draw_x >= 0i64 && draw_y >= 0i64 {
+                canvas.set_pixel(draw_x as usize, draw_y as usize, Color.white());
+            }
 
             i = i + 1usize;
+        }
+
+        // Draw TUI Settings Menu overlay or bottom HUD
+        if show_menu {
+            let mw = 64usize;
+            let mh = 36usize;
+            var mx = 8usize;
+            var my = 4usize;
+            if width > mw {
+                mx = (width - mw) / 2usize;
+            }
+            if height > mh {
+                my = (height - mh) / 2usize;
+            }
+
+            // Box background and border
+            canvas.fill_rect(mx, my, mw, mh, Color.rgb(15u8, 22u8, 38u8));
+            canvas.draw_rect(mx, my, mw, mh, Color.rgb(80u8, 140u8, 220u8));
+
+            // Title
+            canvas.draw_text(mx + 16usize, my + 2usize, "PHYSICS MENU", Color.rgb(255u8, 220u8, 80u8));
+
+            // Row 0: Gravity
+            var col0 = Color.rgb(180u8, 200u8, 220u8);
+            var pre0 = "  ";
+            if selected_item == 0usize { col0 = Color.rgb(255u8, 255u8, 80u8); pre0 = "> "; }
+            var t0 = String.from_str(pre0);
+            t0.push_str("GRAVITY:   ");
+            t0.push_str(int_to_s(gravity).as_ptr() as str);
+            canvas.draw_text(mx + 4usize, my + 8usize, t0.as_ptr() as str, col0);
+
+            // Row 1: Bounciness (Restitution)
+            var col1 = Color.rgb(180u8, 200u8, 220u8);
+            var pre1 = "  ";
+            if selected_item == 1usize { col1 = Color.rgb(255u8, 255u8, 80u8); pre1 = "> "; }
+            var t1 = String.from_str(pre1);
+            t1.push_str("BOUNCE:    ");
+            t1.push_str(int_to_s(restitution).as_ptr() as str);
+            t1.push_str("%");
+            canvas.draw_text(mx + 4usize, my + 13usize, t1.as_ptr() as str, col1);
+
+            // Row 2: Floor Friction
+            var col2 = Color.rgb(180u8, 200u8, 220u8);
+            var pre2 = "  ";
+            if selected_item == 2usize { col2 = Color.rgb(255u8, 255u8, 80u8); pre2 = "> "; }
+            var t2 = String.from_str(pre2);
+            t2.push_str("FRICTION:  ");
+            t2.push_str(int_to_s(floor_friction).as_ptr() as str);
+            t2.push_str("%");
+            canvas.draw_text(mx + 4usize, my + 18usize, t2.as_ptr() as str, col2);
+
+            // Row 3: Ball Collisions
+            var col3 = Color.rgb(180u8, 200u8, 220u8);
+            var pre3 = "  ";
+            if selected_item == 3usize { col3 = Color.rgb(255u8, 255u8, 80u8); pre3 = "> "; }
+            var t3 = String.from_str(pre3);
+            t3.push_str("COLLIDE:   ");
+            if ball_collisions { t3.push_str("ON"); } else { t3.push_str("OFF"); }
+            canvas.draw_text(mx + 4usize, my + 23usize, t3.as_ptr() as str, col3);
+
+            // Row 4: Ball Count
+            var col4 = Color.rgb(180u8, 200u8, 220u8);
+            var pre4 = "  ";
+            if selected_item == 4usize { col4 = Color.rgb(255u8, 255u8, 80u8); pre4 = "> "; }
+            var t4 = String.from_str(pre4);
+            t4.push_str("BALLS:     ");
+            t4.push_str(int_to_s(active_balls as i64).as_ptr() as str);
+            canvas.draw_text(mx + 4usize, my + 28usize, t4.as_ptr() as str, col4);
+
+            // Menu Footer Navigation Legend
+            canvas.draw_text(mx + 2usize, my + 33usize, "[UP/DN] [LT/RT] [S]X", Color.rgb(100u8, 200u8, 255u8));
+        } else {
+            // Bottom HUD Hint
+            if height > 8usize && width > 40usize {
+                canvas.draw_text(2usize, height - 6usize, "[S]MENU [G]GRAV [R]RST [Q]QUIT", Color.rgb(120u8, 160u8, 200u8));
+            }
         }
 
         window.draw_canvas(canvas);
