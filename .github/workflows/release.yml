@@ -3,6 +3,10 @@ name: Build & Release Toolchain
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
   workflow_dispatch:
     inputs:
       tag:
@@ -18,6 +22,10 @@ on:
         required: false
         default: 'Rad v0.2.4 Release: Major ecosystem milestone introducing the official Rad Library Registry (rad-lib), pure native RadTUI framework (rad-tui 0.1.0) with differential double-buffering and constraint layouts, RadJSON (rad-json 0.1.0), seamless package management (rad package install/search/info/list/tree/outdated), global ~/.rad/packages/ library resolution (callable directly by name), direct system clang/clang++ interop with zero redundant wrappers, native standard library expansions (path, process, sha256, unicode, deque, hash), and 100% test suite pass rate.'
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   release:
     name: Build & Publish Release
@@ -29,18 +37,18 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Setup Fast Compression Tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq pigz xz-utils
+
       - name: Download & Extract Previous Release (Bootstrap)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.rad /tmp/bootstrap
-          (gh release download 0.2.4 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-           gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-           gh release download 0.2.2 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-           gh release download 0.2.1 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-           gh release download 0.2.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-           gh release download 0.1.0 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
-           gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap) || true
+          (gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+           gh release download 0.2.4 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap || \
+           gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.gz" --dir /tmp/bootstrap) || true
           if [ -d /tmp/bootstrap ] && [ -n "$(ls /tmp/bootstrap/rad-*.tar.gz 2>/dev/null)" ]; then
             ARCHIVE=$(ls /tmp/bootstrap/rad-*.tar.gz | head -n 1)
             tar -xzf "$ARCHIVE" -C ~/.rad --strip-components=1 || true
@@ -56,6 +64,31 @@ jobs:
           radc --version || true
           rad --version || true
           [ -d ~/.rad/bin ] && ls -la ~/.rad/bin/ || true
+
+      - name: Cache Musl Builder Docker Image
+        id: cache-builder
+        uses: actions/cache@v4
+        with:
+          path: /tmp/docker-builder-cache
+          key: rad-musl-builder-3.23-${{ hashFiles('tests/docker/builder/Dockerfile') }}
+
+      - name: Load Cached Docker Image or Prepare Cache
+        run: |
+          mkdir -p /tmp/docker-builder-cache
+          if [ -f /tmp/docker-builder-cache/rad-musl-builder.tar.gz ]; then
+            echo "==> Restoring cached Docker builder image from compressed archive..."
+            pigz -dc /tmp/docker-builder-cache/rad-musl-builder.tar.gz | docker load
+            echo "  [✓] Successfully restored rad-musl-builder:3.23 from cache"
+          elif [ -f /tmp/docker-builder-cache/rad-musl-builder.tar ]; then
+            echo "==> Restoring cached Docker builder image..."
+            docker load -i /tmp/docker-builder-cache/rad-musl-builder.tar
+            echo "  [✓] Successfully restored rad-musl-builder:3.23 from cache"
+          else
+            echo "==> Cache miss: Building Docker builder image (rad-musl-builder:3.23)..."
+            docker build --network host --platform linux/amd64 -t rad-musl-builder:3.23 tests/docker/builder
+            echo "==> Saving Docker builder image for subsequent fast runs..."
+            docker save rad-musl-builder:3.23 | pigz -1 > /tmp/docker-builder-cache/rad-musl-builder.tar.gz
+          fi
 
       - name: Build & Publish Release
         env:

@@ -361,7 +361,7 @@ else
     if [ -n "${RAD_DIST_DIR:-}" ] && [ -d "$RAD_DIST_DIR" ]; then
         log_step "Using local distribution directory: $RAD_DIST_DIR"
         FOUND_ARCHIVE=""
-        for cand in "$ARCHIVE_NAME" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
+        for cand in "rad-${VERSION}-linux-x86_64.tar.xz" "$ARCHIVE_NAME" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
             if [ -f "$RAD_DIST_DIR/$cand" ]; then
                 FOUND_ARCHIVE="$cand"
                 break
@@ -389,7 +389,7 @@ else
 
         log_step "Downloading Rad release archive from $BASE_URL..."
         DOWNLOAD_OK=0
-        for cand in "${ARCHIVE_NAME}" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
+        for cand in "rad-${VERSION}-linux-x86_64.tar.xz" "${ARCHIVE_NAME}" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
             cand_url="${BASE_URL}/${cand}"
             if command -v curl >/dev/null 2>&1; then
                 if curl -fSL --progress-bar "$cand_url" -o "$TMP_DIR/$cand" 2>/dev/null; then
@@ -453,6 +453,7 @@ else
 
     # 4. Staging and Extraction
     log_info "Extracting distribution into staging directory..."
+    tar -xf "$ARCHIVE_PATH" -C "$STAGE_DIR" --strip-components=1 2>/dev/null || \
     tar -xzf "$ARCHIVE_PATH" -C "$STAGE_DIR" --strip-components=1 || {
         log_error "Failed to extract archive $ARCHIVE_PATH"
         exit 1

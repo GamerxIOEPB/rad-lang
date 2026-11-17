@@ -253,13 +253,31 @@ echo "LLVM Apache 2.0 with LLVM Exception" > "$DIST_ROOT/share/rad/LICENSES/LICE
 echo "MIT License (Musl libc)" > "$DIST_ROOT/share/rad/LICENSES/LICENSE-MUSL"
 
 # ------------------------------------------------------------------------------
-# 3. Archive Unified Package
+# 3. Optimize & Archive Unified Package
 # ------------------------------------------------------------------------------
-echo "==> [3/4] Packaging unified tarball..."
+echo "==> [3/4] Optimizing binaries & packaging distribution..."
 
-tar -czf "$DIST_OUT/${DIST_NAME}.tar.gz" -C "$BUILD_TMP" "$DIST_NAME"
+# Strip all debug/unneeded sections from binaries and sysroot static libraries
+strip --strip-all "$DIST_ROOT/bin/radc" "$DIST_ROOT/bin/rad" 2>/dev/null || true
+strip --strip-debug "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/lib"/*.a 2>/dev/null || true
+strip --strip-debug "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/crt"/*.o 2>/dev/null || true
+
+# 3.1 Package maximum-compression parallel .tar.gz
+if command -v pigz >/dev/null 2>&1; then
+    tar -cf - -C "$BUILD_TMP" "$DIST_NAME" | pigz -9 -p "$(nproc)" > "$DIST_OUT/${DIST_NAME}.tar.gz"
+else
+    GZIP="-9" tar -czf "$DIST_OUT/${DIST_NAME}.tar.gz" -C "$BUILD_TMP" "$DIST_NAME"
+fi
 sha256sum "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}' > "$DIST_OUT/${DIST_NAME}.tar.gz.sha256"
 echo "  [✓] Created ${DIST_NAME}.tar.gz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.gz" | awk '{print $1}'))"
+
+# 3.2 Package ultra-compact .tar.xz (typically 35-50% smaller for lower download size)
+if command -v xz >/dev/null 2>&1; then
+    echo "==> Packaging ultra-compact .tar.xz..."
+    tar -cf - -C "$BUILD_TMP" "$DIST_NAME" | xz -9e -T0 > "$DIST_OUT/${DIST_NAME}.tar.xz"
+    sha256sum "$DIST_OUT/${DIST_NAME}.tar.xz" | awk '{print $1}' > "$DIST_OUT/${DIST_NAME}.tar.xz.sha256"
+    echo "  [✓] Created ${DIST_NAME}.tar.xz ($(du -h "$DIST_OUT/${DIST_NAME}.tar.xz" | awk '{print $1}'))"
+fi
 
 # Copy VS Code extension if available
 if [ -f "$ROOT_DIR/extensions/vscode-rad/rad-utils-${VERSION}.vsix" ]; then
@@ -271,11 +289,7 @@ fi
 (
     cd "$DIST_OUT"
     rm -f SHA256SUMS
-    if [ -f "rad-utils-${VERSION}.vsix" ]; then
-        sha256sum "${DIST_NAME}.tar.gz" "rad-utils-${VERSION}.vsix" > SHA256SUMS
-    else
-        sha256sum "${DIST_NAME}.tar.gz" > SHA256SUMS
-    fi
+    sha256sum ${DIST_NAME}.tar.* *.vsix 2>/dev/null > SHA256SUMS || sha256sum ${DIST_NAME}.tar.* > SHA256SUMS
 )
 echo "  [✓] Generated SHA256SUMS manifest"
 
@@ -339,6 +353,9 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
     echo ""
     echo "==> Uploading release to GitHub (${REPO})..."
     UPLOAD_FILES=("$DIST_OUT/${DIST_NAME}.tar.gz" "$DIST_OUT/SHA256SUMS")
+    if [ -f "$DIST_OUT/${DIST_NAME}.tar.xz" ]; then
+        UPLOAD_FILES+=("$DIST_OUT/${DIST_NAME}.tar.xz")
+    fi
     if [ -f "$DIST_OUT/rad-utils-${VERSION}.vsix" ]; then
         UPLOAD_FILES+=("$DIST_OUT/rad-utils-${VERSION}.vsix")
     fi
