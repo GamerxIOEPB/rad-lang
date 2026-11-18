@@ -417,6 +417,7 @@ pub struct Window {
     pub frame_count: u64,
     pub cols: usize,
     pub rows: usize,
+    pub overlay_buf: String,
 }
 
 fn gfx_str_len(s: str) -> usize {
@@ -531,8 +532,9 @@ impl Window {
             h = sz.height;
         }
 
-        // Clear screen and hide cursor: \x1b[2J\x1b[H\x1b[?25l
-        let init_seq = "\x1b[2J\x1b[H\x1b[?25l";
+        // Switch to alternate screen buffer, clear screen, and hide cursor:
+        // \x1b[?1049h (Enter alternate screen), \x1b[2J\x1b[H (Clear screen), \x1b[?25l (Hide cursor)
+        let init_seq = "\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l";
         let _ = syscall3(1i64, 1i64, init_seq as *raw u8, gfx_str_len(init_seq) as i64);
 
         // Set stdin non-blocking:
@@ -561,6 +563,7 @@ impl Window {
             frame_count: 0u64,
             cols: sz.cols,
             rows: sz.rows,
+            overlay_buf: String.new(),
         };
     }
 
@@ -582,7 +585,7 @@ impl Window {
 
     pub fn draw_canvas(var self, canvas: Canvas) {
         var out = String.new();
-        out.push_str("\x1b[H"); // Cursor home
+        out.push_str("\x1b[?2025h\x1b[H"); // Synchronized update start + cursor home
 
         var last_fg_r = -1i32;
         var last_fg_g = -1i32;
@@ -651,6 +654,14 @@ impl Window {
             y = y + 2usize;
         }
 
+        // Atomically append all queued GUI overlays into the frame buffer:
+        if self.overlay_buf.len() > 0usize {
+            out.push_str(self.overlay_buf.as_ptr() as str);
+            self.overlay_buf = String.new();
+        }
+
+        out.push_str("\x1b[?2025l"); // Synchronized update end
+
         var written = 0i64;
         let total = out.len() as i64;
         let p_val = (out.as_ptr() as usize);
@@ -666,17 +677,26 @@ impl Window {
     }
 
     pub fn draw_overlay_text(var self, row: usize, col: usize, text: str, fg_r: u8, fg_g: u8, fg_b: u8, bg_r: u8, bg_g: u8, bg_b: u8) {
-        var out = String.new();
-        out.push_str("\x1b[");
-        push_usize_str(out, row);
-        out.push_byte(59u8);
-        push_usize_str(out, col);
-        out.push_byte(72u8);
-        emit_fg(out, fg_r, fg_g, fg_b);
-        emit_bg(out, bg_r, bg_g, bg_b);
-        out.push_str(text);
-        out.push_str("\x1b[0m");
-        let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
+        self.overlay_buf.push_str("\x1b[");
+        push_usize_str(self.overlay_buf, row);
+        self.overlay_buf.push_byte(59u8);
+        push_usize_str(self.overlay_buf, col);
+        self.overlay_buf.push_byte(72u8);
+        emit_fg(self.overlay_buf, fg_r, fg_g, fg_b);
+        emit_bg(self.overlay_buf, bg_r, bg_g, bg_b);
+        self.overlay_buf.push_str(text);
+        self.overlay_buf.push_str("\x1b[0m");
+    }
+
+    pub fn flush_overlays(var self) {
+        if self.overlay_buf.len() > 0usize {
+            var out = String.new();
+            out.push_str("\x1b[?2025h");
+            out.push_str(self.overlay_buf.as_ptr() as str);
+            out.push_str("\x1b[?2025l");
+            self.overlay_buf = String.new();
+            let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
+        }
     }
 
     pub fn poll_event(var self) -> Option<Event> {
@@ -733,8 +753,12 @@ impl Window {
     }
 
     pub fn close(var self) {
+        if !self.open {
+            return;
+        }
         self.open = false;
-        let exit_seq = "\x1b[?25h\x1b[0m\r\n";
+        // End synchronized update, clear alternate screen, return to main screen buffer, show cursor, reset formatting:
+        let exit_seq = "\x1b[?2025l\x1b[2J\x1b[H\x1b[?1049l\x1b[?25h\x1b[0m\r\n";
         let _ = syscall3(1i64, 1i64, exit_seq as *raw u8, gfx_str_len(exit_seq) as i64);
 
         let termios_buf = malloc(64usize) as *raw var u8;

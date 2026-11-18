@@ -253,12 +253,15 @@ pub fn main() -> i32 {
 
         canvas.clear(Color.rgb(8u8, 12u8, 22u8)); // Deep cosmic dark navy arena
 
-        // Draw arena boundary border
-        canvas.draw_rect(0usize, 0usize, width, height, Color.rgb(45u8, 65u8, 105u8));
+        // Top line for HUD banner
+        canvas.fill_rect(0usize, 0usize, width, 2usize, Color.rgb(20u8, 28u8, 48u8));
+
+        // Draw arena boundary border (starts below the top HUD line)
+        canvas.draw_rect(0usize, 2usize, width, height - 2usize, Color.rgb(45u8, 65u8, 105u8));
 
         let left_limit = 200i64;
         let right_limit = ((width as i64) - 2i64) * 100i64;
-        let ceil_limit = 200i64;
+        let ceil_limit = 400i64; // Bounces below top HUD banner (terminal row 3)
         let floor_limit = ((height as i64) - 2i64) * 100i64;
 
         // Physics step: ball positions & boundary collisions
@@ -395,10 +398,7 @@ pub fn main() -> i32 {
             i = i + 1usize;
         }
 
-        // Render frame buffer to terminal
-        window.draw_canvas(canvas);
-
-        // Render Crisp Native Font Overlays (Razor-sharp Unicode text)
+        // Render Crisp Native Font Overlays (Queued into the atomic frame buffer)
         if show_menu {
             var mr = 2usize;
             if window.rows > 11usize {
@@ -412,6 +412,11 @@ pub fn main() -> i32 {
             let bg_r = 15u8;
             let bg_g = 22u8;
             let bg_b = 38u8;
+
+            // Fill canvas backing under menu with identical background so balls smoothly pass behind
+            let menu_px_x = mc - 1usize;
+            let menu_px_y = (mr - 1usize) * 2usize;
+            canvas.fill_rect(menu_px_x, menu_px_y, 46usize, 22usize, Color.rgb(bg_r, bg_g, bg_b));
 
             let border_r = 100u8;
             let border_g = 160u8;
@@ -471,6 +476,9 @@ pub fn main() -> i32 {
                 window.draw_overlay_text(1usize, 2usize, " ⚛ RAD 2D PHYSICS │ [S] Settings │ [G] Gravity │ [R] Reset │ [Q] Quit ", 210u8, 230u8, 255u8, 20u8, 28u8, 48u8);
             }
         }
+
+        // Atomically present canvas and all overlays in a single synchronized flush
+        window.draw_canvas(canvas);
 
         Window.sleep_frame(60u64);
     }
