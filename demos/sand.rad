@@ -1,0 +1,822 @@
+// ==============================================================================
+// Rad Graphics Demo 3: Interactive Falling Sand & Fluid Mechanics Simulator
+// Pure-Rad 2D Cellular Automata Physics Engine running at 60 FPS in the terminal.
+// Simulates granular solids, fluids, gases, combustion, thermodynamics & explosives.
+// Elements: Sand, Water, Fire, Smoke, Acid, Oil, Gunpowder, Wood, Bedrock, Air.
+// Controls: Arrow keys/WASD move brush, Space paint, 1-9 select element,
+//           [ / ] brush size, 'c' clear, 'p' pause, 's' menu, 'q' quit.
+// ==============================================================================
+
+import gfx;
+
+// Element Types
+pub const ELEM_AIR: u8       = 0u8;
+pub const ELEM_WALL: u8      = 1u8; // Indestructible stone
+pub const ELEM_SAND: u8      = 2u8; // Granular falling solid (sinks in liquids)
+pub const ELEM_WATER: u8     = 3u8; // Dense fluid (flows, extinguishes fire)
+pub const ELEM_FIRE: u8      = 4u8; // Heat source (burns fuel, creates smoke, decays)
+pub const ELEM_SMOKE: u8     = 5u8; // Light buoyant gas (drifts up and dissipates)
+pub const ELEM_ACID: u8      = 6u8; // Corrosive fluid (dissolves materials)
+pub const ELEM_OIL: u8       = 7u8; // Flammable fluid (floats on water, burns violently)
+pub const ELEM_GUNPOWDER: u8 = 8u8; // Explosive powder (explodes from fire)
+pub const ELEM_WOOD: u8      = 9u8; // Flammable solid structure (slow combustion)
+
+struct Rng {
+    pub state: u64,
+}
+
+impl Rng {
+    pub fn new(seed: u64) -> Rng {
+        return Rng { state: seed };
+    }
+
+    pub fn next(var self) -> u64 {
+        self.state = self.state ^ (self.state << 13u64);
+        self.state = self.state ^ (self.state >> 7u64);
+        self.state = self.state ^ (self.state << 17u64);
+        return self.state;
+    }
+
+    pub fn range(var self, min_val: i64, max_val: i64) -> i64 {
+        let span = (max_val - min_val) + 1i64;
+        let r = (self.next() % (span as u64)) as i64;
+        return min_val + r;
+    }
+
+    pub fn bool_chance(var self, percent: u64) -> bool {
+        return (self.next() % 100u64) < percent;
+    }
+}
+
+fn clamp_left(x: usize) -> usize {
+    if x > 1usize { return x - 1usize; }
+    return x;
+}
+
+fn clamp_right(x: usize, max_w: usize) -> usize {
+    if x + 1usize < max_w - 1usize { return x + 1usize; }
+    return x;
+}
+
+fn clamp_above(y: usize) -> usize {
+    if y > 1usize { return y - 1usize; }
+    return y;
+}
+
+fn pick_random_idx(rng: var Rng, a: usize, b: usize) -> usize {
+    if rng.bool_chance(50u64) { return a; }
+    return b;
+}
+
+fn brush_bound(coord: usize, radius: usize) -> usize {
+    if coord >= radius { return coord - radius; }
+    return 0usize;
+}
+
+fn elem_name(elem: u8) -> str {
+    if elem == ELEM_SAND { return "Sand"; }
+    if elem == ELEM_WATER { return "Water"; }
+    if elem == ELEM_FIRE { return "Fire"; }
+    if elem == ELEM_ACID { return "Acid"; }
+    if elem == ELEM_OIL { return "Oil"; }
+    if elem == ELEM_GUNPOWDER { return "Gunpowder"; }
+    if elem == ELEM_WOOD { return "Wood"; }
+    if elem == ELEM_WALL { return "Wall (Bedrock)"; }
+    if elem == ELEM_AIR { return "Eraser (Air)"; }
+    return "Unknown";
+}
+
+fn int_to_s(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0");
+    }
+    var v = val;
+    var is_neg = false;
+    if v < 0i64 {
+        is_neg = true;
+        v = -v;
+    }
+    var buf = String.new();
+    while v > 0i64 {
+        let rem = (v % 10i64) as u8;
+        buf.push_byte(48u8 + rem);
+        v = v / 10i64;
+    }
+    if is_neg {
+        buf.push_byte(45u8);
+    }
+    var res = String.new();
+    var i = buf.len();
+    while i > 0usize {
+        i = i - 1usize;
+        res.push_byte((buf.as_ptr() as *raw u8)[i]);
+    }
+    return res;
+}
+
+fn draw_hud(var window: Window, cur_elem: u8, brush_size: usize, paused: bool) {
+    if window.cols < 30usize {
+        return;
+    }
+    var line = String.from_str(" 🧪 RAD FLUID ENGINE │ Brush: ");
+    line.push_str(elem_name(cur_elem));
+    line.push_str(" (r=");
+    line.push_str(int_to_s(brush_size as i64).as_ptr() as str);
+    line.push_str(") │ [1-9] Pick │ [Space] Paint │ [C] Clear │ ");
+    if paused {
+        line.push_str("[P] Resume │ ");
+    } else {
+        line.push_str("[P] Pause │ ");
+    }
+    line.push_str("[S] Menu │ [Q] Quit ");
+
+    var p = line.len();
+    while p < window.cols {
+        line.push_byte(32u8);
+        p = p + 1usize;
+    }
+    window.draw_overlay_text(1usize, 1usize, line.as_ptr() as str, 210u8, 240u8, 255u8, 20u8, 30u8, 50u8);
+}
+
+fn render_settings_menu(var window: Window, selected: usize, sim_speed: i64, acid_potency: i64, explosion_rad: i64) {
+    var mr = 2usize;
+    if window.rows > 14usize {
+        mr = (window.rows - 13usize) / 2usize;
+    }
+    var mc = 2usize;
+    if window.cols > 52usize {
+        mc = (window.cols - 50usize) / 2usize;
+    }
+
+    let bg_r = 15u8;
+    let bg_g = 22u8;
+    let bg_b = 38u8;
+
+    let border_r = 80u8;
+    let border_g = 180u8;
+    let border_b = 240u8;
+
+    let title_r = 255u8;
+    let title_g = 220u8;
+    let title_b = 90u8;
+
+    let sel_r = 255u8;
+    let sel_g = 255u8;
+    let sel_b = 80u8;
+
+    let unsel_r = 210u8;
+    let unsel_g = 230u8;
+    let unsel_b = 250u8;
+
+    let foot_r = 120u8;
+    let foot_g = 200u8;
+    let foot_b = 255u8;
+
+    window.draw_overlay_text(mr, mc,          "┌────────────────────────────────────────────────┐", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 1usize, mc, "│       FLUID & PARTICLE DYNAMICS SETTINGS       │", title_r, title_g, title_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 2usize, mc, "├────────────────────────────────────────────────┤", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+
+    // Row 0: Sim Speed
+    var row0 = String.from_str("│  ");
+    if selected == 0usize { row0.push_str("► SIM STEPS/FRAME:  "); } else { row0.push_str("  SIM STEPS/FRAME:  "); }
+    row0.push_str(int_to_s(sim_speed).as_ptr() as str);
+    row0.push_str("x  (1x - 4x)          │");
+    var fg0_r = unsel_r; var fg0_g = unsel_g; var fg0_b = unsel_b;
+    if selected == 0usize { fg0_r = sel_r; fg0_g = sel_g; fg0_b = sel_b; }
+    window.draw_overlay_text(mr + 3usize, mc, row0.as_ptr() as str, fg0_r, fg0_g, fg0_b, bg_r, bg_g, bg_b);
+
+    // Row 1: Acid Potency
+    var row1 = String.from_str("│  ");
+    if selected == 1usize { row1.push_str("► ACID DISSOLVE:    "); } else { row1.push_str("  ACID DISSOLVE:    "); }
+    row1.push_str(int_to_s(acid_potency).as_ptr() as str);
+    row1.push_str(" % (Reaction rate)    │");
+    var fg1_r = unsel_r; var fg1_g = unsel_g; var fg1_b = unsel_b;
+    if selected == 1usize { fg1_r = sel_r; fg1_g = sel_g; fg1_b = sel_b; }
+    window.draw_overlay_text(mr + 4usize, mc, row1.as_ptr() as str, fg1_r, fg1_g, fg1_b, bg_r, bg_g, bg_b);
+
+    // Row 2: Blast Radius
+    var row2 = String.from_str("│  ");
+    if selected == 2usize { row2.push_str("► BLAST RADIUS:     "); } else { row2.push_str("  BLAST RADIUS:     "); }
+    row2.push_str(int_to_s(explosion_rad).as_ptr() as str);
+    row2.push_str(" px (Gunpowder explosion)│");
+    var fg2_r = unsel_r; var fg2_g = unsel_g; var fg2_b = unsel_b;
+    if selected == 2usize { fg2_r = sel_r; fg2_g = sel_g; fg2_b = sel_b; }
+    window.draw_overlay_text(mr + 5usize, mc, row2.as_ptr() as str, fg2_r, fg2_g, fg2_b, bg_r, bg_g, bg_b);
+
+    window.draw_overlay_text(mr + 6usize, mc, "├────────────────────────────────────────────────┤", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 7usize, mc, "│ ELEMENT REACTIONS:                             │", 255u8, 200u8, 100u8, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 8usize, mc, "│ • Water extinguishes Fire into Smoke/Steam     │", 150u8, 220u8, 255u8, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 9usize, mc, "│ • Fire ignites Oil & detonates Gunpowder       │", 255u8, 140u8, 80u8, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 10usize, mc,"│ • Acid dissolves Sand, Wood & bedrock wall     │", 100u8, 255u8, 120u8, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 11usize, mc,"├────────────────────────────────────────────────┤", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 12usize, mc,"│  [▲/▼] Select   [◄/►] Adjust   [S] Resume      │", foot_r, foot_g, foot_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 13usize, mc,"└────────────────────────────────────────────────┘", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+}
+
+pub fn main() -> i32 {
+    var window = Window.open_autores("Rad Interactive Fluid Dynamics Simulator");
+
+    var width = window.cols;
+    var arena_rows = 23usize;
+    if window.rows > 1usize {
+        arena_rows = window.rows - 1usize;
+    }
+    var height = arena_rows * 2usize;
+
+    var canvas = Canvas.new(width, height);
+    var rng = Rng.new(98765432101234567u64);
+
+    let total_cells = width * height;
+    let grid_type = malloc(total_cells) as *raw var u8;
+    let grid_meta = malloc(total_cells) as *raw var u8;
+
+    // Clear grid
+    var ci = 0usize;
+    while ci < total_cells {
+        grid_type[ci] = ELEM_AIR;
+        grid_meta[ci] = 0u8;
+        ci = ci + 1usize;
+    }
+
+    // Brush State
+    var brush_x = width / 2usize;
+    var brush_y = height / 4usize;
+    var brush_size = 2usize; // radius
+    var cur_elem = ELEM_SAND;
+    var is_painting = false;
+
+    // Simulation Parameters
+    var paused = false;
+    var sim_speed = 1i64; // 1 to 4 steps per frame
+    var acid_potency = 80i64; // percentage
+    var explosion_rad = 12i64;
+
+    // Menu state
+    var show_menu = false;
+    var menu_dirty = true;
+    var selected_item = 0usize;
+    let total_menu_items = 3usize;
+
+    // Frame counter & parity flag to prevent directional bias
+    var frame_count = 0u64;
+
+    draw_hud(window, cur_elem, brush_size, paused);
+
+    var running = true;
+    while running && window.is_open() {
+        let ev_opt = window.poll_event();
+        match ev_opt {
+            Option.Some(ev) => {
+                if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) { // 'q', 'Q'
+                    running = false;
+                    window.close();
+                    break;
+                } else if ev.is_key(115u8) || ev.is_key(83u8) { // 's', 'S': Toggle settings menu
+                    show_menu = !show_menu;
+                    menu_dirty = true;
+                    draw_hud(window, cur_elem, brush_size, show_menu);
+                } else if ev.is_key(27u8) { // ESC: Close menu or quit
+                    if show_menu {
+                        show_menu = false;
+                        draw_hud(window, cur_elem, brush_size, false);
+                    } else {
+                        running = false;
+                        window.close();
+                        break;
+                    }
+                } else if show_menu {
+                    if ev.is_up() {
+                        if selected_item == 0usize { selected_item = total_menu_items - 1usize; }
+                        else { selected_item = selected_item - 1usize; }
+                        menu_dirty = true;
+                    } else if ev.is_down() {
+                        selected_item = (selected_item + 1usize) % total_menu_items;
+                        menu_dirty = true;
+                    } else if ev.is_left() {
+                        if selected_item == 0usize && sim_speed > 1i64 { sim_speed = sim_speed - 1i64; }
+                        else if selected_item == 1usize && acid_potency > 20i64 { acid_potency = acid_potency - 10i64; }
+                        else if selected_item == 2usize && explosion_rad > 4i64 { explosion_rad = explosion_rad - 2i64; }
+                        menu_dirty = true;
+                    } else if ev.is_right() {
+                        if selected_item == 0usize && sim_speed < 4i64 { sim_speed = sim_speed + 1i64; }
+                        else if selected_item == 1usize && acid_potency < 100i64 { acid_potency = acid_potency + 10i64; }
+                        else if selected_item == 2usize && explosion_rad < 24i64 { explosion_rad = explosion_rad + 2i64; }
+                        menu_dirty = true;
+                    }
+                } else {
+                    // Play mode controls
+                    if ev.is_up() || ev.is_key(119u8) || ev.is_key(87u8) { // Up / 'w'
+                        if brush_y > 2usize { brush_y = brush_y - 2usize; }
+                    } else if ev.is_down() || ev.is_key(115u8) || ev.is_key(83u8) { // Down / 's'
+                        if brush_y + 2usize < height - 2usize { brush_y = brush_y + 2usize; }
+                    } else if ev.is_left() || ev.is_key(97u8) || ev.is_key(65u8) { // Left / 'a'
+                        if brush_x > 2usize { brush_x = brush_x - 2usize; }
+                    } else if ev.is_right() || ev.is_key(100u8) || ev.is_key(68u8) { // Right / 'd'
+                        if brush_x + 2usize < width - 2usize { brush_x = brush_x + 2usize; }
+                    } else if ev.is_key(32u8) || ev.is_key(10u8) { // Space / Enter: toggle painting
+                        is_painting = !is_painting;
+                    } else if ev.is_key(49u8) { cur_elem = ELEM_SAND; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(50u8) { cur_elem = ELEM_WATER; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(51u8) { cur_elem = ELEM_FIRE; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(52u8) { cur_elem = ELEM_ACID; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(53u8) { cur_elem = ELEM_OIL; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(54u8) { cur_elem = ELEM_GUNPOWDER; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(55u8) { cur_elem = ELEM_WOOD; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(56u8) { cur_elem = ELEM_WALL; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(57u8) { cur_elem = ELEM_AIR; draw_hud(window, cur_elem, brush_size, paused); }
+                    else if ev.is_key(91u8) || ev.is_key(45u8) { // '[' or '-': decrease brush size
+                        if brush_size > 1usize { brush_size = brush_size - 1usize; draw_hud(window, cur_elem, brush_size, paused); }
+                    } else if ev.is_key(93u8) || ev.is_key(61u8) { // ']' or '=': increase brush size
+                        if brush_size < 8usize { brush_size = brush_size + 1usize; draw_hud(window, cur_elem, brush_size, paused); }
+                    } else if ev.is_key(112u8) || ev.is_key(80u8) { // 'p', 'P': Pause
+                        paused = !paused;
+                        draw_hud(window, cur_elem, brush_size, paused);
+                    } else if ev.is_key(99u8) || ev.is_key(67u8) { // 'c', 'C': Clear
+                        ci = 0usize;
+                        while ci < total_cells {
+                            grid_type[ci] = ELEM_AIR;
+                            grid_meta[ci] = 0u8;
+                            ci = ci + 1usize;
+                        }
+                    }
+                }
+            },
+            Option.None => {},
+            _ => {},
+        }
+        if !running {
+            break;
+        }
+
+        if !window.is_open() {
+            break;
+        }
+
+        // Terminal resize handling
+        if window.check_resize() {
+            let old_w = width;
+            let old_h = height;
+            width = window.cols;
+            arena_rows = 23usize;
+            if window.rows > 1usize {
+                arena_rows = window.rows - 1usize;
+            }
+            height = arena_rows * 2usize;
+            canvas.destroy();
+            canvas = Canvas.new(width, height);
+
+            let new_cells = width * height;
+            let new_type = malloc(new_cells) as *raw var u8;
+            let new_meta = malloc(new_cells) as *raw var u8;
+
+            var r_ci = 0usize;
+            while r_ci < new_cells {
+                new_type[r_ci] = ELEM_AIR;
+                new_meta[r_ci] = 0u8;
+                r_ci = r_ci + 1usize;
+            }
+
+            // Copy old contents
+            var cy = 0usize;
+            while cy < old_h && cy < height {
+                var cx = 0usize;
+                while cx < old_w && cx < width {
+                    new_type[cy * width + cx] = grid_type[cy * old_w + cx];
+                    new_meta[cy * width + cx] = grid_meta[cy * old_w + cx];
+                    cx = cx + 1usize;
+                }
+                cy = cy + 1usize;
+            }
+
+            free(grid_type);
+            free(grid_meta);
+            grid_type = new_type;
+            grid_meta = new_meta;
+
+            if brush_x >= width { brush_x = width - 2usize; }
+            if brush_y >= height { brush_y = height - 2usize; }
+
+            let _ = syscall3(1i64, 1i64, "\x1b[2J\x1b[H" as *raw u8, 7i64);
+            draw_hud(window, cur_elem, brush_size, paused);
+            if show_menu {
+                menu_dirty = true;
+            }
+        }
+
+        if show_menu {
+            if menu_dirty {
+                render_settings_menu(window, selected_item, sim_speed, acid_potency, explosion_rad);
+                menu_dirty = false;
+            }
+            Window.sleep_frame(30u64);
+        } else {
+            // Apply brush painting
+            if is_painting {
+                let br = brush_size as i64;
+                var dy = -br;
+                while dy <= br {
+                    var dx = -br;
+                    while dx <= br {
+                        if (dx * dx) + (dy * dy) <= (br * br) {
+                            let px = (brush_x as i64) + dx;
+                            let py = (brush_y as i64) + dy;
+                            if px >= 1i64 && px < ((width as i64) - 1i64) && py >= 1i64 && py < ((height as i64) - 1i64) {
+                                let idx = ((py as usize) * width) + (px as usize);
+                                if grid_type[idx] != ELEM_WALL || cur_elem == ELEM_WALL || cur_elem == ELEM_AIR {
+                                    grid_type[idx] = cur_elem;
+                                    grid_meta[idx] = rng.range(0i64, 255i64) as u8;
+                                }
+                            }
+                        }
+                        dx = dx + 1i64;
+                    }
+                    dy = dy + 1i64;
+                }
+            }
+
+            // Cellular Automata Simulation Steps
+            if !paused {
+                var step = 0i64;
+                while step < sim_speed {
+                    frame_count = frame_count + 1u64;
+                    let alt_dir = ((frame_count + (step as u64)) % 2u64) == 0u64;
+
+                    // Bottom-up pass for falling solids and liquids
+                    var y = height - 2usize;
+                    while y >= 1usize {
+                        var x_start = 1usize;
+                        var x_end = width - 1usize;
+                        var x_step = 1i64;
+                        if alt_dir {
+                            x_start = width - 2usize;
+                            x_end = 0usize;
+                            x_step = -1i64;
+                        }
+
+                        var x_idx = x_start as i64;
+                        while (x_step > 0i64 && (x_idx as usize) < x_end) || (x_step < 0i64 && (x_idx as usize) > x_end) {
+                            let x = x_idx as usize;
+                            let idx = (y * width) + x;
+                            let elem = grid_type[idx];
+
+                            if elem == ELEM_SAND {
+                                // Sand falls straight down into Air, Water, or Oil
+                                let below_idx = ((y + 1usize) * width) + x;
+                                let below_elem = grid_type[below_idx];
+                                if below_elem == ELEM_AIR || below_elem == ELEM_WATER || below_elem == ELEM_OIL {
+                                    grid_type[idx] = below_elem;
+                                    grid_type[below_idx] = ELEM_SAND;
+                                } else {
+                                    // Diagonal slide down-left or down-right
+                                    let dl_x = clamp_left(x);
+                                    let dr_x = clamp_right(x, width);
+                                    let dl_idx = ((y + 1usize) * width) + dl_x;
+                                    let dr_idx = ((y + 1usize) * width) + dr_x;
+
+                                    let dl_open = (grid_type[dl_idx] == ELEM_AIR || grid_type[dl_idx] == ELEM_WATER || grid_type[dl_idx] == ELEM_OIL);
+                                    let dr_open = (grid_type[dr_idx] == ELEM_AIR || grid_type[dr_idx] == ELEM_WATER || grid_type[dr_idx] == ELEM_OIL);
+
+                                    if dl_open && dr_open {
+                                        let target = pick_random_idx(rng, dl_idx, dr_idx);
+                                        let target_elem = grid_type[target];
+                                        grid_type[idx] = target_elem;
+                                        grid_type[target] = ELEM_SAND;
+                                    } else if dl_open {
+                                        let target_elem = grid_type[dl_idx];
+                                        grid_type[idx] = target_elem;
+                                        grid_type[dl_idx] = ELEM_SAND;
+                                    } else if dr_open {
+                                        let target_elem = grid_type[dr_idx];
+                                        grid_type[idx] = target_elem;
+                                        grid_type[dr_idx] = ELEM_SAND;
+                                    }
+                                }
+                            } else if elem == ELEM_GUNPOWDER {
+                                // Gunpowder falls like sand
+                                let below_idx = ((y + 1usize) * width) + x;
+                                let below_elem = grid_type[below_idx];
+                                if below_elem == ELEM_AIR {
+                                    grid_type[idx] = ELEM_AIR;
+                                    grid_type[below_idx] = ELEM_GUNPOWDER;
+                                } else {
+                                    let dl_x = clamp_left(x);
+                                    let dr_x = clamp_right(x, width);
+                                    let dl_idx = ((y + 1usize) * width) + dl_x;
+                                    let dr_idx = ((y + 1usize) * width) + dr_x;
+                                    if grid_type[dl_idx] == ELEM_AIR && grid_type[dr_idx] == ELEM_AIR {
+                                        let target = pick_random_idx(rng, dl_idx, dr_idx);
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[target] = ELEM_GUNPOWDER;
+                                    } else if grid_type[dl_idx] == ELEM_AIR {
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[dl_idx] = ELEM_GUNPOWDER;
+                                    } else if grid_type[dr_idx] == ELEM_AIR {
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[dr_idx] = ELEM_GUNPOWDER;
+                                    }
+                                }
+                            } else if elem == ELEM_WATER {
+                                // Water falls down, diagonally, and spreads horizontally
+                                let below_idx = ((y + 1usize) * width) + x;
+                                let below_elem = grid_type[below_idx];
+                                if below_elem == ELEM_AIR {
+                                    grid_type[idx] = ELEM_AIR;
+                                    grid_type[below_idx] = ELEM_WATER;
+                                } else if below_elem == ELEM_FIRE {
+                                    grid_type[below_idx] = ELEM_SMOKE;
+                                    grid_type[idx] = ELEM_AIR;
+                                } else {
+                                    let dl_x = clamp_left(x);
+                                    let dr_x = clamp_right(x, width);
+                                    let dl_idx = ((y + 1usize) * width) + dl_x;
+                                    let dr_idx = ((y + 1usize) * width) + dr_x;
+
+                                    if grid_type[dl_idx] == ELEM_AIR && grid_type[dr_idx] == ELEM_AIR {
+                                        let target = pick_random_idx(rng, dl_idx, dr_idx);
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[target] = ELEM_WATER;
+                                    } else if grid_type[dl_idx] == ELEM_AIR {
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[dl_idx] = ELEM_WATER;
+                                    } else if grid_type[dr_idx] == ELEM_AIR {
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[dr_idx] = ELEM_WATER;
+                                    } else {
+                                        let l_x = clamp_left(x);
+                                        let r_x = clamp_right(x, width);
+                                        let l_idx = (y * width) + l_x;
+                                        let r_idx = (y * width) + r_x;
+                                        if grid_type[l_idx] == ELEM_AIR && grid_type[r_idx] == ELEM_AIR {
+                                            let target = pick_random_idx(rng, l_idx, r_idx);
+                                            grid_type[idx] = ELEM_AIR;
+                                            grid_type[target] = ELEM_WATER;
+                                        } else if grid_type[l_idx] == ELEM_AIR {
+                                            grid_type[idx] = ELEM_AIR;
+                                            grid_type[l_idx] = ELEM_WATER;
+                                        } else if grid_type[r_idx] == ELEM_AIR {
+                                            grid_type[idx] = ELEM_AIR;
+                                            grid_type[r_idx] = ELEM_WATER;
+                                        }
+                                    }
+                                }
+                            } else if elem == ELEM_OIL {
+                                // Oil flows down and spreads (floats on water)
+                                let below_idx = ((y + 1usize) * width) + x;
+                                if grid_type[below_idx] == ELEM_AIR {
+                                    grid_type[idx] = ELEM_AIR;
+                                    grid_type[below_idx] = ELEM_OIL;
+                                } else {
+                                    let dl_x = clamp_left(x);
+                                    let dr_x = clamp_right(x, width);
+                                    let dl_idx = ((y + 1usize) * width) + dl_x;
+                                    let dr_idx = ((y + 1usize) * width) + dr_x;
+                                    if grid_type[dl_idx] == ELEM_AIR && grid_type[dr_idx] == ELEM_AIR {
+                                        let target = pick_random_idx(rng, dl_idx, dr_idx);
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[target] = ELEM_OIL;
+                                    } else if grid_type[dl_idx] == ELEM_AIR {
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[dl_idx] = ELEM_OIL;
+                                    } else if grid_type[dr_idx] == ELEM_AIR {
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[dr_idx] = ELEM_OIL;
+                                    } else {
+                                        let l_x = clamp_left(x);
+                                        let r_x = clamp_right(x, width);
+                                        let l_idx = (y * width) + l_x;
+                                        let r_idx = (y * width) + r_x;
+                                        if grid_type[l_idx] == ELEM_AIR && grid_type[r_idx] == ELEM_AIR {
+                                            let target = pick_random_idx(rng, l_idx, r_idx);
+                                            grid_type[idx] = ELEM_AIR;
+                                            grid_type[target] = ELEM_OIL;
+                                        } else if grid_type[l_idx] == ELEM_AIR {
+                                            grid_type[idx] = ELEM_AIR;
+                                            grid_type[l_idx] = ELEM_OIL;
+                                        } else if grid_type[r_idx] == ELEM_AIR {
+                                            grid_type[idx] = ELEM_AIR;
+                                            grid_type[r_idx] = ELEM_OIL;
+                                        }
+                                    }
+                                }
+                            } else if elem == ELEM_ACID {
+                                // Acid dissolves nearby dissolvable material
+                                let below_idx = ((y + 1usize) * width) + x;
+                                let below_elem = grid_type[below_idx];
+                                if below_elem == ELEM_AIR {
+                                    grid_type[idx] = ELEM_AIR;
+                                    grid_type[below_idx] = ELEM_ACID;
+                                } else if below_elem != ELEM_ACID && below_elem != ELEM_WATER {
+                                    if rng.bool_chance(acid_potency as u64) {
+                                        grid_type[below_idx] = ELEM_SMOKE;
+                                        grid_type[idx] = ELEM_AIR;
+                                    }
+                                } else {
+                                    let l_x = clamp_left(x);
+                                    let r_x = clamp_right(x, width);
+                                    let l_idx = (y * width) + l_x;
+                                    let r_idx = (y * width) + r_x;
+                                    if grid_type[l_idx] == ELEM_AIR && grid_type[r_idx] == ELEM_AIR {
+                                        let target = pick_random_idx(rng, l_idx, r_idx);
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[target] = ELEM_ACID;
+                                    } else if grid_type[l_idx] == ELEM_AIR {
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[l_idx] = ELEM_ACID;
+                                    } else if grid_type[r_idx] == ELEM_AIR {
+                                        grid_type[idx] = ELEM_AIR;
+                                        grid_type[r_idx] = ELEM_ACID;
+                                    }
+                                }
+                            }
+
+                            x_idx = x_idx + x_step;
+                        }
+                        y = y - 1usize;
+                    }
+
+                    // Top-down pass for rising gases (Smoke) and Fire
+                    var ty = 1usize;
+                    while ty < height - 1usize {
+                        var tx = 1usize;
+                        while tx < width - 1usize {
+                            let idx = (ty * width) + tx;
+                            let elem = grid_type[idx];
+
+                            if elem == ELEM_FIRE {
+                                var life = grid_meta[idx] as i64;
+                                life = life - 8i64;
+                                if life <= 0i64 {
+                                    grid_type[idx] = ELEM_SMOKE;
+                                    grid_meta[idx] = rng.range(40i64, 90i64) as u8;
+                                } else {
+                                    grid_meta[idx] = life as u8;
+
+                                    let above_y = clamp_above(ty);
+                                    var drift_x = tx;
+                                    if rng.bool_chance(50u64) {
+                                        drift_x = clamp_left(tx);
+                                    } else {
+                                        drift_x = clamp_right(tx, width);
+                                    }
+
+                                    let target = (above_y * width) + drift_x;
+                                    if grid_type[target] == ELEM_AIR {
+                                        grid_type[target] = ELEM_FIRE;
+                                        grid_meta[target] = grid_meta[idx];
+                                        grid_type[idx] = ELEM_AIR;
+                                    }
+
+                                    // Combustion of neighbor fuels
+                                    var ny = (ty as i64) - 1i64;
+                                    while ny <= (ty as i64) + 1i64 {
+                                        var nx = (tx as i64) - 1i64;
+                                        while nx <= (tx as i64) + 1i64 {
+                                            if nx >= 1i64 && nx < ((width as i64) - 1i64) && ny >= 1i64 && ny < ((height as i64) - 1i64) {
+                                                let n_idx = ((ny as usize) * width) + (nx as usize);
+                                                let n_elem = grid_type[n_idx];
+
+                                                if n_elem == ELEM_OIL {
+                                                    grid_type[n_idx] = ELEM_FIRE;
+                                                    grid_meta[n_idx] = 180u8;
+                                                } else if n_elem == ELEM_WOOD {
+                                                    if rng.bool_chance(25u64) {
+                                                        grid_type[n_idx] = ELEM_FIRE;
+                                                        grid_meta[n_idx] = 200u8;
+                                                    }
+                                                } else if n_elem == ELEM_GUNPOWDER {
+                                                    // Detonation
+                                                    let br = explosion_rad;
+                                                    var by = -br;
+                                                    while by <= br {
+                                                        var bx = -br;
+                                                        while bx <= br {
+                                                            if (bx * bx) + (by * by) <= (br * br) {
+                                                                let ex = nx + bx;
+                                                                let ey = ny + by;
+                                                                if ex >= 1i64 && ex < ((width as i64) - 1i64) && ey >= 1i64 && ey < ((height as i64) - 1i64) {
+                                                                    let b_idx = ((ey as usize) * width) + (ex as usize);
+                                                                    if grid_type[b_idx] != ELEM_WALL {
+                                                                        if rng.bool_chance(60u64) {
+                                                                            grid_type[b_idx] = ELEM_FIRE;
+                                                                            grid_meta[b_idx] = rng.range(120i64, 240i64) as u8;
+                                                                        } else {
+                                                                            grid_type[b_idx] = ELEM_SMOKE;
+                                                                            grid_meta[b_idx] = rng.range(60i64, 140i64) as u8;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            bx = bx + 1i64;
+                                                        }
+                                                        by = by + 1i64;
+                                                    }
+                                                }
+                                            }
+                                            nx = nx + 1i64;
+                                        }
+                                        ny = ny + 1i64;
+                                    }
+                                }
+                            } else if elem == ELEM_SMOKE {
+                                var life = grid_meta[idx] as i64;
+                                life = life - 3i64;
+                                if life <= 0i64 {
+                                    grid_type[idx] = ELEM_AIR;
+                                } else {
+                                    grid_meta[idx] = life as u8;
+                                    let above_y = clamp_above(ty);
+                                    var drift_x = tx;
+                                    if rng.bool_chance(50u64) {
+                                        drift_x = clamp_left(tx);
+                                    } else {
+                                        drift_x = clamp_right(tx, width);
+                                    }
+                                    let target = (above_y * width) + drift_x;
+                                    if grid_type[target] == ELEM_AIR {
+                                        grid_type[target] = ELEM_SMOKE;
+                                        grid_meta[target] = grid_meta[idx];
+                                        grid_type[idx] = ELEM_AIR;
+                                    }
+                                }
+                            }
+
+                            tx = tx + 1usize;
+                        }
+                        ty = ty + 1usize;
+                    }
+
+                    step = step + 1i64;
+                }
+            }
+
+            // Render Arena & Particles to Canvas
+            canvas.clear(Color.rgb(10u8, 14u8, 24u8)); // Deep obsidian navy backdrop
+            canvas.draw_rect(0usize, 0usize, width, height, Color.rgb(40u8, 60u8, 100u8)); // Arena border
+
+            var ry = 1usize;
+            while ry < height - 1usize {
+                var rx = 1usize;
+                while rx < width - 1usize {
+                    let idx = (ry * width) + rx;
+                    let elem = grid_type[idx];
+                    let meta = grid_meta[idx];
+
+                    if elem == ELEM_SAND {
+                        let var_g = 180u8 + ((meta % 40u8));
+                        let var_b = 60u8 + ((meta % 30u8));
+                        canvas.set_pixel(rx, ry, Color.rgb(235u8, var_g, var_b));
+                    } else if elem == ELEM_WATER {
+                        let var_b = 200u8 + ((meta % 55u8));
+                        canvas.set_pixel(rx, ry, Color.rgb(40u8, 130u8, var_b));
+                    } else if elem == ELEM_FIRE {
+                        if meta > 160u8 {
+                            canvas.set_pixel(rx, ry, Color.rgb(255u8, 255u8, 180u8));
+                        } else if meta > 80u8 {
+                            canvas.set_pixel(rx, ry, Color.rgb(255u8, 180u8, 30u8));
+                        } else {
+                            canvas.set_pixel(rx, ry, Color.rgb(240u8, 60u8, 20u8));
+                        }
+                    } else if elem == ELEM_SMOKE {
+                        let gray = 100u8 + ((meta % 60u8));
+                        canvas.set_pixel(rx, ry, Color.rgb(gray, gray, gray));
+                    } else if elem == ELEM_ACID {
+                        canvas.set_pixel(rx, ry, Color.rgb(80u8, 255u8, 70u8));
+                    } else if elem == ELEM_OIL {
+                        canvas.set_pixel(rx, ry, Color.rgb(110u8, 70u8, 35u8));
+                    } else if elem == ELEM_GUNPOWDER {
+                        let dark = 55u8 + ((meta % 25u8));
+                        canvas.set_pixel(rx, ry, Color.rgb(dark, dark, dark));
+                    } else if elem == ELEM_WOOD {
+                        canvas.set_pixel(rx, ry, Color.rgb(140u8, 90u8, 50u8));
+                    } else if elem == ELEM_WALL {
+                        canvas.set_pixel(rx, ry, Color.rgb(110u8, 125u8, 150u8));
+                    }
+
+                    rx = rx + 1usize;
+                }
+                ry = ry + 1usize;
+            }
+
+            // Draw Brush Indicator (Crosshair Cursor)
+            let cur_x = brush_bound(brush_x, brush_size);
+            let cur_y = brush_bound(brush_y, brush_size);
+            var brush_col = Color.rgb(255u8, 255u8, 255u8);
+            if is_painting {
+                brush_col = Color.rgb(255u8, 60u8, 60u8);
+            }
+            canvas.draw_rect(cur_x, cur_y, (brush_size * 2usize) + 1usize, (brush_size * 2usize) + 1usize, brush_col);
+
+            // Present canvas starting at terminal row 2 down
+            window.draw_canvas_from(canvas, 2usize);
+            Window.sleep_frame(60u64);
+        }
+    }
+
+    free(grid_type);
+    free(grid_meta);
+    canvas.destroy();
+    window.close();
+
+    println("Fluid dynamics simulation finished successfully!");
+    return 0;
+}

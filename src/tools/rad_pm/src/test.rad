@@ -64,6 +64,20 @@ fn extract_mod_name_from_line(line: str) -> String {
     return name
 }
 
+fn test_is_attr(line: str, attr_name: str) -> bool {
+    let p = line as *raw u8
+    let len = str_len(line)
+    var i = 0usize
+    while i < len && (p[i] == 32u8 || p[i] == 9u8) {
+        i = i + 1usize
+    }
+    if i + 2usize <= len && p[i] == 47u8 && p[i + 1usize] == 47u8 {
+        return false
+    }
+    let sub = (line as usize + i) as str
+    return str_starts_with(sub, attr_name)
+}
+
 fn parse_unit_tests_in_file(fpath: str, var symbols: Vec<String>, var displays: Vec<String>) {
     let content = read_file_str(fpath)
     if content.len() == 0usize {
@@ -97,7 +111,7 @@ fn parse_unit_tests_in_file(fpath: str, var symbols: Vec<String>, var displays: 
             }
         }
 
-        if str_contains(line, "#[test]") {
+        if test_is_attr(line, "#[test]") {
             next_is_test = true
         } else if next_is_test {
             if str_contains(line, "fn ") {

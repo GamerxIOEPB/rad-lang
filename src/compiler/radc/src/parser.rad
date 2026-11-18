@@ -835,6 +835,30 @@ impl Parser {
             self.check_lex_error()
             return 0usize
         }
+        if k == TOK_IF {
+            let cur_l = self.cur_tok_line()
+            let cur_c = self.cur_tok_col()
+            var msg = String.new()
+            msg.push_str("unexpected 'if' in expression: Rad does not support if-expressions; use an 'if' statement to assign to a variable")
+            self.report_error("E0014", msg.as_ptr() as str, cur_l, cur_c)
+            self.advance()
+            let _cond = self.parse_expr(0)
+            if self.peek_kind() == TOK_LBRACE {
+                self.advance()
+                let _then = self.parse_block_stmts()
+                self.expect_tok(TOK_RBRACE, "}")
+            }
+            if self.match_tok(TOK_ELSE) {
+                if self.peek_kind() == TOK_IF {
+                    let _dummy = self.parse_primary()
+                } else if self.peek_kind() == TOK_LBRACE {
+                    self.advance()
+                    let _else = self.parse_block_stmts()
+                    self.expect_tok(TOK_RBRACE, "}")
+                }
+            }
+            return 0usize
+        }
         if k != TOK_EOF {
             let cur_l = self.cur_tok_line()
             let cur_c = self.cur_tok_col()

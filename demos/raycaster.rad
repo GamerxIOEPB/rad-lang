@@ -1,0 +1,902 @@
+// ==============================================================================
+// Rad Graphics Demo 4: 3D TrueColor Raycaster Engine (Wolfenstein / Doom Style)
+// Pure-Rad 2.5D Real-Time DDA Raycaster running at 60 FPS in the terminal.
+// Features: Texture mapping, depth fog lighting, floor/ceiling gradients,
+//           real-time 2D minimap with FOV cone, wall sliding collisions & TUI menu.
+// Controls: [W/S] or [Up/Down] Move, [A/D] Strafe, [Left/Right] Rotate,
+//           [Space] Sprint, [M] Toggle Minimap, [S] Settings Menu, [Q] Quit.
+// ==============================================================================
+
+import gfx;
+
+// Constants & Native Math Primitives
+fn rad_pi() -> f64 { return 3.141592653589793; }
+fn rad_two_pi() -> f64 { return 6.283185307179586; }
+fn rad_half_pi() -> f64 { return 1.5707963267948966; }
+
+fn rad_abs(x: f64) -> f64 {
+    if x < 0.0 { return 0.0 - x; }
+    return x;
+}
+
+fn rad_sqrt(x: f64) -> f64 {
+    if x <= 0.0 { return 0.0; }
+    var guess: f64 = x;
+    var i = 0;
+    while i < 12 {
+        guess = 0.5 * (guess + (x / guess));
+        i = i + 1;
+    }
+    return guess;
+}
+
+fn rad_sin(x_in: f64) -> f64 {
+    var x = x_in;
+    let pi_val = rad_pi();
+    let two_pi_val = rad_two_pi();
+    let half_pi_val = rad_half_pi();
+    while x > pi_val { x = x - two_pi_val; }
+    while x < (0.0 - pi_val) { x = x + two_pi_val; }
+    if x > half_pi_val {
+        x = pi_val - x;
+    } else if x < (0.0 - half_pi_val) {
+        x = (0.0 - pi_val) - x;
+    }
+    let x2 = x * x;
+    let t1 = x;
+    let t3 = (t1 * x2) / 6.0;
+    let t5 = (t3 * x2) / 20.0;
+    let t7 = (t5 * x2) / 42.0;
+    let t9 = (t7 * x2) / 72.0;
+    return ((t1 - t3) + t5) - (t7 - t9);
+}
+
+fn rad_cos(x: f64) -> f64 {
+    return rad_sin(x + rad_half_pi());
+}
+
+fn rad_fract(x: f64) -> f64 {
+    var int_part = (x as i64) as f64;
+    if x < int_part {
+        int_part = int_part - 1.0;
+    }
+    return x - int_part;
+}
+
+fn int_to_s(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0");
+    }
+    var v = val;
+    var is_neg = false;
+    if v < 0i64 {
+        is_neg = true;
+        v = -v;
+    }
+    var rev = String.new();
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8;
+        rev.push_byte(48u8 + digit);
+        v = v / 10i64;
+    }
+    if is_neg {
+        rev.push_byte(45u8);
+    }
+    var res = String.new();
+    var len = rev.len();
+    let p = rev.as_ptr();
+    while len > 0usize {
+        len = len - 1usize;
+        res.push_byte(p[len]);
+    }
+    return res;
+}
+
+fn float_to_s(val: f64, decimals: usize) -> String {
+    let int_part = val as i64;
+    var frac_part = val - (int_part as f64);
+    if frac_part < 0.0 { frac_part = 0.0 - frac_part; }
+    var mult = 1.0;
+    var i = 0usize;
+    while i < decimals {
+        mult = mult * 10.0;
+        i = i + 1usize;
+    }
+    let frac_int = (frac_part * mult) as i64;
+    var res = int_to_s(int_part);
+    res.push_byte(46u8); // '.'
+    var frac_str = int_to_s(frac_int);
+    while frac_str.len() < decimals {
+        var padded = String.from_str("0");
+        padded.push_str(frac_str.as_ptr() as str);
+        frac_str = padded;
+    }
+    res.push_str(frac_str.as_ptr() as str);
+    return res;
+}
+
+// -----------------------------------------------------------------------------
+// Maze Configuration (24 x 24 layout)
+// -----------------------------------------------------------------------------
+const MAP_W: usize = 24usize;
+const MAP_H: usize = 24usize;
+
+// Wall Types
+const WALL_NONE: u8    = 0u8;
+const WALL_CYBER: u8   = 1u8; // Titanium Slate + Glowing Cyan Traces
+const WALL_BRICK: u8   = 2u8; // Red Terracotta Brick with Mortar Seams
+const WALL_STONE: u8   = 3u8; // Granite Block with Emerald Moss
+const WALL_WOOD: u8    = 4u8; // Cedar Wood Panels
+const WALL_HAZARD: u8  = 5u8; // Yellow & Black Caution Hazard Stripes
+
+fn init_maze_map() -> *raw var u8 {
+    let total = MAP_W * MAP_H;
+    let m = malloc(total) as *raw var u8;
+    var i = 0usize;
+    while i < total {
+        m[i] = WALL_NONE;
+        i = i + 1usize;
+    }
+
+    // Outer perimeter: Cyber titanium
+    var x = 0usize;
+    while x < MAP_W {
+        m[x] = WALL_CYBER;
+        m[((MAP_H - 1usize) * MAP_W) + x] = WALL_CYBER;
+        x = x + 1usize;
+    }
+    var y = 0usize;
+    while y < MAP_H {
+        m[y * MAP_W] = WALL_CYBER;
+        m[(y * MAP_W) + (MAP_W - 1usize)] = WALL_CYBER;
+        y = y + 1usize;
+    }
+
+    // Central Courtyard Pillars (Hazard Caution)
+    m[(10usize * MAP_W) + 10usize] = WALL_HAZARD;
+    m[(10usize * MAP_W) + 13usize] = WALL_HAZARD;
+    m[(13usize * MAP_W) + 10usize] = WALL_HAZARD;
+    m[(13usize * MAP_W) + 13usize] = WALL_HAZARD;
+
+    // West Sector: Red Brick Corridors
+    y = 2usize;
+    while y <= 8usize {
+        m[(y * MAP_W) + 5usize] = WALL_BRICK;
+        y = y + 1usize;
+    }
+    x = 2usize;
+    while x <= 5usize {
+        m[(5usize * MAP_W) + x] = WALL_BRICK;
+        x = x + 1usize;
+    }
+    m[(3usize * MAP_W) + 3usize] = WALL_BRICK;
+
+    // North Sector: Mossy Stone Hallway
+    x = 8usize;
+    while x <= 18usize {
+        if x != 12usize && x != 13usize {
+            m[(4usize * MAP_W) + x] = WALL_STONE;
+        }
+        x = x + 1usize;
+    }
+    y = 2usize;
+    while y <= 6usize {
+        m[(y * MAP_W) + 8usize] = WALL_STONE;
+        m[(y * MAP_W) + 18usize] = WALL_STONE;
+        y = y + 1usize;
+    }
+
+    // East Sector: Wood Panel Archives
+    y = 7usize;
+    while y <= 16usize {
+        if y != 11usize && y != 12usize {
+            m[(y * MAP_W) + 19usize] = WALL_WOOD;
+        }
+        y = y + 1usize;
+    }
+    x = 15usize;
+    while x <= 21usize {
+        if x != 18usize {
+            m[(9usize * MAP_W) + x] = WALL_WOOD;
+            m[(14usize * MAP_W) + x] = WALL_WOOD;
+        }
+        x = x + 1usize;
+    }
+
+    // South Sector: Tech Control Rooms (Cyber Titanium)
+    x = 4usize;
+    while x <= 16usize {
+        if x != 9usize && x != 10usize {
+            m[(17usize * MAP_W) + x] = WALL_CYBER;
+        }
+        x = x + 1usize;
+    }
+    y = 17usize;
+    while y <= 21usize {
+        m[(y * MAP_W) + 4usize] = WALL_CYBER;
+        m[(y * MAP_W) + 16usize] = WALL_CYBER;
+        y = y + 1usize;
+    }
+    m[(19usize * MAP_W) + 10usize] = WALL_HAZARD;
+
+    return m;
+}
+
+// -----------------------------------------------------------------------------
+// Texture Atlas (5 textures x 16 x 16 RGB pixels)
+// -----------------------------------------------------------------------------
+const TEX_SIZE: usize = 16usize;
+const NUM_TEX: usize = 5usize;
+
+fn init_texture_atlas() -> *raw var u8 {
+    // 5 textures * 16 * 16 * 3 bytes (RGB)
+    let total_bytes = NUM_TEX * TEX_SIZE * TEX_SIZE * 3usize;
+    let atlas = malloc(total_bytes) as *raw var u8;
+
+    var tex_id = 0usize;
+    while tex_id < NUM_TEX {
+        var ty = 0usize;
+        while ty < TEX_SIZE {
+            var tx = 0usize;
+            while tx < TEX_SIZE {
+                let p_idx = ((tex_id * TEX_SIZE * TEX_SIZE) + (ty * TEX_SIZE) + tx) * 3usize;
+                var r = 0u8;
+                var g = 0u8;
+                var b = 0u8;
+
+                if tex_id == 0usize {
+                    // Texture 1: Cyber Titanium Slate with Neon Cyan Circuit Traces
+                    r = 26u8; g = 32u8; b = 44u8; // Dark slate
+                    if tx == 0usize || tx == 15usize || ty == 0usize || ty == 15usize {
+                        r = 65u8; g = 80u8; b = 105u8; // Titanium edge bevel
+                    } else if ty == 7usize || tx == 8usize {
+                        r = 20u8; g = 220u8; b = 255u8; // Glowing neon cyan circuit line
+                    } else if (tx >= 6usize && tx <= 9usize) && (ty >= 5usize && ty <= 8usize) {
+                        r = 180u8; g = 250u8; b = 255u8; // Glowing center microprocessor
+                    }
+                } else if tex_id == 1usize {
+                    // Texture 2: Terracotta Red Brick with Mortar Seams
+                    let is_horiz_mortar = (ty == 0usize || ty == 7usize || ty == 15usize);
+                    var is_vert_mortar = false;
+                    if ty < 7usize {
+                        if tx == 0usize || tx == 15usize { is_vert_mortar = true; }
+                    } else if ty > 7usize && ty < 15usize {
+                        if tx == 7usize || tx == 8usize { is_vert_mortar = true; }
+                    }
+                    if is_horiz_mortar || is_vert_mortar {
+                        r = 95u8; g = 90u8; b = 85u8; // Cement mortar
+                    } else {
+                        // Brick texture variation
+                        let grain = ((tx * 7usize + ty * 13usize) % 25usize) as u8;
+                        r = 180u8 + grain;
+                        g = 55u8 + (grain / 2u8);
+                        b = 40u8;
+                    }
+                } else if tex_id == 2usize {
+                    // Texture 3: Granite Stone Block with Emerald Moss
+                    let is_block_border = (tx == 0usize || tx == 15usize || ty == 0usize || ty == 15usize);
+                    if is_block_border {
+                        r = 50u8; g = 55u8; b = 60u8; // Dark grout
+                    } else {
+                        let is_moss = (ty >= 9usize && ((tx + ty) % 3usize == 0usize || tx % 4usize == 0usize));
+                        if is_moss {
+                            r = 45u8; g = 150u8; b = 60u8; // Emerald moss
+                        } else {
+                            let stone_var = ((tx * 11usize + ty * 17usize) % 30usize) as u8;
+                            r = 115u8 + stone_var;
+                            g = 120u8 + stone_var;
+                            b = 130u8 + stone_var;
+                        }
+                    }
+                } else if tex_id == 3usize {
+                    // Texture 4: Cedar Wood Planks
+                    let is_seam = (tx == 0usize || tx == 5usize || tx == 10usize || tx == 15usize);
+                    if is_seam {
+                        r = 60u8; g = 38u8; b = 18u8; // Dark plank seam
+                    } else {
+                        let grain = ((tx * 3usize + ty * 9usize) % 20usize) as u8;
+                        r = 145u8 + grain;
+                        g = 95u8 + (grain / 2u8);
+                        b = 50u8;
+                    }
+                } else if tex_id == 4usize {
+                    // Texture 5: Hazard Caution Stripes (Yellow & Black)
+                    if (tx + ty) % 6usize < 3usize {
+                        r = 245u8; g = 215u8; b = 25u8; // Hazard Yellow
+                    } else {
+                        r = 25u8; g = 25u8; b = 28u8;   // Carbon Black
+                    }
+                }
+
+                atlas[p_idx] = r;
+                atlas[p_idx + 1usize] = g;
+                atlas[p_idx + 2usize] = b;
+
+                tx = tx + 1usize;
+            }
+            ty = ty + 1usize;
+        }
+        tex_id = tex_id + 1usize;
+    }
+
+    return atlas;
+}
+
+// -----------------------------------------------------------------------------
+// Engine Settings State
+// -----------------------------------------------------------------------------
+struct EngineSettings {
+    pub fov_deg: i64,      // 45 to 90 degrees
+    pub fog_dist: f64,     // 6.0 to 20.0 meters
+    pub speed_level: i64,  // 0: Slow (0.05), 1: Normal (0.08), 2: Fast (0.12)
+    pub show_minimap: bool,
+}
+
+impl EngineSettings {
+    pub fn default() -> EngineSettings {
+        return EngineSettings {
+            fov_deg: 66i64,
+            fog_dist: 13.0,
+            speed_level: 1i64,
+            show_minimap: true,
+        };
+    }
+
+    pub fn get_fov_rad(self) -> f64 {
+        return (self.fov_deg as f64) * (rad_pi() / 180.0);
+    }
+
+    pub fn get_move_speed(self) -> f64 {
+        if self.speed_level == 0i64 { return 0.05; }
+        if self.speed_level == 2i64 { return 0.12; }
+        return 0.08;
+    }
+
+    pub fn speed_name(self) -> str {
+        if self.speed_level == 0i64 { return "Slow (0.05)"; }
+        if self.speed_level == 2i64 { return "Fast (0.12)"; }
+        return "Normal (0.08)";
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Player Collision & Movement
+// -----------------------------------------------------------------------------
+fn is_maze_wall(map: *raw var u8, gx: i32, gy: i32) -> bool {
+    if gx < 0 || gx >= (MAP_W as i32) || gy < 0 || gy >= (MAP_H as i32) {
+        return true;
+    }
+    let cell = map[(gy as usize) * MAP_W + (gx as usize)];
+    return cell > 0u8;
+}
+
+fn apply_movement(
+    map: *raw var u8,
+    var pos_x: f64,
+    var pos_y: f64,
+    angle: f64,
+    forward: f64,
+    strafe: f64
+) -> f64 {
+    let forward_dx = rad_cos(angle) * forward;
+    let forward_dy = rad_sin(angle) * forward;
+    let strafe_dx = rad_cos(angle + rad_half_pi()) * strafe;
+    let strafe_dy = rad_sin(angle + rad_half_pi()) * strafe;
+
+    let dx = forward_dx + strafe_dx;
+    let dy = forward_dy + strafe_dy;
+
+    let margin = 0.25;
+
+    // Check X slide
+    var check_x = pos_x + dx;
+    if dx > 0.0 { check_x = check_x + margin; } else { check_x = check_x - margin; }
+    if !is_maze_wall(map, check_x as i32, pos_y as i32) {
+        pos_x = pos_x + dx;
+    }
+
+    // Check Y slide
+    var check_y = pos_y + dy;
+    if dy > 0.0 { check_y = check_y + margin; } else { check_y = check_y - margin; }
+    if !is_maze_wall(map, pos_x as i32, check_y as i32) {
+        pos_y = pos_y + dy;
+    }
+
+    return pos_x;
+}
+
+// -----------------------------------------------------------------------------
+// Main Entry Point
+// -----------------------------------------------------------------------------
+pub fn main() -> i32 {
+    var window = Window.open_autores("Rad 3D Raycaster Engine");
+    let term_w = window.width;
+    let term_h = window.height;
+
+    // Ensure canvas matches terminal width and height
+    let canvas_w = term_w;
+    let canvas_h = (term_h - 2usize) * 2usize;
+    var canvas = Canvas.new(canvas_w, canvas_h);
+
+    let map = init_maze_map();
+    let tex_atlas = init_texture_atlas();
+    var settings = EngineSettings.default();
+
+    // Player initial state
+    var pos_x: f64 = 3.5;
+    var pos_y: f64 = 3.5;
+    var angle: f64 = 0.0; // Facing east
+    let rot_speed: f64 = 0.055;
+
+    var in_menu = false;
+    var menu_selected = 0i64; // 0: FOV, 1: Fog, 2: Speed, 3: Minimap, 4: Resume, 5: Quit
+
+    // Frame timing
+    var frame_count = 0u64;
+
+    var running = true;
+    while running && window.is_open() {
+        frame_count = frame_count + 1u64;
+
+        // Process Input Events
+        var moved_forward: f64 = 0.0;
+        var moved_strafe: f64 = 0.0;
+        var rotated: f64 = 0.0;
+        var sprint_mult: f64 = 1.0;
+
+        var has_more_events = true;
+        while has_more_events {
+            let ev_opt = window.poll_event();
+            match ev_opt {
+                Option.Some(ev) => {
+                    if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) {
+                        running = false;
+                        window.close();
+                        break;
+                    }
+
+                    if in_menu {
+                        if ev.is_up() {
+                            menu_selected = menu_selected - 1i64;
+                            if menu_selected < 0i64 { menu_selected = 5i64; }
+                        } else if ev.is_down() {
+                            menu_selected = menu_selected + 1i64;
+                            if menu_selected > 5i64 { menu_selected = 0i64; }
+                        } else if ev.is_left() {
+                            if menu_selected == 0i64 {
+                                if settings.fov_deg > 45i64 { settings.fov_deg = settings.fov_deg - 5i64; }
+                            } else if menu_selected == 1i64 {
+                                if settings.fog_dist > 6.0 { settings.fog_dist = settings.fog_dist - 1.0; }
+                            } else if menu_selected == 2i64 {
+                                settings.speed_level = settings.speed_level - 1i64;
+                                if settings.speed_level < 0i64 { settings.speed_level = 2i64; }
+                            } else if menu_selected == 3i64 {
+                                settings.show_minimap = !settings.show_minimap;
+                            }
+                        } else if ev.is_right() {
+                            if menu_selected == 0i64 {
+                                if settings.fov_deg < 90i64 { settings.fov_deg = settings.fov_deg + 5i64; }
+                            } else if menu_selected == 1i64 {
+                                if settings.fog_dist < 20.0 { settings.fog_dist = settings.fog_dist + 1.0; }
+                            } else if menu_selected == 2i64 {
+                                settings.speed_level = settings.speed_level + 1i64;
+                                if settings.speed_level > 2i64 { settings.speed_level = 0i64; }
+                            } else if menu_selected == 3i64 {
+                                settings.show_minimap = !settings.show_minimap;
+                            }
+                        } else if ev.is_key(10u8) || ev.is_key(13u8) { // Enter
+                            if menu_selected == 4i64 {
+                                in_menu = false;
+                            } else if menu_selected == 5i64 {
+                                running = false;
+                                window.close();
+                                break;
+                            } else if menu_selected == 3i64 {
+                                settings.show_minimap = !settings.show_minimap;
+                            }
+                        } else if ev.is_key(112u8) || ev.is_key(80u8) || ev.is_key(115u8) || ev.is_key(83u8) || ev.is_key(27u8) { // 'p', 's', Esc
+                            in_menu = false;
+                        }
+                    } else {
+                        let spd = settings.get_move_speed();
+                        if ev.is_key(119u8) || ev.is_key(87u8) || ev.is_up() { // 'w', 'W', Up
+                            moved_forward = moved_forward + spd;
+                        } else if ev.is_key(115u8) || ev.is_key(83u8) || ev.is_down() { // 's', 'S', Down
+                            moved_forward = moved_forward - spd;
+                        } else if ev.is_key(97u8) || ev.is_key(65u8) { // 'a', 'A' (strafe left)
+                            moved_strafe = moved_strafe - spd;
+                        } else if ev.is_key(100u8) || ev.is_key(68u8) { // 'd', 'D' (strafe right)
+                            moved_strafe = moved_strafe + spd;
+                        } else if ev.is_left() {
+                            rotated = rotated - rot_speed;
+                        } else if ev.is_right() {
+                            rotated = rotated + rot_speed;
+                        } else if ev.is_key(32u8) { // Space (Sprint boost)
+                            sprint_mult = 1.6;
+                        } else if ev.is_key(109u8) || ev.is_key(77u8) { // 'm', 'M' (Toggle minimap)
+                            settings.show_minimap = !settings.show_minimap;
+                        } else if ev.is_key(112u8) || ev.is_key(80u8) || ev.is_key(111u8) || ev.is_key(79u8) { // 'p', 'P', 'o', 'O'
+                            in_menu = true;
+                            menu_selected = 0i64;
+                        }
+                    }
+                },
+                Option.None => {
+                    has_more_events = false;
+                }
+            }
+        }
+
+        if !running || !window.is_open() {
+            break;
+        }
+
+        // Apply Player Physics
+        if !in_menu {
+            if rad_abs(rotated) > 0.0001 {
+                angle = angle + rotated;
+                let two_pi_val = rad_two_pi();
+                while angle >= two_pi_val { angle = angle - two_pi_val; }
+                while angle < 0.0 { angle = angle + two_pi_val; }
+            }
+
+            if rad_abs(moved_forward) > 0.0001 || rad_abs(moved_strafe) > 0.0001 {
+                let forward_dx = rad_cos(angle) * (moved_forward * sprint_mult);
+                let forward_dy = rad_sin(angle) * (moved_forward * sprint_mult);
+                let strafe_dx = rad_cos(angle + rad_half_pi()) * (moved_strafe * sprint_mult);
+                let strafe_dy = rad_sin(angle + rad_half_pi()) * (moved_strafe * sprint_mult);
+
+                let dx = forward_dx + strafe_dx;
+                let dy = forward_dy + strafe_dy;
+                let margin = 0.22;
+
+                var check_x = pos_x + dx;
+                if dx > 0.0 { check_x = check_x + margin; } else { check_x = check_x - margin; }
+                if !is_maze_wall(map, check_x as i32, pos_y as i32) {
+                    pos_x = pos_x + dx;
+                }
+
+                var check_y = pos_y + dy;
+                if dy > 0.0 { check_y = check_y + margin; } else { check_y = check_y - margin; }
+                if !is_maze_wall(map, pos_x as i32, check_y as i32) {
+                    pos_y = pos_y + dy;
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Render 3D DDA Raycaster Scene
+        // ---------------------------------------------------------------------
+        let fov = settings.get_fov_rad();
+        let half_fov = fov * 0.5;
+        let horizon = canvas_h / 2usize;
+        let fog_max = settings.fog_dist;
+
+        // Render each vertical screen column
+        var col = 0usize;
+        while col < canvas_w {
+            let col_ratio = (col as f64) / (canvas_w as f64);
+            let ray_angle = (angle - half_fov) + (col_ratio * fov);
+
+            let ray_dir_x = rad_cos(ray_angle);
+            let ray_dir_y = rad_sin(ray_angle);
+
+            // DDA Setup
+            var map_x = pos_x as i32;
+            var map_y = pos_y as i32;
+
+            var delta_dist_x = 1000000.0;
+            if rad_abs(ray_dir_x) > 0.00001 {
+                delta_dist_x = rad_abs(1.0 / ray_dir_x);
+            }
+            var delta_dist_y = 1000000.0;
+            if rad_abs(ray_dir_y) > 0.00001 {
+                delta_dist_y = rad_abs(1.0 / ray_dir_y);
+            }
+
+            var step_x = 0;
+            var side_dist_x: f64 = 0.0;
+            if ray_dir_x < 0.0 {
+                step_x = 0 - 1;
+                side_dist_x = (pos_x - (map_x as f64)) * delta_dist_x;
+            } else {
+                step_x = 1;
+                side_dist_x = (((map_x as f64) + 1.0) - pos_x) * delta_dist_x;
+            }
+
+            var step_y = 0;
+            var side_dist_y: f64 = 0.0;
+            if ray_dir_y < 0.0 {
+                step_y = 0 - 1;
+                side_dist_y = (pos_y - (map_y as f64)) * delta_dist_y;
+            } else {
+                step_y = 1;
+                side_dist_y = (((map_y as f64) + 1.0) - pos_y) * delta_dist_y;
+            }
+
+            // Perform DDA
+            var hit = false;
+            var side = 0; // 0 = NS, 1 = EW
+            var hit_type = 1usize;
+            var dist_traveled = 0;
+
+            while !hit && dist_traveled < 28 {
+                if side_dist_x < side_dist_y {
+                    side_dist_x = side_dist_x + delta_dist_x;
+                    map_x = map_x + step_x;
+                    side = 0;
+                } else {
+                    side_dist_y = side_dist_y + delta_dist_y;
+                    map_y = map_y + step_y;
+                    side = 1;
+                }
+
+                if map_x >= 0 && map_x < (MAP_W as i32) && map_y >= 0 && map_y < (MAP_H as i32) {
+                    let cell = map[(map_y as usize) * MAP_W + (map_x as usize)];
+                    if cell > 0u8 {
+                        hit = true;
+                        hit_type = cell as usize;
+                    }
+                } else {
+                    hit = true;
+                    hit_type = 1usize;
+                }
+                dist_traveled = dist_traveled + 1;
+            }
+
+            // Perpendicular Wall Distance (correcting fisheye)
+            var perp_dist: f64 = 1.0;
+            if side == 0 {
+                perp_dist = ((map_x as f64) - pos_x + ((1.0 - (step_x as f64)) * 0.5)) / ray_dir_x;
+            } else {
+                perp_dist = ((map_y as f64) - pos_y + ((1.0 - (step_y as f64)) * 0.5)) / ray_dir_y;
+            }
+            if perp_dist < 0.12 { perp_dist = 0.12; }
+
+            // Fisheye correction factor
+            let corrected_dist = perp_dist * rad_cos(ray_angle - angle);
+
+            // Wall height on canvas
+            let line_height_f = ((canvas_h as f64) * 0.95) / corrected_dist;
+            let line_height = line_height_f as i64;
+
+            let draw_start = ((canvas_h as i64) - line_height) / 2i64;
+            let draw_end = draw_start + line_height;
+
+            // Texture X coordinate calculation
+            var wall_x: f64 = 0.0;
+            if side == 0 {
+                wall_x = pos_y + (perp_dist * ray_dir_y);
+            } else {
+                wall_x = pos_x + (perp_dist * ray_dir_x);
+            }
+            wall_x = rad_fract(wall_x);
+
+            var tex_x = (wall_x * 16.0) as usize;
+            if tex_x >= 16usize { tex_x = 15usize; }
+            if (side == 0 && ray_dir_x > 0.0) || (side == 1 && ray_dir_y < 0.0) {
+                tex_x = 15usize - tex_x;
+            }
+
+            // Distance Fog & Shading
+            var fog_factor = 1.0 - (perp_dist / fog_max);
+            if fog_factor < 0.0 { fog_factor = 0.0; }
+            if fog_factor > 1.0 { fog_factor = 1.0; }
+
+            // Directional Wall Shadow: EW walls are 25% darker
+            if side == 1 {
+                fog_factor = fog_factor * 0.75;
+            }
+
+            let tex_offset = (hit_type - 1usize) * TEX_SIZE * TEX_SIZE;
+
+            // Draw Column Pixels
+            var y = 0usize;
+            while y < canvas_h {
+                let yi = y as i64;
+                if yi < draw_start {
+                    // Ceiling: Cosmic midnight gradient
+                    let ceil_ratio = (y as f64) / (horizon as f64);
+                    let cr = (14.0 + (ceil_ratio * 14.0)) as u8;
+                    let cg = (18.0 + (ceil_ratio * 16.0)) as u8;
+                    let cb = (32.0 + (ceil_ratio * 16.0)) as u8;
+                    canvas.set_pixel(col, y, Color.rgb(cr, cg, cb));
+                } else if yi <= draw_end {
+                    // Wall Texture Pixel
+                    var tex_y = (((yi - draw_start) * 16i64) / line_height) as usize;
+                    if tex_y >= 16usize { tex_y = 15usize; }
+
+                    let p_idx = (tex_offset + (tex_y * TEX_SIZE) + tex_x) * 3usize;
+                    let base_r = tex_atlas[p_idx] as f64;
+                    let base_g = tex_atlas[p_idx + 1usize] as f64;
+                    let base_b = tex_atlas[p_idx + 2usize] as f64;
+
+                    // Blend with deep obsidian fog (12, 16, 26)
+                    let final_r = ((base_r * fog_factor) + (12.0 * (1.0 - fog_factor))) as u8;
+                    let final_g = ((base_g * fog_factor) + (16.0 * (1.0 - fog_factor))) as u8;
+                    let final_b = ((base_b * fog_factor) + (26.0 * (1.0 - fog_factor))) as u8;
+
+                    canvas.set_pixel(col, y, Color.rgb(final_r, final_g, final_b));
+                } else {
+                    // Floor: Tiled stone pavement gradient
+                    let floor_dist = ((canvas_h as f64) * 0.5) / (((y - horizon) as f64) + 0.001);
+                    var floor_fog = 1.0 - (floor_dist / fog_max);
+                    if floor_fog < 0.0 { floor_fog = 0.0; }
+                    if floor_fog > 1.0 { floor_fog = 1.0; }
+
+                    let fr = (18.0 + (floor_fog * 18.0)) as u8;
+                    let fg = (22.0 + (floor_fog * 20.0)) as u8;
+                    let fb = (32.0 + (floor_fog * 22.0)) as u8;
+                    canvas.set_pixel(col, y, Color.rgb(fr, fg, fb));
+                }
+
+                y = y + 1usize;
+            }
+
+            col = col + 1usize;
+        }
+
+        // ---------------------------------------------------------------------
+        // Render 2D Minimap Overlay (Top-Right Corner)
+        // ---------------------------------------------------------------------
+        if settings.show_minimap && canvas_w >= 80usize && canvas_h >= 40usize {
+            let map_scale = 2usize; // 2x2 pixels per cell
+            let mm_w = MAP_W * map_scale;
+            let mm_h = MAP_H * map_scale;
+            let mm_x = canvas_w - mm_w - 2usize;
+            let mm_y = 2usize;
+
+            // Minimap border & background
+            canvas.fill_rect(mm_x, mm_y, mm_w, mm_h, Color.rgb(10u8, 14u8, 22u8));
+            canvas.draw_rect(mm_x, mm_y, mm_w, mm_h, Color.rgb(65u8, 90u8, 125u8));
+
+            // Draw maze walls
+            var my = 0usize;
+            while my < MAP_H {
+                var mx = 0usize;
+                while mx < MAP_W {
+                    let cell = map[(my * MAP_W) + mx];
+                    if cell > 0u8 {
+                        var wall_c = Color.rgb(80u8, 90u8, 110u8);
+                        if cell == WALL_CYBER {
+                            wall_c = Color.rgb(20u8, 180u8, 230u8); // Cyan
+                        } else if cell == WALL_BRICK {
+                            wall_c = Color.rgb(200u8, 65u8, 45u8);  // Red
+                        } else if cell == WALL_STONE {
+                            wall_c = Color.rgb(55u8, 170u8, 75u8);  // Mossy Green
+                        } else if cell == WALL_WOOD {
+                            wall_c = Color.rgb(160u8, 105u8, 55u8); // Cedar
+                        } else if cell == WALL_HAZARD {
+                            wall_c = Color.rgb(240u8, 210u8, 30u8); // Yellow
+                        }
+                        canvas.fill_rect(mm_x + (mx * map_scale), mm_y + (my * map_scale), map_scale, map_scale, wall_c);
+                    }
+                    mx = mx + 1usize;
+                }
+                my = my + 1usize;
+            }
+
+            // Draw player position & FOV cone
+            let p_pixel_x = mm_x + ((pos_x * (map_scale as f64)) as usize);
+            let p_pixel_y = mm_y + ((pos_y * (map_scale as f64)) as usize);
+
+            // Draw 5 FOV rays on minimap
+            var ri = 0i64;
+            while ri < 5i64 {
+                let ray_frac = (ri as f64) / 4.0;
+                let c_ray_angle = (angle - half_fov) + (ray_frac * fov);
+                let ray_len = 5.0 * (map_scale as f64);
+                let end_rx = (p_pixel_x as f64) + (rad_cos(c_ray_angle) * ray_len);
+                let end_ry = (p_pixel_y as f64) + (rad_sin(c_ray_angle) * ray_len);
+                canvas.draw_line(p_pixel_x as i64, p_pixel_y as i64, end_rx as i64, end_ry as i64, Color.rgb(90u8, 190u8, 255u8));
+                ri = ri + 1i64;
+            }
+
+            // Draw player beacon dot
+            canvas.fill_rect(p_pixel_x - 1usize, p_pixel_y - 1usize, 3usize, 3usize, Color.rgb(120u8, 255u8, 120u8));
+        }
+
+        // ---------------------------------------------------------------------
+        // Render Settings Modal Overlay
+        // ---------------------------------------------------------------------
+        if in_menu {
+            let menu_w = 46usize;
+            let menu_h = 24usize;
+            let menu_x = (canvas_w - menu_w) / 2usize;
+            let menu_y = (canvas_h - menu_h) / 2usize;
+
+            // Semi-transparent dark slate dialog with cyan border
+            canvas.fill_rect(menu_x, menu_y, menu_w, menu_h, Color.rgb(14u8, 18u8, 28u8));
+            canvas.draw_rect(menu_x, menu_y, menu_w, menu_h, Color.rgb(0u8, 210u8, 255u8));
+            canvas.draw_rect(menu_x + 1usize, menu_y + 1usize, menu_w - 2usize, menu_h - 2usize, Color.rgb(30u8, 60u8, 90u8));
+
+            // Dialog Header Bar
+            canvas.fill_rect(menu_x + 2usize, menu_y + 2usize, menu_w - 4usize, 3usize, Color.rgb(20u8, 45u8, 75u8));
+            canvas.draw_text(menu_x + 6usize, menu_y + 3usize, "RAD 3D ENGINE SETTINGS", Color.rgb(0u8, 240u8, 255u8));
+
+            // Option 0: Field of View
+            var fov_col = Color.rgb(180u8, 190u8, 205u8);
+            if menu_selected == 0i64 { fov_col = Color.rgb(255u8, 240u8, 60u8); }
+            var fov_str = String.from_str("1. FOV Angle:      < ");
+            fov_str.push_str(int_to_s(settings.fov_deg).as_ptr() as str);
+            fov_str.push_str(" deg >");
+            canvas.draw_text(menu_x + 4usize, menu_y + 7usize, fov_str.as_ptr() as str, fov_col);
+
+            // Option 1: Fog Distance
+            var fog_col = Color.rgb(180u8, 190u8, 205u8);
+            if menu_selected == 1i64 { fog_col = Color.rgb(255u8, 240u8, 60u8); }
+            var fog_str = String.from_str("2. Fog Distance:   < ");
+            fog_str.push_str(float_to_s(settings.fog_dist, 1usize).as_ptr() as str);
+            fog_str.push_str(" m >");
+            canvas.draw_text(menu_x + 4usize, menu_y + 10usize, fog_str.as_ptr() as str, fog_col);
+
+            // Option 2: Movement Speed
+            var spd_col = Color.rgb(180u8, 190u8, 205u8);
+            if menu_selected == 2i64 { spd_col = Color.rgb(255u8, 240u8, 60u8); }
+            var spd_str = String.from_str("3. Walk Speed:     < ");
+            spd_str.push_str(settings.speed_name());
+            spd_str.push_str(" >");
+            canvas.draw_text(menu_x + 4usize, menu_y + 13usize, spd_str.as_ptr() as str, spd_col);
+
+            // Option 3: Minimap Toggle
+            var map_col = Color.rgb(180u8, 190u8, 205u8);
+            if menu_selected == 3i64 { map_col = Color.rgb(255u8, 240u8, 60u8); }
+            var map_str = String.from_str("4. Minimap Overlay: [ ");
+            if settings.show_minimap { map_str.push_str("ENABLED "); } else { map_str.push_str("DISABLED"); }
+            map_str.push_str(" ]");
+            canvas.draw_text(menu_x + 4usize, menu_y + 16usize, map_str.as_ptr() as str, map_col);
+
+            // Option 4: Resume
+            var res_col = Color.rgb(140u8, 150u8, 170u8);
+            if menu_selected == 4i64 { res_col = Color.rgb(80u8, 255u8, 120u8); }
+            canvas.draw_text(menu_x + 6usize, menu_y + 19usize, "[ RESUME SIMULATION ]", res_col);
+
+            // Option 5: Exit
+            var exit_col = Color.rgb(140u8, 150u8, 170u8);
+            if menu_selected == 5i64 { exit_col = Color.rgb(255u8, 80u8, 80u8); }
+            canvas.draw_text(menu_x + 6usize, menu_y + 21usize, "[ EXIT TO TERMINAL ]", exit_col);
+        }
+
+        // ---------------------------------------------------------------------
+        // Render Row 1 Dedicated HUD (Zero-Flicker ANSI Status Line)
+        // ---------------------------------------------------------------------
+        var hud = String.new();
+        hud.push_str("\x1b[1;1H\x1b[2K");
+        hud.push_str("\x1b[1;44;97m RAD 3D ENGINE \x1b[0m ");
+        hud.push_str("\x1b[1;36mPOS:\x1b[0m (");
+        hud.push_str(float_to_s(pos_x, 1usize).as_ptr() as str);
+        hud.push_str(", ");
+        hud.push_str(float_to_s(pos_y, 1usize).as_ptr() as str);
+        hud.push_str(") ");
+
+        let deg = ((angle * 180.0) / rad_pi()) as i64;
+        hud.push_str("\x1b[1;33mDIR:\x1b[0m ");
+        hud.push_str(int_to_s(deg).as_ptr() as str);
+        hud.push_str("° ");
+
+        hud.push_str("\x1b[1;32mFOV:\x1b[0m ");
+        hud.push_str(int_to_s(settings.fov_deg).as_ptr() as str);
+        hud.push_str("° ");
+
+        hud.push_str("\x1b[1;35mFOG:\x1b[0m ");
+        hud.push_str(float_to_s(settings.fog_dist, 1usize).as_ptr() as str);
+        hud.push_str("m ");
+
+        hud.push_str("\x1b[90m| [WASD] Move [←/→] Look [Space] Boost [M] Map [P] Settings [Q] Quit\x1b[0m");
+
+        let _ = syscall3(1i64, 1i64, hud.as_ptr() as *raw u8, hud.len() as i64);
+
+        // Present Canvas starting at terminal row 2 down
+        window.draw_canvas_from(canvas, 2usize);
+        Window.sleep_frame(60u64);
+    }
+
+    // Cleanup & Terminal Restoration
+    free(map);
+    free(tex_atlas);
+    canvas.destroy();
+    window.close();
+
+    println("3D Raycaster Engine finished cleanly.");
+    return 0;
+}

@@ -58,6 +58,20 @@ fn bench_extract_mod_name_from_line(line: str) -> String {
     return name
 }
 
+fn bench_is_attr(line: str, attr_name: str) -> bool {
+    let p = line as *raw u8
+    let len = str_len(line)
+    var i = 0usize
+    while i < len && (p[i] == 32u8 || p[i] == 9u8) {
+        i = i + 1usize
+    }
+    if i + 2usize <= len && p[i] == 47u8 && p[i + 1usize] == 47u8 {
+        return false
+    }
+    let sub = (line as usize + i) as str
+    return str_starts_with(sub, attr_name)
+}
+
 fn parse_benchmarks_in_file(fpath: str, var symbols: Vec<String>, var displays: Vec<String>) {
     let content = read_file_str(fpath)
     if content.len() == 0usize {
@@ -91,7 +105,7 @@ fn parse_benchmarks_in_file(fpath: str, var symbols: Vec<String>, var displays: 
             }
         }
 
-        if str_contains(line, "#[bench]") {
+        if bench_is_attr(line, "#[bench]") {
             next_is_bench = true
         } else if next_is_bench {
             if str_contains(line, "fn ") {
@@ -437,10 +451,16 @@ pub fn cmd_bench(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     var compile_cmd = String.new()
     compile_cmd.push_str(radc_bin.as_ptr() as str)
     if file_exists("src") {
-        compile_cmd.push_str(" src/*.rad")
+        let chk_src = system("ls src/*.rad >/dev/null 2>&1")
+        if chk_src == 0 {
+            compile_cmd.push_str(" src/*.rad")
+        }
     }
     if file_exists("benches") {
-        compile_cmd.push_str(" benches/*.rad")
+        let chk_b = system("ls benches/*.rad >/dev/null 2>&1")
+        if chk_b == 0 {
+            compile_cmd.push_str(" benches/*.rad")
+        }
     }
     compile_cmd.push_str(" target/.rad_bench_runner.rad --bench -o target/bench_bin")
 

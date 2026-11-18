@@ -282,11 +282,13 @@ pub fn main() -> i32 {
     draw_hud(window, gravity, false);
 
     // Continuous 60 FPS loop until 'q' or close
-    while window.is_open() {
+    var running = true;
+    while running && window.is_open() {
         let ev_opt = window.poll_event();
         match ev_opt {
             Option.Some(ev) => {
                 if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) { // 'q', 'Q'
+                    running = false;
                     window.close();
                     break;
                 } else if ev.is_key(115u8) || ev.is_key(83u8) { // 's', 'S': Toggle settings menu
@@ -298,6 +300,7 @@ pub fn main() -> i32 {
                         show_menu = false;
                         draw_hud(window, gravity, false);
                     } else {
+                        running = false;
                         window.close();
                         break;
                     }
@@ -349,6 +352,9 @@ pub fn main() -> i32 {
             },
             Option.None => {},
             _ => {},
+        }
+        if !running {
+            break;
         }
 
         if !window.is_open() {
