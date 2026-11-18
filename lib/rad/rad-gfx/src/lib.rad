@@ -442,6 +442,25 @@ fn push_u8_str(out: var String, val: u8) {
     }
 }
 
+fn push_usize_str(out: var String, val: usize) {
+    if val == 0usize {
+        out.push_byte(48u8);
+        return;
+    }
+    var buf = String.new();
+    var v = val;
+    while v > 0usize {
+        let rem = (v % 10usize) as u8;
+        buf.push_byte(48u8 + rem);
+        v = v / 10usize;
+    }
+    var i = buf.len();
+    while i > 0usize {
+        i = i - 1usize;
+        out.push_byte((buf.as_ptr() as *raw u8)[i]);
+    }
+}
+
 fn emit_fg(out: var String, r: u8, g: u8, b: u8) {
     out.push_str("\x1b[38;2;");
     push_u8_str(out, r);
@@ -482,13 +501,18 @@ impl Window {
         free(buf);
 
         // In half-block mode, each terminal row holds 2 vertical pixels.
-        // We use (rows - 1) terminal rows for rendering to avoid terminal scrolling.
+        // We use (rows - 1) terminal rows and (cols - 2) columns to completely eliminate auto-wrap and scrolling.
         var term_rows = rows;
         if term_rows > 1usize {
             term_rows = term_rows - 1usize;
         }
         let px_height = term_rows * 2usize;
-        let px_width = cols;
+
+        var term_cols = cols;
+        if term_cols > 2usize {
+            term_cols = term_cols - 2usize;
+        }
+        let px_width = term_cols;
 
         return ScreenSize {
             width: px_width,
@@ -639,6 +663,20 @@ impl Window {
             written = written + n;
         }
         self.frame_count = self.frame_count + 1u64;
+    }
+
+    pub fn draw_overlay_text(var self, row: usize, col: usize, text: str, fg_r: u8, fg_g: u8, fg_b: u8, bg_r: u8, bg_g: u8, bg_b: u8) {
+        var out = String.new();
+        out.push_str("\x1b[");
+        push_usize_str(out, row);
+        out.push_byte(59u8);
+        push_usize_str(out, col);
+        out.push_byte(72u8);
+        emit_fg(out, fg_r, fg_g, fg_b);
+        emit_bg(out, bg_r, bg_g, bg_b);
+        out.push_str(text);
+        out.push_str("\x1b[0m");
+        let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
     }
 
     pub fn poll_event(var self) -> Option<Event> {
