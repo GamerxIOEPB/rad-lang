@@ -3,6 +3,8 @@
 // Zero-dependency pure-Rad rasterizer supporting lines, rects, circles, PPM and BMP.
 // ==============================================================================
 
+import std/terminal;
+
 pub struct Color {
     pub r: u8,
     pub g: u8,
@@ -417,7 +419,8 @@ pub struct Window {
     pub frame_count: u64,
     pub cols: usize,
     pub rows: usize,
-    pub overlay_buf: String,
+    pub session: TerminalSession,
+    pub is_closed: bool,
 }
 
 fn gfx_str_len(s: str) -> usize {
@@ -532,28 +535,11 @@ impl Window {
             h = sz.height;
         }
 
-        // Switch to alternate screen buffer, clear screen, and hide cursor:
-        // \x1b[?1049h (Enter alternate screen), \x1b[2J\x1b[H (Clear screen), \x1b[?25l (Hide cursor)
-        let init_seq = "\x1b[?1049h\x1b[2J\x1b[H\x1b[?25l";
-        let _ = syscall3(1i64, 1i64, init_seq as *raw u8, gfx_str_len(init_seq) as i64);
-
-        // Set stdin non-blocking:
-        let flags = syscall3(72i64, 0i64, 3i64, 0i64); // F_GETFL = 3
-        if flags >= 0i64 {
-            let _ = syscall3(72i64, 0i64, 4i64, (flags | 2048i64)); // F_SETFL, O_NONBLOCK = 2048
-        }
-
-        // Set raw terminal mode via termios ioctl if available:
-        let termios_buf = malloc(64usize) as *raw var u8;
-        let r_tc = syscall3(16i64, 0i64, 21505i64, termios_buf); // SYS_ioctl = 16, TCGETS = 0x5401
-        if r_tc == 0i64 {
-            let lflag = (termios_buf[12usize] as i32 & 255) | ((termios_buf[13usize] as i32 & 255) << 8);
-            let new_lflag = lflag & (~(2 | 8)); // disable ICANON (2) and ECHO (8)
-            termios_buf[12usize] = (new_lflag & 255) as u8;
-            termios_buf[13usize] = ((new_lflag >> 8) & 255) as u8;
-            let _ = syscall3(16i64, 0i64, 21506i64, termios_buf); // TCSETS = 0x5402
-        }
-        free(termios_buf);
+        var session = TerminalSession.new();
+        session.enable_raw_mode();
+        session.enter_alternate_screen();
+        session.hide_cursor();
+        session.clear_screen();
 
         return Window {
             width: w,
@@ -563,7 +549,8 @@ impl Window {
             frame_count: 0u64,
             cols: sz.cols,
             rows: sz.rows,
-            overlay_buf: String.new(),
+            session: session,
+            is_closed: false,
         };
     }
 
@@ -583,9 +570,15 @@ impl Window {
         return false;
     }
 
-    pub fn draw_canvas(var self, canvas: Canvas) {
+    pub fn draw_canvas_from(var self, canvas: Canvas, start_row: usize) {
         var out = String.new();
-        out.push_str("\x1b[?2025h\x1b[H"); // Synchronized update start + cursor home
+        if start_row <= 1usize {
+            out.push_str("\x1b[H"); // Cursor home (row 1, col 1)
+        } else {
+            out.push_str("\x1b[");
+            push_usize_str(out, start_row);
+            out.push_str(";1H"); // Cursor to start_row, col 1
+        }
 
         var last_fg_r = -1i32;
         var last_fg_g = -1i32;
@@ -654,14 +647,6 @@ impl Window {
             y = y + 2usize;
         }
 
-        // Atomically append all queued GUI overlays into the frame buffer:
-        if self.overlay_buf.len() > 0usize {
-            out.push_str(self.overlay_buf.as_ptr() as str);
-            self.overlay_buf = String.new();
-        }
-
-        out.push_str("\x1b[?2025l"); // Synchronized update end
-
         var written = 0i64;
         let total = out.len() as i64;
         let p_val = (out.as_ptr() as usize);
@@ -676,48 +661,37 @@ impl Window {
         self.frame_count = self.frame_count + 1u64;
     }
 
-    pub fn draw_overlay_text(var self, row: usize, col: usize, text: str, fg_r: u8, fg_g: u8, fg_b: u8, bg_r: u8, bg_g: u8, bg_b: u8) {
-        self.overlay_buf.push_str("\x1b[");
-        push_usize_str(self.overlay_buf, row);
-        self.overlay_buf.push_byte(59u8);
-        push_usize_str(self.overlay_buf, col);
-        self.overlay_buf.push_byte(72u8);
-        emit_fg(self.overlay_buf, fg_r, fg_g, fg_b);
-        emit_bg(self.overlay_buf, bg_r, bg_g, bg_b);
-        self.overlay_buf.push_str(text);
-        self.overlay_buf.push_str("\x1b[0m");
+    pub fn draw_canvas(var self, canvas: Canvas) {
+        self.draw_canvas_from(canvas, 1usize);
     }
 
-    pub fn flush_overlays(var self) {
-        if self.overlay_buf.len() > 0usize {
-            var out = String.new();
-            out.push_str("\x1b[?2025h");
-            out.push_str(self.overlay_buf.as_ptr() as str);
-            out.push_str("\x1b[?2025l");
-            self.overlay_buf = String.new();
-            let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
-        }
+    pub fn draw_overlay_text(var self, row: usize, col: usize, text: str, fg_r: u8, fg_g: u8, fg_b: u8, bg_r: u8, bg_g: u8, bg_b: u8) {
+        var out = String.new();
+        out.push_str("\x1b[");
+        push_usize_str(out, row);
+        out.push_byte(59u8);
+        push_usize_str(out, col);
+        out.push_byte(72u8);
+        emit_fg(out, fg_r, fg_g, fg_b);
+        emit_bg(out, bg_r, bg_g, bg_b);
+        out.push_str(text);
+        out.push_str("\x1b[0m");
+        let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
     }
 
     pub fn poll_event(var self) -> Option<Event> {
-        let buf = malloc(8usize) as *raw var u8;
-        let n = syscall3(0i64, 0i64, buf, 1i64);
-        if n > 0i64 {
-            let ch = buf[0usize];
-            if ch == 27u8 {
-                // Check for escape sequence (arrow keys: ESC [ A/B/C/D)
-                let p2 = (buf as usize) + 1usize;
-                let n2 = syscall3(0i64, 0i64, p2 as *raw u8, 2i64);
-                if n2 >= 2i64 && buf[1usize] == 91u8 {
-                    let code = buf[2usize];
-                    free(buf);
-                    return Option.Some(Event {
-                        kind: EVENT_KEY,
-                        key: code,
-                        mouse_x: 0,
-                        mouse_y: 0,
-                    });
-                }
+        let buf = malloc(32usize) as *raw var u8;
+        let n = syscall3(0i64, 0i64, buf, 32i64);
+        if n <= 0i64 {
+            free(buf);
+            return Option.None;
+        }
+
+        let ch = buf[0usize];
+
+        // Escape sequence or lone Escape key
+        if ch == 27u8 {
+            if n == 1i64 {
                 free(buf);
                 return Option.Some(Event {
                     kind: EVENT_KEY,
@@ -726,51 +700,115 @@ impl Window {
                     mouse_y: 0,
                 });
             }
-            if ch == 113u8 || ch == 81u8 { // 'q', 'Q'
-                self.open = false;
+
+            let b1 = buf[1usize];
+
+            // SS3 application cursor keys: \x1bO [A/B/C/D]
+            if b1 == 79u8 && n >= 3i64 {
+                let code = buf[2usize];
                 free(buf);
-                return Option.Some(Event {
-                    kind: EVENT_CLOSE,
-                    key: ch,
-                    mouse_x: 0,
-                    mouse_y: 0,
-                });
+                if code == 65u8 || code == 66u8 || code == 67u8 || code == 68u8 {
+                    return Option.Some(Event {
+                        kind: EVENT_KEY,
+                        key: code,
+                        mouse_x: 0,
+                        mouse_y: 0,
+                    });
+                }
+                return Option.None;
             }
+
+            // CSI sequence: \x1b[ ...
+            if b1 == 91u8 && n >= 3i64 {
+                // Drop Kitty keyboard protocol key-release events (contains ":3" or ";3")
+                var is_release = false;
+                var si = 2usize;
+                let s_limit = (n - 1i64) as usize;
+                while si < s_limit {
+                    if (buf[si] == 58u8 || buf[si] == 59u8) && buf[si + 1usize] == 51u8 {
+                        is_release = true;
+                    }
+                    si = si + 1usize;
+                }
+
+                if is_release {
+                    // Silently drop release events so keystrokes never trigger twice
+                    free(buf);
+                    return Option.None;
+                }
+
+                // Final command byte in CSI sequence (e.g., 'A', 'B', 'C', 'D')
+                let last_b = buf[(n - 1i64) as usize];
+                free(buf);
+
+                if last_b == 65u8 || last_b == 66u8 || last_b == 67u8 || last_b == 68u8 {
+                    return Option.Some(Event {
+                        kind: EVENT_KEY,
+                        key: last_b,
+                        mouse_x: 0,
+                        mouse_y: 0,
+                    });
+                }
+                return Option.None;
+            }
+
             free(buf);
             return Option.Some(Event {
                 kind: EVENT_KEY,
+                key: KEY_ESC,
+                mouse_x: 0,
+                mouse_y: 0,
+            });
+        }
+
+        if ch == 113u8 || ch == 81u8 || ch == 3u8 { // 'q', 'Q', Ctrl+C (3)
+            free(buf);
+            return Option.Some(Event {
+                kind: EVENT_CLOSE,
                 key: ch,
                 mouse_x: 0,
                 mouse_y: 0,
             });
         }
+
         free(buf);
-        return Option.None;
+        return Option.Some(Event {
+            kind: EVENT_KEY,
+            key: ch,
+            mouse_x: 0,
+            mouse_y: 0,
+        });
     }
 
     pub fn is_open(self) -> bool {
-        return self.open;
+        return self.open && !self.is_closed;
+    }
+
+    pub fn clear_row(var self, row: usize) {
+        var out = String.new();
+        out.push_str("\x1b[");
+        push_usize_str(out, row);
+        out.push_str(";1H\x1b[2K\x1b[0m");
+        let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
     }
 
     pub fn close(var self) {
-        if !self.open {
+        if self.is_closed {
             return;
         }
+        self.is_closed = true;
         self.open = false;
-        // End synchronized update, clear alternate screen, return to main screen buffer, show cursor, reset formatting:
-        let exit_seq = "\x1b[?2025l\x1b[2J\x1b[H\x1b[?1049l\x1b[?25h\x1b[0m\r\n";
-        let _ = syscall3(1i64, 1i64, exit_seq as *raw u8, gfx_str_len(exit_seq) as i64);
 
-        let termios_buf = malloc(64usize) as *raw var u8;
-        let r_tc = syscall3(16i64, 0i64, 21505i64, termios_buf);
-        if r_tc == 0i64 {
-            let lflag = (termios_buf[12usize] as i32 & 255) | ((termios_buf[13usize] as i32 & 255) << 8);
-            let new_lflag = lflag | (2 | 8);
-            termios_buf[12usize] = (new_lflag & 255) as u8;
-            termios_buf[13usize] = ((new_lflag >> 8) & 255) as u8;
-            let _ = syscall3(16i64, 0i64, 21506i64, termios_buf);
-        }
-        free(termios_buf);
+        // Reset text formatting and clear the alternate screen buffer
+        let clear_seq = "\x1b[0m\x1b[2J\x1b[H";
+        let _ = syscall3(1i64, 1i64, clear_seq as *raw u8, 10i64);
+
+        // End terminal session (restores cursor, leaves alternate screen, restores termios via TCSETSF)
+        self.session.end_session();
+
+        // Extra guarantee: ensure cursor is visible and reset styling
+        let final_seq = "\x1b[?25h\x1b[0m\r\n";
+        let _ = syscall3(1i64, 1i64, final_seq as *raw u8, 10i64);
     }
 
     pub fn sleep_frame(fps: u64) {

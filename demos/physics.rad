@@ -119,11 +119,110 @@ fn make_menu_row(idx: usize, selected: bool, val: i64, bool_val: bool) -> String
     return line;
 }
 
+fn draw_hud(var window: Window, gravity: i64, paused: bool) {
+    if window.cols < 30usize {
+        return;
+    }
+    var line = String.from_str(" ⚛ RAD 2D PHYSICS │ [S] ");
+    if paused {
+        line.push_str("Resume │ ");
+    } else {
+        line.push_str("Settings │ ");
+    }
+    line.push_str("[G] Gravity: ");
+    if gravity == 0i64 {
+        line.push_str("OFF │ ");
+    } else {
+        line.push_str("ON │ ");
+    }
+    line.push_str("[R] Reset │ [Q] Quit ");
+
+    var p = line.len();
+    while p < window.cols {
+        line.push_byte(32u8);
+        p = p + 1usize;
+    }
+    window.draw_overlay_text(1usize, 1usize, line.as_ptr() as str, 210u8, 230u8, 255u8, 20u8, 28u8, 48u8);
+}
+
+fn render_settings_menu(var window: Window, selected: usize, gravity: i64, restitution: i64, friction: i64, collisions: bool, balls: usize) {
+    var mr = 2usize;
+    if window.rows > 13usize {
+        mr = (window.rows - 11usize) / 2usize;
+    }
+    var mc = 2usize;
+    if window.cols > 48usize {
+        mc = (window.cols - 46usize) / 2usize;
+    }
+
+    let bg_r = 15u8;
+    let bg_g = 22u8;
+    let bg_b = 38u8;
+
+    let border_r = 100u8;
+    let border_g = 160u8;
+    let border_b = 240u8;
+
+    let title_r = 255u8;
+    let title_g = 220u8;
+    let title_b = 80u8;
+
+    let sel_r = 255u8;
+    let sel_g = 255u8;
+    let sel_b = 80u8;
+
+    let unsel_r = 210u8;
+    let unsel_g = 225u8;
+    let unsel_b = 245u8;
+
+    let foot_r = 120u8;
+    let foot_g = 180u8;
+    let foot_b = 255u8;
+
+    window.draw_overlay_text(mr, mc,          "┌────────────────────────────────────────────┐", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 1usize, mc, "│          2D PHYSICS SETTINGS MENU          │", title_r, title_g, title_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 2usize, mc, "├────────────────────────────────────────────┤", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+
+    var mi = 0usize;
+    while mi < 5usize {
+        let is_sel = (selected == mi);
+        var fgr = unsel_r;
+        var fgg = unsel_g;
+        var fgb = unsel_b;
+        if is_sel {
+            fgr = sel_r;
+            fgg = sel_g;
+            fgb = sel_b;
+        }
+
+        var v = 0i64;
+        var bv = false;
+        if mi == 0usize { v = gravity; }
+        else if mi == 1usize { v = restitution; }
+        else if mi == 2usize { v = friction; }
+        else if mi == 3usize { bv = collisions; }
+        else if mi == 4usize { v = balls as i64; }
+
+        let row_str = make_menu_row(mi, is_sel, v, bv);
+        window.draw_overlay_text(mr + 3usize + mi, mc, row_str.as_ptr() as str, fgr, fgg, fgb, bg_r, bg_g, bg_b);
+        mi = mi + 1usize;
+    }
+
+    window.draw_overlay_text(mr + 8usize, mc, "├────────────────────────────────────────────┤", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 9usize, mc, "│  [▲/▼] Select   [◄/►] Adjust   [S] Resume  │", foot_r, foot_g, foot_b, bg_r, bg_g, bg_b);
+    window.draw_overlay_text(mr + 10usize, mc,"└────────────────────────────────────────────┘", border_r, border_g, border_b, bg_r, bg_g, bg_b);
+}
+
 pub fn main() -> i32 {
     // Auto-detect display/terminal resolution
     var window = Window.open_autores("Rad 2D Physics Demo");
-    var width = window.width;
-    var height = window.height;
+
+    var width = window.cols;
+    var arena_rows = 23usize;
+    if window.rows > 1usize {
+        arena_rows = window.rows - 1usize;
+    }
+    var height = arena_rows * 2usize;
 
     var canvas = Canvas.new(width, height);
     var rng = Rng.new(12345678901234567u64);
@@ -175,8 +274,12 @@ pub fn main() -> i32 {
 
     // TUI Settings Menu State
     var show_menu = false;
+    var menu_dirty = true;
     var selected_item = 0usize;
     let total_menu_items = 5usize;
+
+    // Initial HUD draw on row 1
+    draw_hud(window, gravity, false);
 
     // Continuous 60 FPS loop until 'q' or close
     while window.is_open() {
@@ -185,13 +288,18 @@ pub fn main() -> i32 {
             Option.Some(ev) => {
                 if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) { // 'q', 'Q'
                     window.close();
+                    break;
                 } else if ev.is_key(115u8) || ev.is_key(83u8) { // 's', 'S': Toggle settings menu
                     show_menu = !show_menu;
+                    menu_dirty = true;
+                    draw_hud(window, gravity, show_menu);
                 } else if ev.is_key(27u8) { // ESC: Close menu or quit
                     if show_menu {
                         show_menu = false;
+                        draw_hud(window, gravity, false);
                     } else {
                         window.close();
+                        break;
                     }
                 } else if show_menu {
                     // Menu navigation with arrow keys
@@ -201,8 +309,10 @@ pub fn main() -> i32 {
                         } else {
                             selected_item = selected_item - 1usize;
                         }
+                        menu_dirty = true;
                     } else if ev.is_down() {
                         selected_item = (selected_item + 1usize) % total_menu_items;
+                        menu_dirty = true;
                     } else if ev.is_left() {
                         // Decrease current parameter
                         if selected_item == 0usize && gravity >= 5i64 { gravity = gravity - 5i64; }
@@ -210,6 +320,7 @@ pub fn main() -> i32 {
                         else if selected_item == 2usize && floor_friction >= 50i64 { floor_friction = floor_friction - 1i64; }
                         else if selected_item == 3usize { ball_collisions = !ball_collisions; }
                         else if selected_item == 4usize && active_balls > 4usize { active_balls = active_balls - 4usize; }
+                        menu_dirty = true;
                     } else if ev.is_right() {
                         // Increase current parameter
                         if selected_item == 0usize && gravity <= 50i64 { gravity = gravity + 5i64; }
@@ -217,11 +328,13 @@ pub fn main() -> i32 {
                         else if selected_item == 2usize && floor_friction <= 99i64 { floor_friction = floor_friction + 1i64; }
                         else if selected_item == 3usize { ball_collisions = !ball_collisions; }
                         else if selected_item == 4usize && active_balls + 4usize <= max_balls { active_balls = active_balls + 4usize; }
+                        menu_dirty = true;
                     }
                 } else {
                     // Quick hotkeys in play mode
                     if ev.is_key(103u8) || ev.is_key(71u8) { // 'g', 'G': Quick toggle gravity
                         if gravity > 0i64 { gravity = 0i64; } else { gravity = 20i64; }
+                        draw_hud(window, gravity, false);
                     } else if ev.is_key(114u8) || ev.is_key(82u8) { // 'r', 'R': Reset & Scramble
                         i = 0usize;
                         while i < active_balls {
@@ -244,243 +357,177 @@ pub fn main() -> i32 {
 
         // Dynamically adjust on terminal resize
         if window.check_resize() {
-            width = window.width;
-            height = window.height;
+            width = window.cols;
+            arena_rows = 23usize;
+            if window.rows > 1usize {
+                arena_rows = window.rows - 1usize;
+            }
+            height = arena_rows * 2usize;
             canvas.destroy();
             canvas = Canvas.new(width, height);
             let _ = syscall3(1i64, 1i64, "\x1b[2J\x1b[H" as *raw u8, 7i64);
+            draw_hud(window, gravity, show_menu);
+            if show_menu {
+                menu_dirty = true;
+            }
         }
 
-        canvas.clear(Color.rgb(8u8, 12u8, 22u8)); // Deep cosmic dark navy arena
-
-        // Top line for HUD banner
-        canvas.fill_rect(0usize, 0usize, width, 2usize, Color.rgb(20u8, 28u8, 48u8));
-
-        // Draw arena boundary border (starts below the top HUD line)
-        canvas.draw_rect(0usize, 2usize, width, height - 2usize, Color.rgb(45u8, 65u8, 105u8));
-
-        let left_limit = 200i64;
-        let right_limit = ((width as i64) - 2i64) * 100i64;
-        let ceil_limit = 400i64; // Bounces below top HUD banner (terminal row 3)
-        let floor_limit = ((height as i64) - 2i64) * 100i64;
-
-        // Physics step: ball positions & boundary collisions
-        i = 0usize;
-        while i < active_balls {
-            // Apply downward gravity
-            ball_vy[i] = ball_vy[i] + gravity;
-
-            // Integrate position
-            ball_px[i] = ball_px[i] + ball_vx[i];
-            ball_py[i] = ball_py[i] + ball_vy[i];
-
-            // Left / right wall bounce with restitution
-            if ball_px[i] < left_limit {
-                ball_px[i] = left_limit;
-                ball_vx[i] = (-ball_vx[i] * restitution) / 100i64;
-            } else if ball_px[i] > right_limit {
-                ball_px[i] = right_limit;
-                ball_vx[i] = (-ball_vx[i] * restitution) / 100i64;
+        if show_menu {
+            if menu_dirty {
+                render_settings_menu(window, selected_item, gravity, restitution, floor_friction, ball_collisions, active_balls);
+                menu_dirty = false;
             }
+            Window.sleep_frame(30u64);
+        } else {
+            canvas.clear(Color.rgb(8u8, 12u8, 22u8)); // Deep cosmic dark navy arena
 
-            // Ceiling bounce
-            if ball_py[i] < ceil_limit {
-                ball_py[i] = ceil_limit;
-                ball_vy[i] = (-ball_vy[i] * restitution) / 100i64;
-            } else if ball_py[i] >= floor_limit {
-                // Floor contact
-                ball_py[i] = floor_limit;
+            // Draw arena boundary border around the physics canvas
+            canvas.draw_rect(0usize, 0usize, width, height, Color.rgb(45u8, 65u8, 105u8));
 
-                if gravity > 0i64 {
-                    // Resting state: zero out micro-bounces when vertical speed is small
-                    if gfx_int_abs(ball_vy[i]) < 40i64 {
-                        ball_vy[i] = 0i64;
+            let left_limit = 200i64;
+            let right_limit = ((width as i64) - 2i64) * 100i64;
+            let ceil_limit = 200i64;
+            let floor_limit = ((height as i64) - 2i64) * 100i64;
+
+            // Physics step: ball positions & boundary collisions
+            i = 0usize;
+            while i < active_balls {
+                // Apply downward gravity
+                ball_vy[i] = ball_vy[i] + gravity;
+
+                // Integrate position
+                ball_px[i] = ball_px[i] + ball_vx[i];
+                ball_py[i] = ball_py[i] + ball_vy[i];
+
+                // Left / right wall bounce with restitution
+                if ball_px[i] < left_limit {
+                    ball_px[i] = left_limit;
+                    ball_vx[i] = (-ball_vx[i] * restitution) / 100i64;
+                } else if ball_px[i] > right_limit {
+                    ball_px[i] = right_limit;
+                    ball_vx[i] = (-ball_vx[i] * restitution) / 100i64;
+                }
+
+                // Ceiling bounce
+                if ball_py[i] < ceil_limit {
+                    ball_py[i] = ceil_limit;
+                    ball_vy[i] = (-ball_vy[i] * restitution) / 100i64;
+                } else if ball_py[i] >= floor_limit {
+                    // Floor contact
+                    ball_py[i] = floor_limit;
+
+                    if gravity > 0i64 {
+                        // Resting state: zero out micro-bounces when vertical speed is small
+                        if gfx_int_abs(ball_vy[i]) < 40i64 {
+                            ball_vy[i] = 0i64;
+                        } else {
+                            ball_vy[i] = (-ball_vy[i] * restitution) / 100i64;
+                        }
+
+                        // Floor kinetic friction only when touching floor with gravity on
+                        ball_vx[i] = (ball_vx[i] * floor_friction) / 100i64;
+                        if gfx_int_abs(ball_vx[i]) < 5i64 {
+                            ball_vx[i] = 0i64;
+                        }
                     } else {
+                        // Zero-G space mode: bounce elastically like any wall
                         ball_vy[i] = (-ball_vy[i] * restitution) / 100i64;
                     }
-
-                    // Floor kinetic friction only when touching floor with gravity on
-                    ball_vx[i] = (ball_vx[i] * floor_friction) / 100i64;
-                    if gfx_int_abs(ball_vx[i]) < 5i64 {
-                        ball_vx[i] = 0i64;
-                    }
-                } else {
-                    // Zero-G space mode: bounce elastically like any wall
-                    ball_vy[i] = (-ball_vy[i] * restitution) / 100i64;
                 }
+
+                i = i + 1usize;
             }
 
-            i = i + 1usize;
-        }
+            // Subpixel Ball-to-Ball Elastic Collisions with Resting Contact Stabilization
+            if ball_collisions {
+                var bi = 0usize;
+                while bi < active_balls {
+                    var bj = bi + 1usize;
+                    while bj < active_balls {
+                        let f_dx = ball_px[bj] - ball_px[bi];
+                        let f_dy = ball_py[bj] - ball_py[bi];
+                        let f_dist_sq = (f_dx * f_dx) + (f_dy * f_dy);
+                        let min_dist = 200i64; // radius 1 + 1 = 2 pixels = 200 fixed-point units
 
-        // Subpixel Ball-to-Ball Elastic Collisions with Resting Contact Stabilization
-        if ball_collisions {
-            var bi = 0usize;
-            while bi < active_balls {
-                var bj = bi + 1usize;
-                while bj < active_balls {
-                    let f_dx = ball_px[bj] - ball_px[bi];
-                    let f_dy = ball_py[bj] - ball_py[bi];
-                    let f_dist_sq = (f_dx * f_dx) + (f_dy * f_dy);
-                    let min_dist = 200i64; // radius 1 + 1 = 2 pixels = 200 fixed-point units
+                        if f_dist_sq < (min_dist * min_dist) {
+                            var f_dist = int_sqrt(f_dist_sq);
+                            if f_dist == 0i64 { f_dist = 1i64; }
+                            let nx = (f_dx * 100i64) / f_dist;
+                            let ny = (f_dy * 100i64) / f_dist;
+                            let f_overlap = min_dist - f_dist;
 
-                    if f_dist_sq < (min_dist * min_dist) {
-                        var f_dist = int_sqrt(f_dist_sq);
-                        if f_dist == 0i64 { f_dist = 1i64; }
-                        let nx = (f_dx * 100i64) / f_dist;
-                        let ny = (f_dy * 100i64) / f_dist;
-                        let f_overlap = min_dist - f_dist;
-
-                        // Anti-jitter: when particles rest on floor, separate purely horizontally
-                        if gravity > 0i64 && ball_py[bi] >= floor_limit - 120i64 && ball_py[bj] >= floor_limit - 120i64 {
-                            let sep = (f_overlap * 35i64) / 100i64;
-                            if f_dx >= 0i64 {
-                                ball_px[bi] = ball_px[bi] - sep;
-                                ball_px[bj] = ball_px[bj] + sep;
+                            // Anti-jitter: when particles rest on floor, separate purely horizontally
+                            if gravity > 0i64 && ball_py[bi] >= floor_limit - 120i64 && ball_py[bj] >= floor_limit - 120i64 {
+                                let sep = (f_overlap * 35i64) / 100i64;
+                                if f_dx >= 0i64 {
+                                    ball_px[bi] = ball_px[bi] - sep;
+                                    ball_px[bj] = ball_px[bj] + sep;
+                                } else {
+                                    ball_px[bi] = ball_px[bi] + sep;
+                                    ball_px[bj] = ball_px[bj] - sep;
+                                }
                             } else {
-                                ball_px[bi] = ball_px[bi] + sep;
-                                ball_px[bj] = ball_px[bj] - sep;
+                                let sep_x = (nx * f_overlap * 35i64) / 10000i64;
+                                let sep_y = (ny * f_overlap * 35i64) / 10000i64;
+                                ball_px[bi] = ball_px[bi] - sep_x;
+                                ball_py[bi] = ball_py[bi] - sep_y;
+                                ball_px[bj] = ball_px[bj] + sep_x;
+                                ball_py[bj] = ball_py[bj] + sep_y;
                             }
-                        } else {
-                            let sep_x = (nx * f_overlap * 35i64) / 10000i64;
-                            let sep_y = (ny * f_overlap * 35i64) / 10000i64;
-                            ball_px[bi] = ball_px[bi] - sep_x;
-                            ball_py[bi] = ball_py[bi] - sep_y;
-                            ball_px[bj] = ball_px[bj] + sep_x;
-                            ball_py[bj] = ball_py[bj] + sep_y;
+
+                            // Velocity momentum exchange
+                            let dvx = ball_vx[bj] - ball_vx[bi];
+                            let dvy = ball_vy[bj] - ball_vy[bi];
+                            let vel_along_norm = ((dvx * nx) + (dvy * ny)) / 100i64;
+
+                            if vel_along_norm < -15i64 {
+                                // Elastic momentum collision when approaching
+                                let impulse = -((100i64 + restitution) * vel_along_norm) / 200i64;
+                                let imp_x = (impulse * nx) / 100i64;
+                                let imp_y = (impulse * ny) / 100i64;
+                                ball_vx[bi] = ball_vx[bi] - imp_x;
+                                ball_vy[bi] = ball_vy[bi] - imp_y;
+                                ball_vx[bj] = ball_vx[bj] + imp_x;
+                                ball_vy[bj] = ball_vy[bj] + imp_y;
+                            } else if vel_along_norm < 0i64 {
+                                // Inelastic resting contact: zero restitution to cancel jitter
+                                let impulse = -vel_along_norm / 2i64;
+                                let imp_x = (impulse * nx) / 100i64;
+                                let imp_y = (impulse * ny) / 100i64;
+                                ball_vx[bi] = ball_vx[bi] - imp_x;
+                                ball_vy[bi] = ball_vy[bi] - imp_y;
+                                ball_vx[bj] = ball_vx[bj] + imp_x;
+                                ball_vy[bj] = ball_vy[bj] + imp_y;
+                            }
                         }
 
-                        // Velocity momentum exchange
-                        let dvx = ball_vx[bj] - ball_vx[bi];
-                        let dvy = ball_vy[bj] - ball_vy[bi];
-                        let vel_along_norm = ((dvx * nx) + (dvy * ny)) / 100i64;
-
-                        if vel_along_norm < -15i64 {
-                            // Elastic momentum collision when approaching
-                            let impulse = -((100i64 + restitution) * vel_along_norm) / 200i64;
-                            let imp_x = (impulse * nx) / 100i64;
-                            let imp_y = (impulse * ny) / 100i64;
-                            ball_vx[bi] = ball_vx[bi] - imp_x;
-                            ball_vy[bi] = ball_vy[bi] - imp_y;
-                            ball_vx[bj] = ball_vx[bj] + imp_x;
-                            ball_vy[bj] = ball_vy[bj] + imp_y;
-                        } else if vel_along_norm < 0i64 {
-                            // Inelastic resting contact: zero restitution to cancel jitter
-                            let impulse = -vel_along_norm / 2i64;
-                            let imp_x = (impulse * nx) / 100i64;
-                            let imp_y = (impulse * ny) / 100i64;
-                            ball_vx[bi] = ball_vx[bi] - imp_x;
-                            ball_vy[bi] = ball_vy[bi] - imp_y;
-                            ball_vx[bj] = ball_vx[bj] + imp_x;
-                            ball_vy[bj] = ball_vy[bj] + imp_y;
-                        }
+                        bj = bj + 1usize;
                     }
-
-                    bj = bj + 1usize;
+                    bi = bi + 1usize;
                 }
-                bi = bi + 1usize;
-            }
-        }
-
-        // Render compact glowing particles (3x3 footprint with bright core)
-        i = 0usize;
-        while i < active_balls {
-            let draw_x = ball_px[i] / 100i64;
-            let draw_y = ball_py[i] / 100i64;
-            let ball_col = Color.rgb(ball_cr[i], ball_cg[i], ball_cb[i]);
-            canvas.fill_circle(draw_x, draw_y, 1i64, ball_col);
-
-            // Sparkling bright core
-            if draw_x >= 0i64 && draw_y >= 0i64 {
-                canvas.set_pixel(draw_x as usize, draw_y as usize, Color.white());
             }
 
-            i = i + 1usize;
-        }
+            // Render compact glowing particles (3x3 footprint with bright core)
+            i = 0usize;
+            while i < active_balls {
+                let draw_x = ball_px[i] / 100i64;
+                let draw_y = ball_py[i] / 100i64;
+                let ball_col = Color.rgb(ball_cr[i], ball_cg[i], ball_cb[i]);
+                canvas.fill_circle(draw_x, draw_y, 1i64, ball_col);
 
-        // Render Crisp Native Font Overlays (Queued into the atomic frame buffer)
-        if show_menu {
-            var mr = 2usize;
-            if window.rows > 11usize {
-                mr = (window.rows - 11usize) / 2usize;
-            }
-            var mc = 2usize;
-            if window.cols > 48usize {
-                mc = (window.cols - 46usize) / 2usize;
-            }
-
-            let bg_r = 15u8;
-            let bg_g = 22u8;
-            let bg_b = 38u8;
-
-            // Fill canvas backing under menu with identical background so balls smoothly pass behind
-            let menu_px_x = mc - 1usize;
-            let menu_px_y = (mr - 1usize) * 2usize;
-            canvas.fill_rect(menu_px_x, menu_px_y, 46usize, 22usize, Color.rgb(bg_r, bg_g, bg_b));
-
-            let border_r = 100u8;
-            let border_g = 160u8;
-            let border_b = 240u8;
-
-            let title_r = 255u8;
-            let title_g = 220u8;
-            let title_b = 80u8;
-
-            let sel_r = 255u8;
-            let sel_g = 255u8;
-            let sel_b = 80u8;
-
-            let unsel_r = 210u8;
-            let unsel_g = 225u8;
-            let unsel_b = 245u8;
-
-            let foot_r = 120u8;
-            let foot_g = 180u8;
-            let foot_b = 255u8;
-
-            window.draw_overlay_text(mr, mc,          "┌────────────────────────────────────────────┐", border_r, border_g, border_b, bg_r, bg_g, bg_b);
-            window.draw_overlay_text(mr + 1usize, mc, "│          2D PHYSICS SETTINGS MENU          │", title_r, title_g, title_b, bg_r, bg_g, bg_b);
-            window.draw_overlay_text(mr + 2usize, mc, "├────────────────────────────────────────────┤", border_r, border_g, border_b, bg_r, bg_g, bg_b);
-
-            var mi = 0usize;
-            while mi < total_menu_items {
-                let is_sel = (selected_item == mi);
-                var fgr = unsel_r;
-                var fgg = unsel_g;
-                var fgb = unsel_b;
-                if is_sel {
-                    fgr = sel_r;
-                    fgg = sel_g;
-                    fgb = sel_b;
+                // Sparkling bright core
+                if draw_x >= 0i64 && draw_y >= 0i64 {
+                    canvas.set_pixel(draw_x as usize, draw_y as usize, Color.white());
                 }
 
-                var v = 0i64;
-                var bv = false;
-                if mi == 0usize { v = gravity; }
-                else if mi == 1usize { v = restitution; }
-                else if mi == 2usize { v = floor_friction; }
-                else if mi == 3usize { bv = ball_collisions; }
-                else if mi == 4usize { v = active_balls as i64; }
-
-                let row_str = make_menu_row(mi, is_sel, v, bv);
-                window.draw_overlay_text(mr + 3usize + mi, mc, row_str.as_ptr() as str, fgr, fgg, fgb, bg_r, bg_g, bg_b);
-                mi = mi + 1usize;
+                i = i + 1usize;
             }
 
-            window.draw_overlay_text(mr + 8usize, mc, "├────────────────────────────────────────────┤", border_r, border_g, border_b, bg_r, bg_g, bg_b);
-            window.draw_overlay_text(mr + 9usize, mc, "│  [▲/▼] Select   [◄/►] Adjust   [S] Close   │", foot_r, foot_g, foot_b, bg_r, bg_g, bg_b);
-            window.draw_overlay_text(mr + 10usize, mc,"└────────────────────────────────────────────┘", border_r, border_g, border_b, bg_r, bg_g, bg_b);
-        } else {
-            // Sleek Top HUD Banner
-            if window.cols > 72usize {
-                window.draw_overlay_text(1usize, 2usize, " ⚛ RAD 2D PHYSICS │ [S] Settings │ [G] Gravity │ [R] Reset │ [Q] Quit ", 210u8, 230u8, 255u8, 20u8, 28u8, 48u8);
-            }
+            // Render canvas starting from terminal row 2 down (row 1 is preserved for HUD)
+            window.draw_canvas_from(canvas, 2usize);
+
+            Window.sleep_frame(60u64);
         }
-
-        // Atomically present canvas and all overlays in a single synchronized flush
-        window.draw_canvas(canvas);
-
-        Window.sleep_frame(60u64);
     }
 
     free(ball_px as *raw var u8);
