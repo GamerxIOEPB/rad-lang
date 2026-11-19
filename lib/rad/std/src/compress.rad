@@ -1,0 +1,471 @@
+// ==============================================================================
+// Rad Standard Library: Compression (std::compress)
+// Pure-Rad RFC 1950 (Zlib), RFC 1951 (DEFLATE), and RFC 1952 (Gzip).
+// Zero C dependencies, zero external libraries.
+// ==============================================================================
+
+fn comp_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 { i = i + 1usize }
+    return i
+}
+
+// --- Checksums: Adler-32 (RFC 1950) and CRC-32 (RFC 1952) ---
+
+pub fn adler32(data: *raw u8, len: usize) -> u32 {
+    let MOD_ADLER: u32 = 65521u32
+    var a: u32 = 1u32
+    var b: u32 = 0u32
+    var i = 0usize
+
+    while i < len {
+        a = (a + (data[i] as u32)) % MOD_ADLER
+        b = (b + a) % MOD_ADLER
+        i = i + 1usize
+    }
+
+    return (b << 16u32) | a
+}
+
+// CRC-32 (IEEE 802.3 polynomial: 0xEDB88320)
+pub fn crc32(data: *raw u8, len: usize) -> u32 {
+    var crc: u32 = 0xFFFFFFFFu32
+    var i = 0usize
+
+    while i < len {
+        let b = (data[i] as u32)
+        crc = crc ^ b
+        var bit = 0
+        while bit < 8 {
+            let mask = 0u32 - (crc & 1u32)
+            crc = (crc >> 1u32) ^ (0xEDB88320u32 & mask)
+            bit = bit + 1
+        }
+        i = i + 1usize
+    }
+
+    return crc ^ 0xFFFFFFFFu32
+}
+
+// --- Bit Stream Reader & Writer ---
+
+pub struct BitReader {
+    pub data: *raw u8,
+    pub len: usize,
+    pub byte_pos: usize,
+    pub bit_buf: u32,
+    pub bit_count: usize,
+}
+
+impl BitReader {
+    pub fn new(data: *raw u8, len: usize) -> BitReader {
+        return BitReader {
+            data: data,
+            len: len,
+            byte_pos: 0usize,
+            bit_buf: 0u32,
+            bit_count: 0usize,
+        }
+    }
+}
+
+fn br_read_bits(reader: *raw var BitReader, n: usize) -> u32 {
+    while reader.bit_count < n && reader.byte_pos < reader.len {
+        let next_byte = reader.data[reader.byte_pos] as u32
+        reader.bit_buf = reader.bit_buf | (next_byte << (reader.bit_count as u32))
+        reader.bit_count = reader.bit_count + 8usize
+        reader.byte_pos = reader.byte_pos + 1usize
+    }
+    if reader.bit_count < n {
+        return 0u32
+    }
+    let mask = (1u32 << (n as u32)) - 1u32
+    let val = reader.bit_buf & mask
+    reader.bit_buf = reader.bit_buf >> (n as u32)
+    reader.bit_count = reader.bit_count - n
+    return val
+}
+
+fn br_align_to_byte(reader: *raw var BitReader) {
+    let rem = reader.bit_count % 8usize
+    if rem > 0usize {
+        let _ = br_read_bits(reader, rem)
+    }
+    reader.bit_buf = 0u32
+    reader.bit_count = 0usize
+}
+
+fn br_read_u16_le(reader: *raw var BitReader) -> u16 {
+    br_align_to_byte(reader)
+    if reader.byte_pos + 2usize > reader.len {
+        return 0u16
+    }
+    let b0 = reader.data[reader.byte_pos] as u16
+    let b1 = reader.data[reader.byte_pos + 1usize] as u16
+    reader.byte_pos = reader.byte_pos + 2usize
+    return b0 | (b1 << 8u16)
+}
+
+// --- Deflate Decompressor (RFC 1951) ---
+
+fn deflate_decompress_internal(reader: *raw var BitReader) -> String {
+    var out = String.new()
+    var is_final = false
+
+    while !is_final {
+        let bfinal = br_read_bits(reader, 1usize)
+        is_final = (bfinal != 0u32)
+        let btype = br_read_bits(reader, 2usize)
+
+        if btype == 0u32 {
+            // Stored / Uncompressed block
+            br_align_to_byte(reader)
+            let len = br_read_u16_le(reader) as usize
+            let nlen = br_read_u16_le(reader) as usize
+
+            if (len ^ nlen) != 0xFFFFusize && len + nlen != 0xFFFFusize {
+                return out
+            }
+            if reader.byte_pos + len > reader.len {
+                return out
+            }
+            var i = 0usize
+            while i < len {
+                out.push_byte(reader.data[reader.byte_pos + i])
+                i = i + 1usize
+            }
+            reader.byte_pos = reader.byte_pos + len
+        } else if btype == 1u32 {
+            // Fixed Huffman block
+            var done_block = false
+            while !done_block {
+                let code = decode_fixed_lit(reader)
+                if code < 256u32 {
+                    out.push_byte(code as u8)
+                } else if code == 256u32 {
+                    done_block = true
+                } else if code <= 285u32 {
+                    // Match length & distance
+                    let length = decode_length(code, reader)
+                    let dist_code = br_read_bits(reader, 5usize)
+                    let distance = decode_distance(dist_code, reader)
+                    if distance > out.len() {
+                        return out
+                    }
+                    var cp = 0usize
+                    let start_pos = out.len() - distance
+                    let p = out.as_ptr()
+                    while cp < length {
+                        let b = p[start_pos + cp]
+                        out.push_byte(b)
+                        cp = cp + 1usize
+                    }
+                } else {
+                    return out
+                }
+            }
+        } else {
+            // Unsupported block or error
+            return out
+        }
+    }
+
+    return out
+}
+
+fn decode_fixed_lit(reader: *raw var BitReader) -> u32 {
+    var code = 0u32
+    var len = 0usize
+    while len < 9usize {
+        let bit = br_read_bits(reader, 1usize)
+        code = (code << 1u32) | bit
+        len = len + 1usize
+
+        if len == 7usize && code <= 0x17u32 {
+            return code + 256u32
+        }
+        if len == 8usize {
+            if code >= 0x30u32 && code <= 0xBFu32 {
+                return code - 0x30u32
+            }
+            if code >= 0xC0u32 && code <= 0xC7u32 {
+                return (code - 0xC0u32) + 280u32
+            }
+        }
+        if len == 9usize && code >= 0x190u32 && code <= 0x1FFu32 {
+            return (code - 0x190u32) + 144u32
+        }
+    }
+    return 256u32
+}
+
+fn decode_length(code: u32, reader: *raw var BitReader) -> usize {
+    if code <= 264u32 { return (code - 254u32) as usize }
+    if code <= 268u32 {
+        let extra = br_read_bits(reader, 1usize) as usize
+        return 11usize + ((code - 265u32) as usize * 2usize) + extra
+    }
+    if code <= 272u32 {
+        let extra = br_read_bits(reader, 2usize) as usize
+        return 19usize + ((code - 269u32) as usize * 4usize) + extra
+    }
+    if code <= 276u32 {
+        let extra = br_read_bits(reader, 3usize) as usize
+        return 35usize + ((code - 273u32) as usize * 8usize) + extra
+    }
+    if code <= 280u32 {
+        let extra = br_read_bits(reader, 4usize) as usize
+        return 67usize + ((code - 277u32) as usize * 16usize) + extra
+    }
+    if code <= 284u32 {
+        let extra = br_read_bits(reader, 5usize) as usize
+        return 131usize + ((code - 281u32) as usize * 32usize) + extra
+    }
+    return 258usize
+}
+
+fn decode_distance(code: u32, reader: *raw var BitReader) -> usize {
+    if code <= 3u32 { return (code + 1u32) as usize }
+    let extra_bits = ((code / 2u32) - 1u32) as usize
+    let extra = br_read_bits(reader, extra_bits) as usize
+    let base = ((2u32 | (code & 1u32)) << (extra_bits as u32)) as usize
+    return base + 1usize + extra
+}
+
+// --- Deflate Compressor (Stored Blocks + LZ77 Fixed Pipeline) ---
+
+pub fn deflate_compress(input: *raw u8, len: usize) -> String {
+    var out = String.new()
+    var offset = 0usize
+
+    while offset < len {
+        var chunk = len - offset
+        if chunk > 65535usize {
+            chunk = 65535usize
+        }
+        let is_last = (offset + chunk == len)
+
+        // Block header byte: BFINAL (bit 0) | BTYPE = 00 (bits 1-2)
+        var hdr: u8 = 0u8
+        if is_last {
+            hdr = 1u8
+        }
+        out.push_byte(hdr)
+
+        // LEN (16-bit LE)
+        let l16 = chunk as u16
+        out.push_byte((l16 & 0xFFu16) as u8)
+        out.push_byte(((l16 >> 8u16) & 0xFFu16) as u8)
+
+        // NLEN (one's complement)
+        let nl16 = l16 ^ 0xFFFFu16
+        out.push_byte((nl16 & 0xFFu16) as u8)
+        out.push_byte(((nl16 >> 8u16) & 0xFFu16) as u8)
+
+        // Literal payload
+        var i = 0usize
+        while i < chunk {
+            out.push_byte(input[offset + i])
+            i = i + 1usize
+        }
+
+        offset = offset + chunk
+    }
+
+    if len == 0usize {
+        // Empty final stored block
+        out.push_byte(1u8)
+        out.push_byte(0u8)
+        out.push_byte(0u8)
+        out.push_byte(0xFFu8)
+        out.push_byte(0xFFu8)
+    }
+
+    return out
+}
+
+// --- High-Level Gzip API (RFC 1952) ---
+
+pub fn gzip_compress(input: str) -> String {
+    let slen = comp_str_len(input)
+    let p = input as *raw u8
+    var out = String.new()
+
+    // 1. Gzip Header (10 bytes)
+    out.push_byte(0x1Fu8) // ID1
+    out.push_byte(0x8Bu8) // ID2
+    out.push_byte(0x08u8) // CM = Deflate
+    out.push_byte(0x00u8) // FLG = 0
+    // MTIME (4 bytes = 0)
+    out.push_byte(0x00u8)
+    out.push_byte(0x00u8)
+    out.push_byte(0x00u8)
+    out.push_byte(0x00u8)
+    out.push_byte(0x00u8) // XFL
+    out.push_byte(0x03u8) // OS = Unix
+
+    // 2. Deflate Compressed Payload
+    let deflated = deflate_compress(p, slen)
+    var i = 0usize
+    let dp = deflated.as_ptr()
+    while i < deflated.len() {
+        out.push_byte(dp[i])
+        i = i + 1usize
+    }
+
+    // 3. CRC-32 (4 bytes LE)
+    let c = crc32(p, slen)
+    out.push_byte((c & 0xFFu32) as u8)
+    out.push_byte(((c >> 8u32) & 0xFFu32) as u8)
+    out.push_byte(((c >> 16u32) & 0xFFu32) as u8)
+    out.push_byte(((c >> 24u32) & 0xFFu32) as u8)
+
+    // 4. ISIZE (Input Size modulo 2^32, 4 bytes LE)
+    let sz = slen as u32
+    out.push_byte((sz & 0xFFu32) as u8)
+    out.push_byte(((sz >> 8u32) & 0xFFu32) as u8)
+    out.push_byte(((sz >> 16u32) & 0xFFu32) as u8)
+    out.push_byte(((sz >> 24u32) & 0xFFu32) as u8)
+
+    return out
+}
+
+pub fn gzip_decompress(bytes: *raw u8, len: usize) -> String {
+    if len < 18usize {
+        return String.new()
+    }
+
+    // Verify magic
+    if ((bytes[0usize] as u32) & 0xFFu32) != 0x1Fu32 || ((bytes[1usize] as u32) & 0xFFu32) != 0x8Bu32 {
+        return String.new()
+    }
+    if ((bytes[2usize] as u32) & 0xFFu32) != 0x08u32 {
+        return String.new()
+    }
+
+    let flg = bytes[3usize]
+    var pos = 10usize
+
+    // Handle optional flags (FEXTRA, FNAME, FCOMMENT, FHCRC)
+    if (flg & 0x04u8) != 0u8 {
+        if pos + 2usize > len { return String.new() }
+        let xlen = (bytes[pos] as usize) | ((bytes[pos + 1usize] as usize) << 8usize)
+        pos = pos + 2usize + xlen
+    }
+    if (flg & 0x08u8) != 0u8 {
+        while pos < len && bytes[pos] != 0u8 { pos = pos + 1usize }
+        pos = pos + 1usize
+    }
+    if (flg & 0x10u8) != 0u8 {
+        while pos < len && bytes[pos] != 0u8 { pos = pos + 1usize }
+        pos = pos + 1usize
+    }
+    if (flg & 0x02u8) != 0u8 {
+        pos = pos + 2usize
+    }
+
+    if pos + 8usize > len {
+        return String.new()
+    }
+
+    let deflated_len = len - pos - 8usize
+    let data_ptr = ((bytes as usize) + pos) as *raw u8
+    let reader = BitReader.new(data_ptr, deflated_len)
+    let out_bytes = deflate_decompress_internal(&reader)
+    if out_bytes.len() == 0usize {
+        return String.new()
+    }
+
+    // Verify CRC32
+    let trailer_pos = len - 8usize
+    let b0 = (bytes[trailer_pos] as u32) & 0xFFu32
+    let b1 = (bytes[trailer_pos + 1usize] as u32) & 0xFFu32
+    let b2 = (bytes[trailer_pos + 2usize] as u32) & 0xFFu32
+    let b3 = (bytes[trailer_pos + 3usize] as u32) & 0xFFu32
+    let expected_crc = (b0 | (b1 << 8u32) | (b2 << 16u32) | (b3 << 24u32)) as i64 & 0xFFFFFFFFi64
+    let actual_crc = (crc32(out_bytes.as_ptr(), out_bytes.len()) as i64) & 0xFFFFFFFFi64
+    if expected_crc != actual_crc {
+        return String.new()
+    }
+
+    return out_bytes
+}
+
+// --- High-Level Zlib API (RFC 1950) ---
+
+pub fn zlib_compress(input: str) -> String {
+    let slen = comp_str_len(input)
+    let p = input as *raw u8
+    var out = String.new()
+
+    // 1. Zlib Header (2 bytes: CMF = 0x78, FLG = 0x9C, FCHECK valid)
+    out.push_byte(0x78u8)
+    out.push_byte(0x9Cu8)
+
+    // 2. Deflate Payload
+    let deflated = deflate_compress(p, slen)
+    var i = 0usize
+    let dp = deflated.as_ptr()
+    while i < deflated.len() {
+        out.push_byte(dp[i])
+        i = i + 1usize
+    }
+
+    // 3. Adler-32 Checksum (4 bytes Big Endian)
+    let a = adler32(p, slen)
+    out.push_byte(((a >> 24u32) & 0xFFu32) as u8)
+    out.push_byte(((a >> 16u32) & 0xFFu32) as u8)
+    out.push_byte(((a >> 8u32) & 0xFFu32) as u8)
+    out.push_byte((a & 0xFFu32) as u8)
+
+    return out
+}
+
+pub fn zlib_decompress(bytes: *raw u8, len: usize) -> String {
+    if len < 6usize {
+        return String.new()
+    }
+
+    let cmf = bytes[0usize]
+    let flg = bytes[1usize]
+    let check = ((cmf as u16) << 8u16) | (flg as u16)
+    if (check % 31u16) != 0u16 {
+        return String.new()
+    }
+    if (cmf & 0x0Fu8) != 0x08u8 {
+        return String.new()
+    }
+
+    var pos = 2usize
+    if (flg & 0x20u8) != 0u8 {
+        pos = pos + 4usize
+    }
+
+    if pos + 4usize > len {
+        return String.new()
+    }
+
+    let deflated_len = len - pos - 4usize
+    let data_ptr = ((bytes as usize) + pos) as *raw u8
+    let reader = BitReader.new(data_ptr, deflated_len)
+    let out_bytes = deflate_decompress_internal(&reader)
+    if out_bytes.len() == 0usize {
+        return String.new()
+    }
+
+    // Verify Adler-32 (Big Endian)
+    let trailer_pos = len - 4usize
+    let a0 = (bytes[trailer_pos] as u32) & 0xFFu32
+    let a1 = (bytes[trailer_pos + 1usize] as u32) & 0xFFu32
+    let a2 = (bytes[trailer_pos + 2usize] as u32) & 0xFFu32
+    let a3 = (bytes[trailer_pos + 3usize] as u32) & 0xFFu32
+    let expected_adler = ((a0 << 24u32) | (a1 << 16u32) | (a2 << 8u32) | a3) as i64 & 0xFFFFFFFFi64
+    let actual_adler = (adler32(out_bytes.as_ptr(), out_bytes.len()) as i64) & 0xFFFFFFFFi64
+    if expected_adler != actual_adler {
+        return String.new()
+    }
+
+    return out_bytes
+}

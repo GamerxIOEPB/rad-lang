@@ -1,0 +1,166 @@
+// ==============================================================================
+// Rad Standard Library: Event Loop (std::event)
+// Pure Linux epoll reactor (epoll_create1, epoll_ctl, epoll_wait)
+// Direct kernel interface with zero external C dynamic dependencies.
+// ==============================================================================
+
+import std/os/linux/syscall;
+
+// --- Epoll Event Flags ---
+pub const EPOLLIN: u32        = 0x0001u32
+pub const EPOLLPRI: u32       = 0x0002u32
+pub const EPOLLOUT: u32       = 0x0004u32
+pub const EPOLLERR: u32       = 0x0008u32
+pub const EPOLLHUP: u32       = 0x0010u32
+pub const EPOLLRDHUP: u32     = 0x2000u32
+pub const EPOLLET: u32        = 0x80000000u32
+pub const EPOLLONESHOT: u32   = 0x40000000u32
+
+// Epoll Operations
+const EPOLL_CTL_ADD: i64 = 1i64
+const EPOLL_CTL_DEL: i64 = 2i64
+const EPOLL_CTL_MOD: i64 = 3i64
+
+// Linux Syscall numbers (x86_64)
+const SYS_epoll_wait: i64    = 232i64
+const SYS_epoll_ctl: i64     = 233i64
+const SYS_epoll_create1: i64 = 291i64
+
+// Flags
+const EPOLL_CLOEXEC: i64 = 524288i64
+
+pub struct Event {
+    pub fd: i32,
+    pub events: u32,
+    pub user_data: u64,
+}
+
+impl Event {
+    pub fn readable(self) -> bool {
+        return (self.events & EPOLLIN) != 0u32 || (self.events & EPOLLHUP) != 0u32
+    }
+
+    pub fn writable(self) -> bool {
+        return (self.events & EPOLLOUT) != 0u32
+    }
+
+    pub fn error(self) -> bool {
+        return (self.events & EPOLLERR) != 0u32
+    }
+
+    pub fn hangup(self) -> bool {
+        return (self.events & EPOLLHUP) != 0u32 || (self.events & EPOLLRDHUP) != 0u32
+    }
+}
+
+pub struct EventLoop {
+    pub epoll_fd: i32,
+    pub is_closed: bool,
+}
+
+impl EventLoop {
+    pub fn new() -> Option<EventLoop> {
+        let fd = syscall1(SYS_epoll_create1, EPOLL_CLOEXEC) as i32
+        if fd < 0 {
+            return Option.None
+        }
+        return Option.Some(EventLoop {
+            epoll_fd: fd,
+            is_closed: false,
+        })
+    }
+
+    pub fn add(self, fd: i32, events: u32, user_data: u64) -> bool {
+        if self.is_closed || self.epoll_fd < 0 {
+            return false
+        }
+        // struct epoll_event is 12 bytes on x86_64:
+        // offset 0..3: events (u32)
+        // offset 4..11: data (u64)
+        let ev_buf = malloc(16usize) as *raw var u8
+        let p_ev = ev_buf as *raw var u32
+        p_ev[0usize] = events
+
+        var u_data = user_data
+        if u_data == 0u64 {
+            u_data = fd as u64
+        }
+        let p_data = ((ev_buf as usize) + 4usize) as *raw var u64
+        p_data[0usize] = u_data
+
+        let ret = syscall4(SYS_epoll_ctl, self.epoll_fd as i64, EPOLL_CTL_ADD, fd as i64, ev_buf as *raw u8)
+        free(ev_buf as *raw var u8)
+        return ret == 0i64
+    }
+
+    pub fn modify(self, fd: i32, events: u32, user_data: u64) -> bool {
+        if self.is_closed || self.epoll_fd < 0 {
+            return false
+        }
+        let ev_buf = malloc(16usize) as *raw var u8
+        let p_ev = ev_buf as *raw var u32
+        p_ev[0usize] = events
+
+        var u_data = user_data
+        if u_data == 0u64 {
+            u_data = fd as u64
+        }
+        let p_data = ((ev_buf as usize) + 4usize) as *raw var u64
+        p_data[0usize] = u_data
+
+        let ret = syscall4(SYS_epoll_ctl, self.epoll_fd as i64, EPOLL_CTL_MOD, fd as i64, ev_buf as *raw u8)
+        free(ev_buf as *raw var u8)
+        return ret == 0i64
+    }
+
+    pub fn remove(self, fd: i32) -> bool {
+        if self.is_closed || self.epoll_fd < 0 {
+            return false
+        }
+        let ret = syscall4(SYS_epoll_ctl, self.epoll_fd as i64, EPOLL_CTL_DEL, fd as i64, 0usize as *raw u8)
+        return ret == 0i64
+    }
+
+    pub fn poll(self, max_events: usize, timeout_ms: i32) -> Vec<Event> {
+        var events = Vec.new()
+        if self.is_closed || self.epoll_fd < 0 || max_events == 0usize {
+            return events
+        }
+
+        let ev_buf_size = max_events * 12usize
+        let ev_buf = malloc(ev_buf_size) as *raw var u8
+
+        let n = syscall4(SYS_epoll_wait, self.epoll_fd as i64, ev_buf as *raw u8, max_events as i64, timeout_ms as i64)
+        if n > 0i64 {
+            var i = 0usize
+            let count = n as usize
+            while i < count {
+                let off = (ev_buf as usize) + (i * 12usize)
+                let p_ev = off as *raw u32
+                let p_data = (off + 4usize) as *raw u64
+
+                let ev_flags = p_ev[0usize]
+                let ev_data = p_data[0usize]
+
+                events.push(Event {
+                    fd: (ev_data & 0xFFFFFFFFu64) as i32,
+                    events: ev_flags,
+                    user_data: ev_data,
+                })
+
+                i = i + 1usize
+            }
+        }
+
+        free(ev_buf as *raw var u8)
+        return events
+    }
+
+    pub fn close(var self) {
+        if !self.is_closed && self.epoll_fd >= 0 {
+            let _ = syscall1(SYS_close, self.epoll_fd as i64)
+            self.epoll_fd = -1
+            self.is_closed = true
+        }
+    }
+}

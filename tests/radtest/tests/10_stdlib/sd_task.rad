@@ -1,0 +1,20 @@
+import std/task;
+
+fn main() -> i32 {
+    var sched = Scheduler.new()
+
+    let t1 = sched.spawn("worker_a", 2usize)
+    let t2 = sched.spawn("worker_b", 3usize)
+    let t3 = sched.spawn("worker_c", 1usize)
+
+    println(sched.task_count())
+
+    let steps = sched.run()
+    println(steps)
+
+    if sched.is_empty() {
+        println("ALL_TASKS_COMPLETED")
+    }
+
+    return 0
+}

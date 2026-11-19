@@ -1,0 +1,19 @@
+import std/toml;
+
+fn main() -> i32 {
+    let toml_doc = "[package]\nname = \"my-app\"\nversion = \"1.2.3\"\nport = 8080\nenabled = true\n"
+    let parsed = parse_toml(toml_doc)
+
+    let pkg = parsed.get("package")
+    if pkg.is_table() {
+        println("PKG_TABLE_OK")
+        println(pkg.get("name").as_str())
+        println(pkg.get("version").as_str())
+        println(pkg.get("port").as_int())
+        if pkg.get("enabled").as_bool() {
+            println("ENABLED_OK")
+        }
+    }
+
+    return 0
+}

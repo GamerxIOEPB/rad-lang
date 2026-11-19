@@ -827,3 +827,76 @@ fn parse_float_str(s: str) -> f64 {
     if is_neg { return -total }
     return total
 }
+
+// ==============================================================================
+// Monorepo Workspace Member Resolution
+// ==============================================================================
+
+pub fn get_workspace_members() -> Vec<String> {
+    var members = Vec.new()
+    if !file_exists("rad.toml") {
+        return members
+    }
+    let toml_str = read_file_str("rad.toml")
+    if toml_str.len() == 0usize {
+        return members
+    }
+    let doc = TomlValue.parse(toml_str.as_ptr() as str)
+    let ws_opt = doc.get("workspace.members")
+    match ws_opt {
+        Option.Some(val) => {
+            if val.kind == TOML_ARRAY {
+                var i = 0usize
+                while i < val.arr_val.len {
+                    let elem = val.arr_val.ptr[i]
+                    if elem.kind == TOML_STRING {
+                        let pat = elem.as_str()
+                        if str_ends_with(pat, "/*") {
+                            let pat_len = str_len(pat)
+                            var prefix = String.new()
+                            let p_pat = pat as *raw u8
+                            var pi = 0usize
+                            while pi + 2usize < pat_len {
+                                prefix.push_byte(p_pat[pi])
+                                pi = pi + 1usize
+                            }
+                            var find_cmd = String.new()
+                            find_cmd.push_str("find ")
+                            find_cmd.push_str(prefix.as_ptr() as str)
+                            find_cmd.push_str(" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort > /tmp/rad_ws_find.txt")
+                            let _s = system(find_cmd.as_ptr() as str)
+                            let flist = read_file_str("/tmp/rad_ws_find.txt")
+                            let _rm = remove("/tmp/rad_ws_find.txt")
+                            let lines = split_source_lines(flist)
+                            var li = 0usize
+                            while li < lines.len {
+                                let dir_path = lines.ptr[li].as_ptr() as str
+                                if str_len(dir_path) > 0usize {
+                                    var toml_chk = String.new()
+                                    toml_chk.push_str(dir_path)
+                                    toml_chk.push_str("/rad.toml")
+                                    if file_exists(toml_chk.as_ptr() as str) {
+                                        members.push(String.from_str(dir_path))
+                                    }
+                                }
+                                li = li + 1usize
+                            }
+                        } else {
+                            var toml_chk = String.new()
+                            toml_chk.push_str(pat)
+                            toml_chk.push_str("/rad.toml")
+                            if file_exists(toml_chk.as_ptr() as str) {
+                                members.push(String.from_str(pat))
+                            } else if file_exists(pat) {
+                                members.push(String.from_str(pat))
+                            }
+                        }
+                    }
+                    i = i + 1usize
+                }
+            }
+        },
+        _ => {},
+    }
+    return members
+}

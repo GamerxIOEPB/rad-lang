@@ -1,0 +1,22 @@
+import std/regex;
+
+fn main() -> i32 {
+    let re_num = Regex.compile("^[0-9]+$")
+    if re_num.is_match("12345") {
+        println("MATCH_NUM_OK")
+    }
+    if !re_num.is_match("123a45") {
+        println("REJECT_NON_NUM_OK")
+    }
+
+    let re_word = Regex.compile("foo.*bar")
+    if re_word.is_match("test foo 123 bar end") {
+        println("MATCH_WILDCARD_OK")
+    }
+
+    let re_rep = Regex.compile("[0-9]+")
+    let replaced = re_rep.replace_all("abc 123 def 456", "#")
+    println(replaced.as_ptr() as str)
+
+    return 0
+}

@@ -225,7 +225,7 @@ fn write_unit_runner(out_path: str, symbols: Vec<String>, displays: Vec<String>)
     s.push_str("fn rad_test_main() -> i32 {\n")
     s.push_str("    println(\"\");\n")
     s.push_str("    print(\"running \");\n")
-    s.push_str("    print_num(")
+    s.push_str("    rad_test_print_num(")
     s.push_str(test_int_to_str(symbols.len as i64).as_ptr() as str)
     s.push_str("i64);\n")
     s.push_str("    println(\" tests\");\n")
@@ -245,14 +245,14 @@ fn write_unit_runner(out_path: str, symbols: Vec<String>, displays: Vec<String>)
     s.push_str("    println(\"\");\n")
     s.push_str("    if failed == 0 {\n")
     s.push_str("        print(\"test result: \\x1b[32mok\\x1b[0m. \");\n")
-    s.push_str("        print_num(passed as i64);\n")
+    s.push_str("        rad_test_print_num(passed as i64);\n")
     s.push_str("        println(\" passed; 0 failed\");\n")
     s.push_str("        return 0;\n")
     s.push_str("    } else {\n")
     s.push_str("        print(\"test result: \\x1b[31mFAILED\\x1b[0m. \");\n")
-    s.push_str("        print_num(failed as i64);\n")
+    s.push_str("        rad_test_print_num(failed as i64);\n")
     s.push_str("        print(\" failed; \");\n")
-    s.push_str("        print_num(passed as i64);\n")
+    s.push_str("        rad_test_print_num(passed as i64);\n")
     s.push_str("        println(\" passed\");\n")
     s.push_str("        return 1;\n")
     s.push_str("    }\n")
@@ -262,6 +262,42 @@ fn write_unit_runner(out_path: str, symbols: Vec<String>, displays: Vec<String>)
 }
 
 pub fn cmd_test(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
+    let ws_members = get_workspace_members()
+    if ws_members.len > 0usize {
+        println("Running tests for workspace members...")
+        var mi = 0usize
+        var ws_failed = 0
+        while mi < ws_members.len {
+            let m_path = ws_members.ptr[mi].as_ptr() as str
+            print("   \x1b[1;36mTesting\x1b[0m ")
+            println(m_path)
+            var t_cmd = String.new()
+            t_cmd.push_str("(cd ")
+            t_cmd.push_str(m_path)
+            t_cmd.push_str(" && ")
+            t_cmd.push_str(argv0)
+            t_cmd.push_str(" test")
+            var a_idx = 2
+            while a_idx < argc {
+                t_cmd.push_str(" ")
+                t_cmd.push_str(argv[a_idx] as str)
+                a_idx = a_idx + 1
+            }
+            t_cmd.push_str(")")
+            let t_status = system(t_cmd.as_ptr() as str)
+            if t_status != 0 {
+                ws_failed = ws_failed + 1
+            }
+            mi = mi + 1usize
+        }
+        if ws_failed > 0 {
+            println("error: workspace test failed in one or more members.")
+            return 1
+        }
+        println("  \x1b[1;32m✓\x1b[0m All workspace member tests passed.")
+        return 0
+    }
+
     let has_toml = file_exists("rad.toml")
     let has_src = file_exists("src")
     if !has_toml && !has_src {

@@ -1,0 +1,58 @@
+import std/event;
+import std/os/linux/syscall;
+
+fn main() -> i32 {
+    let loop_opt = EventLoop.new()
+    match loop_opt {
+        Option.Some(ev_loop) => {
+            println("EVENT_LOOP_NEW_OK")
+
+            // Create a pipe using SYS_pipe (22)
+            let pipe_fds = malloc(8usize) as *raw var u32
+            let r = syscall1(22i64, pipe_fds as *raw u8)
+            if r != 0i64 {
+                println("FAIL_PIPE")
+                return 1
+            }
+            let read_fd = pipe_fds[0usize] as i32
+            let write_fd = pipe_fds[1usize] as i32
+
+            // Add read end to epoll
+            let added = ev_loop.add(read_fd, EPOLLIN, 42u64)
+            if added {
+                println("EPOLL_ADD_OK")
+            }
+
+            // Write 1 byte into write end using SYS_write (1)
+            let w_buf = malloc(4usize) as *raw var u8
+            w_buf[0usize] = 65u8 // 'A'
+            let nw = syscall3(1i64, write_fd as i64, w_buf as *raw u8, 1i64)
+
+            // Poll for event
+            let events = ev_loop.poll(4usize, 50)
+            if events.len > 0usize {
+                let ev = events.ptr[0usize]
+                if ev.readable() && ev.user_data == 42u64 {
+                    println("EVENT_READABLE_OK")
+                }
+            }
+
+            // Clean up
+            let removed = ev_loop.remove(read_fd)
+            if removed {
+                println("EPOLL_REMOVE_OK")
+            }
+            let _ = syscall1(3i64, read_fd as i64)
+            let _ = syscall1(3i64, write_fd as i64)
+            free(pipe_fds as *raw var u8)
+            free(w_buf as *raw var u8)
+            ev_loop.close()
+            println("EVENT_LOOP_CLOSE_OK")
+        },
+        Option.None => {
+            println("FAIL_EVENT_LOOP")
+        },
+    }
+
+    return 0
+}

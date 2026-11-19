@@ -363,6 +363,17 @@ fn cmd_init(target_dir: str, is_lib: bool) -> i32 {
 
 fn cmd_clean() -> i32 {
     println("Cleaning target directory...")
+    let ws_members = get_workspace_members()
+    var mi = 0usize
+    while mi < ws_members.len {
+        let m_path = ws_members.ptr[mi].as_ptr() as str
+        var rm_cmd = String.new()
+        rm_cmd.push_str("rm -rf ")
+        rm_cmd.push_str(m_path)
+        rm_cmd.push_str("/target")
+        let _ = system(rm_cmd.as_ptr() as str)
+        mi = mi + 1usize
+    }
     let _r = system("rm -rf target")
     println("Clean complete.")
     return 0
@@ -2377,6 +2388,124 @@ fn cmd_build(is_release: bool, target_triple: str, argv0: str) -> i32 {
         return 1
     }
 
+    let ws_members = get_workspace_members()
+    if ws_members.len > 0usize {
+        let radc_bin = find_radc_compiler(argv0)
+        if !is_executable_radc(radc_bin.as_ptr() as str) {
+            println("error: radc compiler not found or not executable.")
+            return 1
+        }
+
+        var root_out = String.new()
+        if is_release {
+            root_out.push_str("target/release")
+        } else {
+            root_out.push_str("target/debug")
+        }
+        var mk_cmd = String.new()
+        mk_cmd.push_str("mkdir -p ")
+        mk_cmd.push_str(root_out.as_ptr() as str)
+        let _mk = system(mk_cmd.as_ptr() as str)
+
+        println("Building workspace...")
+
+        var mi = 0usize
+        while mi < ws_members.len {
+            let m_path = ws_members.ptr[mi].as_ptr() as str
+            var m_name = path_basename(m_path)
+            var m_toml_path = String.new()
+            m_toml_path.push_str(m_path)
+            m_toml_path.push_str("/rad.toml")
+
+            let m_toml_content = read_file_str(m_toml_path.as_ptr() as str)
+            if m_toml_content.len() > 0usize {
+                let m_doc = TomlValue.parse(m_toml_content.as_ptr() as str)
+                let pn = m_doc.get_str("package.name")
+                if str_len(pn) > 0usize {
+                    m_name = String.from_str(pn)
+                }
+            }
+
+            var has_main = false
+            var chk_main = String.new()
+            chk_main.push_str(m_path)
+            chk_main.push_str("/src/main.rad")
+            if file_exists(chk_main.as_ptr() as str) {
+                has_main = true
+            } else {
+                var chk_root_main = String.new()
+                chk_root_main.push_str(m_path)
+                chk_root_main.push_str("/main.rad")
+                if file_exists(chk_root_main.as_ptr() as str) {
+                    has_main = true
+                }
+            }
+
+            var m_bin_out = String.new()
+            m_bin_out.push_str(root_out.as_ptr() as str)
+            m_bin_out.push_byte(47u8) // '/'
+            if has_main {
+                m_bin_out.push_str(m_name.as_ptr() as str)
+            } else {
+                m_bin_out.push_str("lib")
+                m_bin_out.push_str(m_name.as_ptr() as str)
+                m_bin_out.push_str(".o")
+            }
+
+            var m_src_spec = String.new()
+            m_src_spec.push_str(m_path)
+            m_src_spec.push_str("/src/*.rad")
+
+            var chk_src = String.new()
+            chk_src.push_str(m_path)
+            chk_src.push_str("/src")
+            if !file_exists(chk_src.as_ptr() as str) {
+                m_src_spec = String.new()
+                m_src_spec.push_str(m_path)
+                m_src_spec.push_str("/*.rad")
+            }
+
+            print("   \x1b[1;36mCompiling\x1b[0m ")
+            print(m_name.as_ptr() as str)
+            print(" (")
+            print(m_path)
+            println(")...")
+
+            var b_cmd = String.new()
+            b_cmd.push_str(radc_bin.as_ptr() as str)
+            b_cmd.push_str(" ")
+            b_cmd.push_str(m_src_spec.as_ptr() as str)
+            if !has_main {
+                b_cmd.push_str(" -c")
+            }
+            b_cmd.push_str(" -o ")
+            b_cmd.push_str(m_bin_out.as_ptr() as str)
+            if is_release {
+                b_cmd.push_str(" -O3")
+            } else {
+                b_cmd.push_str(" -O0")
+            }
+            if str_len(target_triple) > 0usize {
+                b_cmd.push_str(" --target ")
+                b_cmd.push_str(target_triple)
+            }
+
+            let status = system(b_cmd.as_ptr() as str)
+            if status != 0 {
+                print("error: failed to build workspace member: ")
+                println(m_path)
+                return 1
+            }
+
+            mi = mi + 1usize
+        }
+
+        print("  \x1b[1;32m✓\x1b[0m Workspace build finished successfully (")
+        print(root_out.as_ptr() as str)
+        println("/).")
+        return 0
+    }
+
     // Auto-install dependencies if rad.toml declares [dependencies] and packages/ is missing
     if str_contains(toml.as_ptr() as str, "[dependencies]") && !file_exists("packages") {
         println("Dependencies not yet installed. Running `rad install`...")
@@ -2476,6 +2605,62 @@ fn cmd_build(is_release: bool, target_triple: str, argv0: str) -> i32 {
 }
 
 fn cmd_run(is_release: bool, target_triple: str, run_args: str, argv0: str) -> i32 {
+    let ws_members = get_workspace_members()
+    if ws_members.len > 0usize {
+        let build_status = cmd_build(is_release, target_triple, argv0)
+        if build_status != 0 {
+            return build_status
+        }
+        var root_out = String.new()
+        if is_release {
+            root_out.push_str("./target/release/")
+        } else {
+            root_out.push_str("./target/debug/")
+        }
+        var run_target = String.new()
+        if str_len(run_args) > 0usize {
+            var candidate = String.new()
+            candidate.push_str(root_out.as_ptr() as str)
+            candidate.push_str(run_args)
+            if file_exists(candidate.as_ptr() as str) {
+                run_target = candidate
+            }
+        }
+        if run_target.len() == 0usize {
+            var mi = 0usize
+            while mi < ws_members.len {
+                let m_path = ws_members.ptr[mi].as_ptr() as str
+                var m_name = path_basename(m_path)
+                var m_toml_path = String.new()
+                m_toml_path.push_str(m_path)
+                m_toml_path.push_str("/rad.toml")
+                let m_toml_content = read_file_str(m_toml_path.as_ptr() as str)
+                if m_toml_content.len() > 0usize {
+                    let m_doc = TomlValue.parse(m_toml_content.as_ptr() as str)
+                    let pn = m_doc.get_str("package.name")
+                    if str_len(pn) > 0usize {
+                        m_name = String.from_str(pn)
+                    }
+                }
+                var bin_chk = String.new()
+                bin_chk.push_str(root_out.as_ptr() as str)
+                bin_chk.push_str(m_name.as_ptr() as str)
+                if file_exists(bin_chk.as_ptr() as str) {
+                    run_target = bin_chk
+                    break
+                }
+                mi = mi + 1usize
+            }
+        }
+        if run_target.len() == 0usize {
+            println("error: no compiled workspace binary found to run")
+            return 1
+        }
+        print("Running ")
+        println(run_target.as_ptr() as str)
+        return system(run_target.as_ptr() as str)
+    }
+
     let build_status = cmd_build(is_release, target_triple, argv0)
     if build_status != 0 {
         return build_status
@@ -2511,6 +2696,48 @@ fn cmd_check(argv0: str) -> i32 {
     if toml.len() == 0usize {
         println("error: could not find `rad.toml` in current directory")
         return 1
+    }
+
+    let ws_members = get_workspace_members()
+    if ws_members.len > 0usize {
+        let radc_bin = find_radc_compiler(argv0)
+        if !is_executable_radc(radc_bin.as_ptr() as str) {
+            println("error: radc compiler not found or not executable.")
+            return 1
+        }
+        println("Checking workspace members...")
+        var mi = 0usize
+        while mi < ws_members.len {
+            let m_path = ws_members.ptr[mi].as_ptr() as str
+            var m_src_spec = String.new()
+            m_src_spec.push_str(m_path)
+            m_src_spec.push_str("/src/*.rad")
+            var chk_src = String.new()
+            chk_src.push_str(m_path)
+            chk_src.push_str("/src")
+            if !file_exists(chk_src.as_ptr() as str) {
+                m_src_spec = String.new()
+                m_src_spec.push_str(m_path)
+                m_src_spec.push_str("/*.rad")
+            }
+
+            print("   \x1b[1;36mChecking\x1b[0m ")
+            println(m_path)
+            var c_cmd = String.new()
+            c_cmd.push_str(radc_bin.as_ptr() as str)
+            c_cmd.push_str(" ")
+            c_cmd.push_str(m_src_spec.as_ptr() as str)
+            c_cmd.push_str(" --check")
+            let status = system(c_cmd.as_ptr() as str)
+            if status != 0 {
+                print("error: check failed for workspace member: ")
+                println(m_path)
+                return 1
+            }
+            mi = mi + 1usize
+        }
+        println("  \x1b[1;32m✓\x1b[0m Workspace check passed: 0 syntax or type errors across all members.")
+        return 0
     }
 
     println("Checking Rad package syntax and types...")

@@ -1,0 +1,31 @@
+import std/json;
+
+fn main() -> i32 {
+    let json_text = "{\"name\":\"rad-app\",\"port\":8080,\"active\":true,\"tags\":[\"fast\",\"compiled\"]}"
+    
+    match json_parse(json_text) {
+        Option.Some(val) => {
+            println("PARSE_OK")
+            println(val.get_str("name"))
+            println(val.get_i64("port"))
+            if val.get_bool("active") {
+                println("ACTIVE_OK")
+            }
+            let tags = val.get("tags")
+            match tags {
+                Option.Some(t) => {
+                    if t.is_array() {
+                        println("ARRAY_OK")
+                        println(t.len())
+                    }
+                },
+                Option.None => {},
+            }
+        },
+        Option.None => {
+            println("PARSE_FAILED")
+        },
+    }
+
+    return 0
+}

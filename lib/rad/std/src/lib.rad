@@ -27,3 +27,7 @@ pub import crypto
 pub import http
 pub import kv
 pub import wasm
+pub import toml
+pub import compress
+pub import event
+pub import task

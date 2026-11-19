@@ -1,0 +1,23 @@
+import std/compress;
+
+fn main() -> i32 {
+    let msg = "Hello from Rad compression! Pure Rad RFC 1951 Deflate, RFC 1952 Gzip, and RFC 1950 Zlib."
+
+    // 1. Gzip roundtrip
+    let gz = gzip_compress(msg)
+    if gz.len() > 0usize {
+        println("GZIP_COMPRESS_OK")
+    }
+    let ungz = gzip_decompress(gz.as_ptr(), gz.len())
+    println(ungz.as_ptr() as str)
+
+    // 2. Zlib roundtrip
+    let zl = zlib_compress(msg)
+    if zl.len() > 0usize {
+        println("ZLIB_COMPRESS_OK")
+    }
+    let unzl = zlib_decompress(zl.as_ptr(), zl.len())
+    println(unzl.as_ptr() as str)
+
+    return 0
+}

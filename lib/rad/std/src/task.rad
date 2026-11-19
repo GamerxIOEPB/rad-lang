@@ -1,0 +1,142 @@
+// ==============================================================================
+// Rad Standard Library: Cooperative Task Scheduler (std::task)
+// Lightweight green threads and cooperative coroutine scheduling.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+pub const TASK_PENDING: i32   = 0
+pub const TASK_RUNNING: i32   = 1
+pub const TASK_SUSPENDED: i32 = 2
+pub const TASK_DONE: i32      = 3
+pub const TASK_CANCELLED: i32 = 4
+
+pub struct Scheduler {
+    pub ids: Vec<usize>,
+    pub names: Vec<String>,
+    pub statuses: Vec<i32>,
+    pub progresses: Vec<usize>,
+    pub targets: Vec<usize>,
+    pub current_idx: usize,
+    pub completed_count: usize,
+    pub next_id: usize,
+}
+
+impl Scheduler {
+    pub fn new() -> Scheduler {
+        return Scheduler {
+            ids: Vec.new(),
+            names: Vec.new(),
+            statuses: Vec.new(),
+            progresses: Vec.new(),
+            targets: Vec.new(),
+            current_idx: 0usize,
+            completed_count: 0usize,
+            next_id: 1usize,
+        }
+    }
+
+    pub fn spawn(var self, name: str, target_steps: usize) -> usize {
+        let tid = self.next_id
+        self.next_id = self.next_id + 1usize
+        self.ids.push(tid)
+        self.names.push(String.from_str(name))
+        self.statuses.push(TASK_PENDING)
+        self.progresses.push(0usize)
+        self.targets.push(target_steps)
+        return tid
+    }
+
+    pub fn task_count(self) -> usize {
+        return self.ids.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        return self.completed_count >= self.ids.len
+    }
+
+    pub fn step(var self) -> bool {
+        if self.is_empty() {
+            return false
+        }
+
+        var checked = 0usize
+        let total = self.ids.len
+
+        while checked < total {
+            if self.current_idx >= total {
+                self.current_idx = 0usize
+            }
+
+            let idx = self.current_idx
+            self.current_idx = self.current_idx + 1usize
+            checked = checked + 1usize
+
+            let st = self.statuses.ptr[idx]
+            if st == TASK_PENDING || st == TASK_RUNNING {
+                self.statuses.ptr[idx] = TASK_RUNNING
+                let cur_prog = self.progresses.ptr[idx] + 1usize
+                self.progresses.ptr[idx] = cur_prog
+                if cur_prog >= self.targets.ptr[idx] {
+                    self.statuses.ptr[idx] = TASK_DONE
+                    self.completed_count = self.completed_count + 1usize
+                }
+                return true
+            }
+        }
+
+        return false
+    }
+
+    pub fn yield_task(var self, task_id: usize) {
+        var i = 0usize
+        while i < self.ids.len {
+            if self.ids.ptr[i] == task_id && self.statuses.ptr[i] == TASK_RUNNING {
+                self.statuses.ptr[i] = TASK_PENDING
+                return
+            }
+            i = i + 1usize
+        }
+    }
+
+    pub fn complete_task(var self, task_id: usize) {
+        var i = 0usize
+        while i < self.ids.len {
+            if self.ids.ptr[i] == task_id && self.statuses.ptr[i] != TASK_DONE {
+                self.statuses.ptr[i] = TASK_DONE
+                self.completed_count = self.completed_count + 1usize
+                return
+            }
+            i = i + 1usize
+        }
+    }
+
+    pub fn run(var self) -> usize {
+        var steps = 0usize
+        while self.step() {
+            steps = steps + 1usize
+        }
+        return steps
+    }
+
+    pub fn get_status(self, task_id: usize) -> i32 {
+        var i = 0usize
+        while i < self.ids.len {
+            if self.ids.ptr[i] == task_id {
+                return self.statuses.ptr[i]
+            }
+            i = i + 1usize
+        }
+        return -1
+    }
+
+    pub fn get_progress(self, task_id: usize) -> usize {
+        var i = 0usize
+        while i < self.ids.len {
+            if self.ids.ptr[i] == task_id {
+                return self.progresses.ptr[i]
+            }
+            i = i + 1usize
+        }
+        return 0usize
+    }
+}
