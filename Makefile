@@ -128,7 +128,6 @@ install: all
 	@find $(BIN_DIR) -maxdepth 1 -type f -exec cp -f {} $(PREFIX)/bin/ \;
 	cp -rf lib/rad/core lib/rad/alloc lib/rad/std lib/rad/rad-test lib/rad/rad-gfx lib/rad/rad-gui lib/rad/rad-sound $(PREFIX)/lib/rad/
 	cp -rf $(SYSROOT)/* $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/
-	cp -rf lib/targets/* $(PREFIX)/lib/targets/
 	@if [ -d "share/rad" ]; then cp -rf share/rad/* $(PREFIX)/share/rad/; fi
 	@if [ -d "../rad-lib/packages" ]; then \
 		echo "==> Pre-installing Rad ecosystem libraries to $(PREFIX)/packages..."; \

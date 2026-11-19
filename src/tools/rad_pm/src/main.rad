@@ -2852,7 +2852,6 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
         println("Subcommands:")
         println("  info                  Display active toolchain version and configuration")
         println("  list                  List available official Rad releases")
-        println("  target <list|add|rm>  Manage compilation targets")
         println("  update                Update toolchain to latest stable release")
         println("  update --check        Check for available updates without installing")
         println("  update --version <v>  Update or switch to a specific version")
@@ -2860,127 +2859,6 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     }
 
     let subcmd = argv[2] as str
-
-    if str_eq(subcmd, "target") || str_eq(subcmd, "install") {
-        var action = "list"
-        var target_name = "wasm32-unknown-unknown"
-        if str_eq(subcmd, "install") {
-            action = "add"
-            if argc > 3 {
-                target_name = argv[3] as str
-            }
-        } else if str_eq(subcmd, "target") {
-            if argc > 3 {
-                action = argv[3] as str
-            }
-            if argc > 4 {
-                target_name = argv[4] as str
-            }
-        }
-
-        let home_env = getenv("HOME")
-        var target_base = String.new()
-        if (home_env as usize) != 0usize {
-            target_base.push_str(home_env as str)
-            target_base.push_str("/.rad/lib/targets")
-        } else {
-            target_base.push_str(".rad/lib/targets")
-        }
-
-        if str_eq(action, "list") {
-            println("Rad Toolchain Targets:")
-            println("")
-            println("  \x1b[1;32mBuilt-in Targets\x1b[0m (0 KB overhead, natively supported):")
-            println("    * x86_64-unknown-linux-musl (host / default)")
-            println("    * wasm32-unknown-unknown (WebAssembly / browser, embedded LLD)")
-            println("")
-            println("  \x1b[1;33mAvailable Cross-Compilation Targets\x1b[0m (require external OS sysroot):")
-            println("    - aarch64-unknown-linux-musl (Linux ARM64)")
-            println("    - x86_64-apple-darwin (macOS Intel x86_64)")
-            println("    - aarch64-apple-darwin (macOS Apple Silicon)")
-            println("    - x86_64-pc-windows-msvc (Windows x64)")
-            println("")
-            println("To install an external cross-compilation target:")
-            println("  rad toolchain target add <target>")
-            return 0
-        }
-
-        if str_eq(action, "add") || str_eq(action, "install") {
-            if str_eq(target_name, "wasm32-unknown-unknown") || str_eq(target_name, "wasm32") {
-                var mkdir_cmd = String.new()
-                mkdir_cmd.push_str("mkdir -p \"")
-                mkdir_cmd.push_str(target_base.as_ptr() as str)
-                mkdir_cmd.push_str("/wasm32-unknown-unknown\"")
-                let _ = system(mkdir_cmd.as_ptr() as str)
-
-                var meta_path = String.new()
-                meta_path.push_str(target_base.as_ptr() as str)
-                meta_path.push_str("/wasm32-unknown-unknown/target.toml")
-                let meta_content = "[target]\ntriple = \"wasm32-unknown-unknown\"\narch = \"wasm32\"\nos = \"unknown\"\nformat = \"wasm\"\nlinker = \"wasm-ld\"\nstorage_overhead = \"0 KB (embedded LLD)\"\nbuiltin = true\n"
-                let _ = write_file_str(meta_path.as_ptr() as str, meta_content)
-
-                println("info: target 'wasm32-unknown-unknown' is already built-in to the toolchain (0 KB overhead, no installation needed).")
-                return 0
-            }
-
-            if str_eq(target_name, "x86_64-unknown-linux-musl") || str_eq(target_name, "x86_64") {
-                println("info: target 'x86_64-unknown-linux-musl' is the default host target (already installed).")
-                return 0
-            }
-
-            let is_known_cross = str_eq(target_name, "aarch64-unknown-linux-musl") ||
-                                 str_eq(target_name, "x86_64-apple-darwin") ||
-                                 str_eq(target_name, "aarch64-apple-darwin") ||
-                                 str_eq(target_name, "x86_64-pc-windows-msvc")
-
-            if is_known_cross {
-                var info_m = String.new()
-                info_m.push_str("info: cross-compilation target '")
-                info_m.push_str(target_name)
-                info_m.push_str("' requires an external OS sysroot (~15-45 MB).\n")
-                info_m.push_str("info: sysroot package distribution for '")
-                info_m.push_str(target_name)
-                info_m.push_str("' will be downloaded when official sysroots are hosted.\n")
-                info_m.push_str("  Note: Built-in wasm32-unknown-unknown requires 0 KB overhead and is already active.")
-                println(info_m.as_ptr() as str)
-                return 0
-            }
-
-            var err_m = String.new()
-            err_m.push_str("error: unknown target triple '")
-            err_m.push_str(target_name)
-            err_m.push_str("'\nRun `rad toolchain target list` to see available targets.")
-            println(err_m.as_ptr() as str)
-            return 1
-        }
-
-        if str_eq(action, "remove") || str_eq(action, "rm") {
-            if str_starts_with(target_name, "x86_64") {
-                println("error: cannot remove default host target 'x86_64-unknown-linux-musl'")
-                return 1
-            }
-            if str_eq(target_name, "wasm32-unknown-unknown") || str_eq(target_name, "wasm32") {
-                println("error: cannot remove built-in target 'wasm32-unknown-unknown' (it is natively embedded in the toolchain)")
-                return 1
-            }
-            var rm_cmd = String.new()
-            rm_cmd.push_str("rm -rf \"")
-            rm_cmd.push_str(target_base.as_ptr() as str)
-            rm_cmd.push_str("/")
-            rm_cmd.push_str(target_name)
-            rm_cmd.push_str("\"")
-            let _ = system(rm_cmd.as_ptr() as str)
-            var rm_m = String.new()
-            rm_m.push_str("  \x1b[1;32m✓\x1b[0m Removed target '")
-            rm_m.push_str(target_name)
-            rm_m.push_str("'")
-            println(rm_m.as_ptr() as str)
-            return 0
-        }
-
-        println("error: unrecognized target action. Usage: `rad toolchain target <list|add|rm>`")
-        return 1
-    }
 
     if str_eq(subcmd, "info") {
         println("Rad Toolchain Information")
