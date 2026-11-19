@@ -249,6 +249,20 @@ impl Codegen {
                                 if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, cname) {
                                     let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                                     if str_len(raw_r) > 0usize && !str_eq(raw_r, "i64") && !str_eq(raw_r, "void") {
+                                        if str_starts_with(raw_r, "Option<") {
+                                            let plen = str_len(raw_r)
+                                            if plen > 8usize {
+                                                var inner = String.new()
+                                                let cp = raw_r as *raw u8
+                                                var ci = 7usize
+                                                while ci < plen && cp[ci] != 62u8 {
+                                                    inner.push_byte(cp[ci])
+                                                    ci = ci + 1usize
+                                                }
+                                                inner.push_byte(0u8)
+                                                return inner.as_ptr() as str
+                                            }
+                                        }
                                         return raw_r
                                     }
                                     break
@@ -268,6 +282,51 @@ impl Codegen {
                                 if self.is_struct_name(rname) {
                                     return rname
                                 }
+                            }
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_METHOD_CALL {
+                        let m_recv = self.parser.exprs.ptr[init_e].left
+                        let m_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        let recv_ty = self.get_expr_struct_name(m_recv)
+                        if str_len(recv_ty) > 0usize {
+                            let base_ty = self.clean_type_name(recv_ty)
+                            var bm = String.new()
+                            bm.push_str(base_ty)
+                            bm.push_str("__")
+                            bm.push_str(m_name)
+                            bm.push_byte(0u8)
+                            let bm_name = bm.as_ptr() as str
+                            var fi = 0usize
+                            while fi < self.parser.functions.len {
+                                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_name) {
+                                    let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                    if str_contains(recv_ty, "<") {
+                                        var si = 0usize
+                                        while si < self.parser.structs.len {
+                                            let sdef = self.parser.structs.ptr[si]
+                                            if self.match_struct_name(sdef.struct_name.as_ptr() as str, base_ty) {
+                                                var fld_i = 0usize
+                                                while fld_i < sdef.field_names.len {
+                                                    if str_eq(sdef.field_types.ptr[fld_i].as_ptr() as str, raw_r) {
+                                                        let mono = self.get_monomorphized_field_type(sdef, recv_ty, fld_i)
+                                                        if str_len(mono) > 0usize {
+                                                            return mono
+                                                        }
+                                                    }
+                                                    fld_i = fld_i + 1usize
+                                                }
+                                                break
+                                            }
+                                            si = si + 1usize
+                                        }
+                                    }
+                                    if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                        return raw_r
+                                    }
+                                    break
+                                }
+                                fi = fi + 1usize
                             }
                         }
                     }
@@ -516,7 +575,10 @@ impl Codegen {
                 return vname
             }
             let raw = self.get_raw_var_type(vname)
-            return self.clean_type_name(raw)
+            if str_starts_with(raw, "*") || str_starts_with(raw, "&") || str_starts_with(raw, "raw ") || str_starts_with(raw, "var ") {
+                return self.clean_type_name(raw)
+            }
+            return raw
         }
         if k == EXPR_FIELD_ACCESS {
             let recv_id = ep[expr_id].left
@@ -557,6 +619,22 @@ impl Codegen {
                     }
                     fi = fi + 1usize
                 }
+                let base_ty = self.clean_type_name(parent_struct)
+                if !str_eq(base_ty, parent_struct) && str_len(base_ty) > 0usize {
+                    var bm = String.new()
+                    bm.push_str(base_ty)
+                    bm.push_str("__")
+                    bm.push_str(member)
+                    bm.push_byte(0u8)
+                    let bm_name = bm.as_ptr() as str
+                    fi = 0usize
+                    while fi < self.parser.functions.len {
+                        if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_name) {
+                            return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                        }
+                        fi = fi + 1usize
+                    }
+                }
             }
             var fi = 0usize
             while fi < self.parser.functions.len {
@@ -591,6 +669,59 @@ impl Codegen {
         return ""
     }
 
+    fn get_monomorphized_field_type(self, sdef: StructDef, s_type: str, fi: usize) -> str {
+        if fi >= sdef.field_types.len {
+            return ""
+        }
+        let raw_fty = sdef.field_types.ptr[fi].as_ptr() as str
+        if !str_contains(s_type, "<") {
+            return raw_fty
+        }
+        let p = s_type as *raw u8
+        let slen = str_len(s_type)
+        var start_lt = 0usize
+        while start_lt < slen && p[start_lt] != 60u8 { // '<'
+            start_lt = start_lt + 1usize
+        }
+        if start_lt >= slen {
+            return raw_fty
+        }
+        start_lt = start_lt + 1usize
+        var cur_arg = String.new()
+        var arg_idx = 0usize
+        var depth = 0i64
+        var pos = start_lt
+        while pos < slen {
+            let b = p[pos]
+            if b == 60u8 { // '<'
+                depth = depth + 1i64
+                cur_arg.push_byte(b)
+            } else if b == 62u8 { // '>'
+                if depth == 0i64 {
+                    if arg_idx == fi {
+                        cur_arg.push_byte(0u8)
+                        return cur_arg.as_ptr() as str
+                    }
+                    break
+                } else {
+                    depth = depth - 1i64
+                    cur_arg.push_byte(b)
+                }
+            } else if b == 44u8 && depth == 0i64 { // ','
+                if arg_idx == fi {
+                    cur_arg.push_byte(0u8)
+                    return cur_arg.as_ptr() as str
+                }
+                arg_idx = arg_idx + 1usize
+                cur_arg = String.new()
+            } else if b != 32u8 || cur_arg.len() > 0usize {
+                cur_arg.push_byte(b)
+            }
+            pos = pos + 1usize
+        }
+        return raw_fty
+    }
+
     fn is_expr_float(self, id: usize) -> bool {
         let ep = self.parser.exprs.ptr
         let k = ep[id].kind
@@ -622,16 +753,23 @@ impl Codegen {
         }
         if k == EXPR_FIELD_ACCESS {
             let fname = ep[id].field_name.as_ptr() as str
+            let recv_id = ep[id].left
+            var s_type = self.get_expr_struct_name(recv_id)
+            if str_len(s_type) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                s_type = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+            }
             var si = 0usize
             while si < self.parser.structs.len {
                 let sdef = self.parser.structs.ptr[si]
-                var fi = 0usize
-                while fi < sdef.field_names.len {
-                    if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
-                        let fty = sdef.field_types.ptr[fi].as_ptr() as str
-                        return str_eq(fty, "f64") || str_eq(fty, "f32")
+                if str_len(s_type) == 0usize || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                    var fi = 0usize
+                    while fi < sdef.field_names.len {
+                        if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                            let fty = self.get_monomorphized_field_type(sdef, s_type, fi)
+                            return str_eq(fty, "f64") || str_eq(fty, "f32")
+                        }
+                        fi = fi + 1usize
                     }
-                    fi = fi + 1usize
                 }
                 si = si + 1usize
             }
@@ -909,6 +1047,95 @@ impl Codegen {
         return -1i64
     }
 
+    fn find_similar_ident(self, target: str) -> str {
+        var best_cand = ""
+        var best_dist = 999i32
+        var vi = 0usize
+        while vi < self.allocated_vars.len {
+            let cand = self.allocated_vars.ptr[vi].as_ptr() as str
+            if is_name_similar(target, cand) {
+                let d = levenshtein_dist(target, cand)
+                if d < best_dist {
+                    best_dist = d
+                    best_cand = cand
+                }
+            }
+            vi = vi + 1usize
+        }
+        if self.current_func_idx < self.parser.functions.len {
+            let cur_fn = self.parser.functions.ptr[self.current_func_idx]
+            var pi = 0usize
+            while pi < cur_fn.param_names.len {
+                let cand = cur_fn.param_names.ptr[pi].as_ptr() as str
+                if is_name_similar(target, cand) {
+                    let d = levenshtein_dist(target, cand)
+                    if d < best_dist {
+                        best_dist = d
+                        best_cand = cand
+                    }
+                }
+                pi = pi + 1usize
+            }
+        }
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let cand = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if is_name_similar(target, cand) {
+                let d = levenshtein_dist(target, cand)
+                if d < best_dist {
+                    best_dist = d
+                    best_cand = cand
+                }
+            }
+            fi = fi + 1usize
+        }
+        var ci = 0usize
+        while ci < self.parser.const_names.len {
+            let cand = self.parser.const_names.ptr[ci].as_ptr() as str
+            if is_name_similar(target, cand) {
+                let d = levenshtein_dist(target, cand)
+                if d < best_dist {
+                    best_dist = d
+                    best_cand = cand
+                }
+            }
+            ci = ci + 1usize
+        }
+        if is_name_similar(target, "println") && 1i32 < best_dist { best_cand = "println"; best_dist = 1i32 }
+        if is_name_similar(target, "print") && 1i32 < best_dist { best_cand = "print"; best_dist = 1i32 }
+        if is_name_similar(target, "eprintln") && 1i32 < best_dist { best_cand = "eprintln"; best_dist = 1i32 }
+        if is_name_similar(target, "assert") && 1i32 < best_dist { best_cand = "assert"; best_dist = 1i32 }
+        return best_cand
+    }
+
+    fn find_similar_field(self, fname: str, s_type: str) -> str {
+        var best_cand = ""
+        var best_dist = 999i32
+        if str_len(s_type) > 0usize {
+            var si = 0usize
+            while si < self.parser.structs.len {
+                let sdef = self.parser.structs.ptr[si]
+                if self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                    var fld_i = 0usize
+                    while fld_i < sdef.field_names.len {
+                        let cand = sdef.field_names.ptr[fld_i].as_ptr() as str
+                        if is_name_similar(fname, cand) {
+                            let d = levenshtein_dist(fname, cand)
+                            if d < best_dist {
+                                best_dist = d
+                                best_cand = cand
+                            }
+                        }
+                        fld_i = fld_i + 1usize
+                    }
+                    break
+                }
+                si = si + 1usize
+            }
+        }
+        return best_cand
+    }
+
     fn is_expr_ptr(self, id: usize) -> bool {
         let ep = self.parser.exprs.ptr
         let k = ep[id].kind
@@ -1046,8 +1273,8 @@ impl Codegen {
                 return true
             }
             let recv_id = ep[id].left
-            var s_type = ""
-            if ep[recv_id].kind == EXPR_IDENT {
+            var s_type = self.get_expr_struct_name(recv_id)
+            if str_len(s_type) == 0usize && ep[recv_id].kind == EXPR_IDENT {
                 s_type = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
             }
             var si = 0usize
@@ -1057,7 +1284,7 @@ impl Codegen {
                     var fi = 0usize
                     while fi < sdef.field_names.len {
                         if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
-                            let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                            let fty = self.get_monomorphized_field_type(sdef, s_type, fi)
                             let lty = self.emit_llvm_type(fty)
                             return str_eq(lty, "ptr") || str_eq(fty, "str") || str_eq(fty, "String") || str_starts_with(fty, "*raw")
                         }
@@ -1482,6 +1709,12 @@ impl Codegen {
                 err.push_str("unresolved identifier '")
                 err.push_str(vname)
                 err.push_str("'")
+                let sug = self.find_similar_ident(vname)
+                if str_len(sug) > 0usize {
+                    err.push_str(" (did you mean '")
+                    err.push_str(sug)
+                    err.push_str("'?)")
+                }
                 self.parser.report_error_span("E0020", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col, str_len(vname) as i64)
             }
 
@@ -1810,6 +2043,12 @@ impl Codegen {
                 err.push_str("unresolved identifier '")
                 err.push_str(callee_name)
                 err.push_str("'")
+                let sug = self.find_similar_ident(callee_name)
+                if str_len(sug) > 0usize {
+                    err.push_str(" (did you mean '")
+                    err.push_str(sug)
+                    err.push_str("'?)")
+                }
                 self.parser.report_error_span("E0020", err.as_ptr() as str, ep[callee_id].expr_line, ep[callee_id].expr_col, str_len(callee_name) as i64)
             }
 
@@ -2431,20 +2670,42 @@ impl Codegen {
                 if str_eq(type_s, "Vec") && str_eq(member, "from") {
                     callee_name = "vec_from"
                 }
-                if !str_eq(type_s, "String") && !str_eq(type_s, "Vec") {
+                let clean_type_s = self.clean_type_name(type_s)
+                if !str_eq(clean_type_s, "String") && !str_eq(clean_type_s, "Vec") {
                     var mangled = String.new()
                     mangled.push_str(type_s)
                     mangled.push_str("__")
                     mangled.push_str(member)
                     mangled.push_byte(0u8)
                     let m_str = mangled.as_ptr() as str
+                    var found_static = false
                     var fi = 0usize
                     while fi < self.parser.functions.len {
                         if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, m_str) {
                             callee_name = m_str
+                            found_static = true
                             break
                         }
                         fi = fi + 1usize
+                    }
+                    if !found_static {
+                        let base_ty = self.clean_type_name(type_s)
+                        if !str_eq(base_ty, type_s) && str_len(base_ty) > 0usize {
+                            var b_mangled = String.new()
+                            b_mangled.push_str(base_ty)
+                            b_mangled.push_str("__")
+                            b_mangled.push_str(member)
+                            b_mangled.push_byte(0u8)
+                            let bm_str = b_mangled.as_ptr() as str
+                            fi = 0usize
+                            while fi < self.parser.functions.len {
+                                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_str) {
+                                    callee_name = bm_str
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
+                        }
                     }
                 }
             } else {
@@ -2457,7 +2718,8 @@ impl Codegen {
                     }
                 }
                 var found_mangled = false
-                if str_len(raw_ty) > 0usize && !str_eq(raw_ty, "String") && !str_eq(raw_ty, "Vec") {
+                let clean_raw = self.clean_type_name(raw_ty)
+                if str_len(raw_ty) > 0usize && !str_eq(clean_raw, "String") && !str_eq(clean_raw, "Vec") {
                     var mangled = String.new()
                     mangled.push_str(raw_ty)
                     mangled.push_str("__")
@@ -2473,6 +2735,26 @@ impl Codegen {
                         }
                         fi = fi + 1usize
                     }
+                    if !found_mangled {
+                        let base_ty = self.clean_type_name(raw_ty)
+                        if !str_eq(base_ty, raw_ty) && str_len(base_ty) > 0usize {
+                            var b_mangled = String.new()
+                            b_mangled.push_str(base_ty)
+                            b_mangled.push_str("__")
+                            b_mangled.push_str(member)
+                            b_mangled.push_byte(0u8)
+                            let bm_str = b_mangled.as_ptr() as str
+                            fi = 0usize
+                            while fi < self.parser.functions.len {
+                                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_str) {
+                                    callee_name = bm_str
+                                    found_mangled = true
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
+                        }
+                    }
                 }
                 if !found_mangled {
                     var standalone_found = false
@@ -2484,7 +2766,7 @@ impl Codegen {
                         }
                         fi = fi + 1usize
                     }
-                    if !standalone_found {
+                    if !standalone_found && !str_eq(clean_raw, "Vec") && !str_eq(clean_raw, "String") {
                         var candidate = ""
                         var c_count = 0
                         fi = 0usize
@@ -2708,6 +2990,12 @@ impl Codegen {
                 err.push_str("no field '")
                 err.push_str(fname)
                 err.push_str("'")
+                let sug = self.find_similar_field(fname, s_type)
+                if str_len(sug) > 0usize {
+                    err.push_str(" (did you mean '")
+                    err.push_str(sug)
+                    err.push_str("'?)")
+                }
                 self.parser.report_error("E0023", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col)
             }
             if !self.is_expr_ptr(recv_id) {
@@ -3365,6 +3653,12 @@ impl Codegen {
                 err.push_str("cannot assign to undeclared variable '")
                 err.push_str(vname)
                 err.push_str("' (declare with 'let' or 'var' first)")
+                let sug = self.find_similar_ident(vname)
+                if str_len(sug) > 0usize {
+                    err.push_str(" (did you mean '")
+                    err.push_str(sug)
+                    err.push_str("'?)")
+                }
                 self.parser.report_error_span("E0020", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, str_len(vname) as i64)
                 let _r = self.emit_expr(init_expr)
                 return
@@ -3768,6 +4062,12 @@ impl Codegen {
                 err.push_str("no field '")
                 err.push_str(fname)
                 err.push_str("'")
+                let sug = self.find_similar_field(fname, s_type)
+                if str_len(sug) > 0usize {
+                    err.push_str(" (did you mean '")
+                    err.push_str(sug)
+                    err.push_str("'?)")
+                }
                 self.parser.report_error("E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
             }
 

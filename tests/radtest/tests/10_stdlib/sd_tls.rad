@@ -1,0 +1,190 @@
+import std/tls;
+import std/http;
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn test_x25519() {
+    let alice_sec = malloc(32usize) as *raw var u8
+    let bob_sec = malloc(32usize) as *raw var u8
+    let alice_pub = malloc(32usize) as *raw var u8
+    let bob_pub = malloc(32usize) as *raw var u8
+    let shared_a = malloc(32usize) as *raw var u8
+    let shared_b = malloc(32usize) as *raw var u8
+
+    var i = 0usize
+    while i < 32usize {
+        alice_sec[i] = 0u8
+        bob_sec[i] = 0u8
+        i = i + 1usize
+    }
+    // Alice private key: 77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a
+    alice_sec[0] = 0x77u8; alice_sec[1] = 0x07u8; alice_sec[2] = 0x6du8; alice_sec[3] = 0x0au8
+    alice_sec[4] = 0x73u8; alice_sec[5] = 0x18u8; alice_sec[6] = 0xa5u8; alice_sec[7] = 0x7du8
+    alice_sec[8] = 0x3cu8; alice_sec[9] = 0x16u8; alice_sec[10] = 0xc1u8; alice_sec[11] = 0x72u8
+    alice_sec[12] = 0x51u8; alice_sec[13] = 0xb2u8; alice_sec[14] = 0x66u8; alice_sec[15] = 0x45u8
+    alice_sec[16] = 0xdfu8; alice_sec[17] = 0x4cu8; alice_sec[18] = 0x2fu8; alice_sec[19] = 0x87u8
+    alice_sec[20] = 0xebu8; alice_sec[21] = 0xc0u8; alice_sec[22] = 0x99u8; alice_sec[23] = 0x2au8
+    alice_sec[24] = 0xb1u8; alice_sec[25] = 0x77u8; alice_sec[26] = 0xfbu8; alice_sec[27] = 0xa5u8
+    alice_sec[28] = 0x1du8; alice_sec[29] = 0xb9u8; alice_sec[30] = 0x2cu8; alice_sec[31] = 0x2au8
+
+    // Bob private key: 5dab087e624a8a4b794bf49b75074d08e1a9fe64540d4ddc339b499b61815d7c
+    bob_sec[0] = 0x5du8; bob_sec[1] = 0xabu8; bob_sec[2] = 0x08u8; bob_sec[3] = 0x7eu8
+    bob_sec[4] = 0x62u8; bob_sec[5] = 0x4au8; bob_sec[6] = 0x8au8; bob_sec[7] = 0x4bu8
+    bob_sec[8] = 0x79u8; bob_sec[9] = 0x4bu8; bob_sec[10] = 0xf4u8; bob_sec[11] = 0x9bu8
+    bob_sec[12] = 0x75u8; bob_sec[13] = 0x07u8; bob_sec[14] = 0x4du8; bob_sec[15] = 0x08u8
+    bob_sec[16] = 0xe1u8; bob_sec[17] = 0xa9u8; bob_sec[18] = 0xfeu8; bob_sec[19] = 0x64u8
+    bob_sec[20] = 0x54u8; bob_sec[21] = 0x0du8; bob_sec[22] = 0x4du8; bob_sec[23] = 0xdcu8
+    bob_sec[24] = 0x33u8; bob_sec[25] = 0x9bu8; bob_sec[26] = 0x49u8; bob_sec[27] = 0x9bu8
+    bob_sec[28] = 0x61u8; bob_sec[29] = 0x81u8; bob_sec[30] = 0x5du8; bob_sec[31] = 0x7cu8
+
+    x25519_base_point(alice_pub, alice_sec as *raw u8)
+    x25519_base_point(bob_pub, bob_sec as *raw u8)
+
+    // Expected Alice pub[0] == 0x85, pub[31] == 0x6a
+    if alice_pub[0usize] == 0x85u8 && alice_pub[31usize] == 0x6au8 {
+        print("X25519_ALICE_PUB_OK\n")
+    } else {
+        print("X25519_ALICE_PUB_FAIL\n")
+    }
+
+    // Shared secrets: Alice(bob_pub) == Bob(alice_pub)
+    x25519_scalarmult(shared_a, alice_sec as *raw u8, bob_pub as *raw u8)
+    x25519_scalarmult(shared_b, bob_sec as *raw u8, alice_pub as *raw u8)
+
+    var match_shared = true
+    i = 0usize
+    while i < 32usize {
+        if shared_a[i] != shared_b[i] { match_shared = false }
+        i = i + 1usize
+    }
+    if match_shared && shared_a[0usize] == 0xb3u8 && shared_a[31usize] == 0x21u8 {
+        print("X25519_SHARED_SECRET_OK\n")
+    } else {
+        print("X25519_SHARED_SECRET_FAIL\n")
+    }
+
+    free(shared_b as *raw var u8)
+    free(shared_a as *raw var u8)
+    free(bob_pub as *raw var u8)
+    free(alice_pub as *raw var u8)
+    free(bob_sec as *raw var u8)
+    free(alice_sec as *raw var u8)
+}
+
+fn test_aead() {
+    let key = malloc(32usize) as *raw var u8
+    let nonce = malloc(12usize) as *raw var u8
+    var i = 0usize
+    while i < 32usize { key[i] = (i + 1usize) as u8; i = i + 1usize }
+    i = 0usize
+    while i < 12usize { nonce[i] = (i + 10usize) as u8; i = i + 1usize }
+
+    let msg = "Pure-Rad Native TLS 1.3 Client"
+    let mlen = 30usize
+    let aad = "TLS_HDR"
+    let aad_len = 7usize
+
+    let ct = malloc(mlen) as *raw var u8
+    let tag = malloc(16usize) as *raw var u8
+    chacha20_poly1305_encrypt(
+        key as *raw u8,
+        nonce as *raw u8,
+        aad as *raw u8,
+        aad_len,
+        msg as *raw u8,
+        mlen,
+        ct,
+        tag
+    )
+
+    let pt = malloc(mlen + 1usize) as *raw var u8
+    let ok = chacha20_poly1305_decrypt(
+        key as *raw u8,
+        nonce as *raw u8,
+        aad as *raw u8,
+        aad_len,
+        ct as *raw u8,
+        mlen,
+        tag as *raw u8,
+        pt
+    )
+    pt[mlen] = 0u8
+
+    if ok {
+        let dec_str = pt as str
+        print("AEAD_DECRYPT_OK: {dec_str}\n")
+    } else {
+        print("AEAD_DECRYPT_FAIL\n")
+    }
+
+    // Test tamper resistance
+    tag[0usize] = tag[0usize] ^ 1u8
+    let tampered_ok = chacha20_poly1305_decrypt(
+        key as *raw u8,
+        nonce as *raw u8,
+        aad as *raw u8,
+        aad_len,
+        ct as *raw u8,
+        mlen,
+        tag as *raw u8,
+        pt
+    )
+    if !tampered_ok {
+        print("AEAD_TAMPER_REJECTED_OK\n")
+    }
+
+    free(pt as *raw var u8)
+    free(tag as *raw var u8)
+    free(ct as *raw var u8)
+    free(nonce as *raw var u8)
+    free(key as *raw var u8)
+}
+
+fn test_hkdf_expand_label() {
+    let secret = malloc(32usize) as *raw var u8
+    var i = 0usize
+    while i < 32usize { secret[i] = 0xAAu8; i = i + 1usize }
+
+    let out_key = malloc(32usize) as *raw var u8
+    let empty_ctx = malloc(1usize) as *raw var u8
+    hkdf_expand_label(secret as *raw u8, 32usize, "c ap traffic", empty_ctx as *raw u8, 0usize, 32u16, out_key)
+
+    if out_key[0usize] != 0u8 || out_key[31usize] != 0u8 {
+        print("HKDF_EXPAND_LABEL_OK\n")
+    }
+
+    free(empty_ctx as *raw var u8)
+    free(out_key as *raw var u8)
+    free(secret as *raw var u8)
+}
+
+fn test_client_hello() {
+    let rand = malloc(32usize) as *raw var u8
+    let pubk = malloc(32usize) as *raw var u8
+    var i = 0usize
+    while i < 32usize { rand[i] = (i + 5usize) as u8; pubk[i] = (i + 15usize) as u8; i = i + 1usize }
+
+    let hello = malloc(512usize) as *raw var u8
+    let len = build_tls13_client_hello("api.github.com", rand as *raw u8, pubk as *raw u8, hello)
+
+    if len > 100usize && hello[0usize] == 0x16u8 && hello[1usize] == 0x03u8 && hello[5usize] == 0x01u8 {
+        print("CLIENT_HELLO_OK: len={len}\n")
+    } else {
+        print("CLIENT_HELLO_FAIL\n")
+    }
+
+    free(hello as *raw var u8)
+    free(pubk as *raw var u8)
+    free(rand as *raw var u8)
+}
+
+fn main() {
+    test_x25519()
+    test_aead()
+    test_hkdf_expand_label()
+    test_client_hello()
+    print("TLS_ALL_PASS\n")
+}

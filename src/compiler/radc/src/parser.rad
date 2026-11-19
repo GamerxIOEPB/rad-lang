@@ -80,7 +80,115 @@ fn get_source_line(source: String, target_line: i64) -> String {
     return res
 }
 
+fn levenshtein_dist(a: str, b: str) -> i32 {
+    let la = str_len(a)
+    let lb = str_len(b)
+    if la == 0usize { return lb as i32 }
+    if lb == 0usize { return la as i32 }
+    if lb > 64usize || la > 64usize { return 999i32 }
+    let v0 = malloc(65usize * 4usize) as *raw var i32
+    let v1 = malloc(65usize * 4usize) as *raw var i32
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var j = 0usize
+    while j <= lb {
+        v0[j] = j as i32
+        j = j + 1usize
+    }
+    var i = 0usize
+    while i < la {
+        v1[0] = (i + 1usize) as i32
+        j = 0usize
+        while j < lb {
+            var cost = 1i32
+            if pa[i] == pb[j] {
+                cost = 0i32
+            }
+            let del_cost = v0[j + 1usize] + 1i32
+            let ins_cost = v1[j] + 1i32
+            let sub_cost = v0[j] + cost
+            var min_val = del_cost
+            if ins_cost < min_val {
+                min_val = ins_cost
+            }
+            if sub_cost < min_val {
+                min_val = sub_cost
+            }
+            v1[j + 1usize] = min_val
+            j = j + 1usize
+        }
+        j = 0usize
+        while j <= lb {
+            v0[j] = v1[j]
+            j = j + 1usize
+        }
+        i = i + 1usize
+    }
+    let res = v0[lb]
+    free(v0 as *raw var u8)
+    free(v1 as *raw var u8)
+    return res
+}
+
+fn is_name_similar(target: str, cand: str) -> bool {
+    let lt = str_len(target)
+    let lc = str_len(cand)
+    if lt == 0usize || lc == 0usize { return false }
+    if str_eq(target, cand) { return false }
+    var diff = 0i32
+    if lt > lc {
+        diff = (lt - lc) as i32
+    } else {
+        diff = (lc - lt) as i32
+    }
+    if diff > 2i32 { return false }
+    let d = levenshtein_dist(target, cand)
+    if lt <= 3usize {
+        return d == 1i32
+    }
+    return d <= 2i32
+}
+
 impl Parser {
+    fn is_stmt_start_token(self, k: i32) -> bool {
+        if k == TOK_LET || k == TOK_VAR || k == TOK_IF || k == TOK_WHILE || k == TOK_LOOP || k == TOK_FOR || k == TOK_RETURN || k == TOK_MATCH || k == TOK_BREAK || k == TOK_CONTINUE {
+            return true
+        }
+        return false
+    }
+
+    fn synchronize_stmt(var self) {
+        while self.peek_kind() != TOK_EOF && self.peek_kind() != TOK_RBRACE {
+            let k = self.peek_kind()
+            if k == TOK_SEMI {
+                self.advance()
+                return
+            }
+            if self.is_stmt_start_token(k) {
+                return
+            }
+            self.advance()
+        }
+    }
+
+    fn synchronize_item(var self) {
+        while self.peek_kind() != TOK_EOF {
+            let k = self.peek_kind()
+            if k == TOK_FN || k == TOK_STRUCT || k == TOK_ENUM {
+                return
+            }
+            let txt = self.peek_text()
+            if str_eq(txt, "impl") || str_eq(txt, "trait") || str_eq(txt, "const") || str_eq(txt, "import") || str_eq(txt, "mod") || str_eq(txt, "extern") {
+                return
+            }
+            if k == TOK_SEMI || k == TOK_RBRACE {
+                self.advance()
+                return
+            }
+            self.advance()
+        }
+    }
+
     fn cur_tok_len(self) -> i64 {
         if self.pos < self.tokens.len {
             let l = self.tokens.ptr[self.pos].len
@@ -1045,6 +1153,64 @@ impl Parser {
                     expr_line: base_l,
                     expr_col: base_c,
                 })
+            } else if k == TOK_LT && self.exprs.ptr[base].kind == EXPR_IDENT {
+                let p_name: *raw u8 = self.exprs.ptr[base].str_val.as_ptr()
+                let slen = str_len(p_name as str)
+                var is_generic_inst = false
+                if (p_name as usize) != 0usize && slen > 0usize && p_name[0usize] >= 65u8 && p_name[0usize] <= 90u8 {
+                    var scan = self.pos + 1usize
+                    var depth = 1i64
+                    while scan < self.tokens.len && depth > 0i64 {
+                        let sk = self.tokens.ptr[scan].kind
+                        if sk == TOK_LT {
+                            depth = depth + 1i64
+                        } else if sk == TOK_GT {
+                            depth = depth - 1i64
+                        } else if sk == TOK_SEMI || sk == TOK_EOF {
+                            break
+                        }
+                        scan = scan + 1usize
+                    }
+                    if depth == 0i64 && scan < self.tokens.len {
+                        let nk = self.tokens.ptr[scan].kind
+                        if nk == TOK_LBRACE || nk == TOK_DOT || nk == TOK_COLONCOLON {
+                            is_generic_inst = true
+                        }
+                    }
+                }
+                if is_generic_inst {
+                    self.advance() // skip '<'
+                    var full_type = String.new()
+                    full_type.push_str(self.exprs.ptr[base].str_val.as_ptr() as str)
+                    full_type.push_byte(60u8) // '<'
+                    var depth = 1i64
+                    while self.peek_kind() != TOK_EOF && depth > 0i64 {
+                        let tk = self.peek_kind()
+                        if tk == TOK_LT {
+                            depth = depth + 1i64
+                            full_type.push_byte(60u8)
+                        } else if tk == TOK_GT {
+                            depth = depth - 1i64
+                            if depth == 0i64 {
+                                full_type.push_byte(62u8) // '>'
+                                self.advance()
+                                break
+                            } else {
+                                full_type.push_byte(62u8)
+                            }
+                        } else if tk == TOK_COMMA {
+                            full_type.push_str(", ")
+                        } else {
+                            full_type.push_str(self.peek_text())
+                        }
+                        self.advance()
+                    }
+                    full_type.push_byte(0u8)
+                    self.exprs.ptr[base].str_val = full_type
+                    continue
+                } else {
+                    break
+                }
             } else if k == TOK_LBRACE {
                 var is_struct = false
                 if self.exprs.ptr[base].kind == EXPR_IDENT {
@@ -1784,6 +1950,9 @@ impl Parser {
     fn parse_block_stmts(var self) -> Vec<usize> {
         var stmts = Vec.new()
         while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+            if self.error_count >= 25i64 {
+                break
+            }
             // 1. Consume leading or standalone semicolons (empty statements)
             while self.match_tok(TOK_SEMI) {
             }
@@ -1792,8 +1961,14 @@ impl Parser {
             }
 
             let start_p = self.pos
+            let errs_before = self.error_count
             let st = self.parse_stmt()
-            stmts.push(st)
+            if st > 0usize {
+                stmts.push(st)
+            } else if self.error_count > errs_before {
+                self.synchronize_stmt()
+                continue
+            }
 
             // 2. Determine end line of the parsed statement
             var end_line = 0i64
@@ -2344,9 +2519,13 @@ impl Parser {
                 err.push_str(self.peek_text())
                 err.push_str("'")
                 self.report_error("E0012", err.as_ptr() as str, err_line, err_col)
-                self.advance()
+                self.synchronize_item()
             } else {
                 self.advance()
+            }
+
+            if self.error_count >= 25i64 {
+                break
             }
 
             if self.pos == start_pos {

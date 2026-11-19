@@ -1,0 +1,8 @@
+p.first=100
+p.second=generic Rad
+p.get_first()=100
+p.get_second()=generic Rad
+q.count()=3
+q.get(0)=10
+q.get(1)=20
+q.get(2)=30

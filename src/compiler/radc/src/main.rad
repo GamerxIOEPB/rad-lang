@@ -802,6 +802,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         debug_info: opts.debug_info,
         source_file: main_src,
     }
+    codegen.parser.filename = main_src
     let ir = codegen.generate()
     if codegen.parser.error_count > 0i64 {
         return 1

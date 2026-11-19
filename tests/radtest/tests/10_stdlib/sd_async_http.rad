@@ -1,0 +1,73 @@
+import std/http;
+
+extern "C" {
+    fn strcmp(s1: str, s2: str) -> i32;
+}
+
+fn test_router_params() {
+    var router = HttpRouter.new()
+    router.add_route("GET", "/api/v1/users/:id", 101)
+    router.add_route("GET", "/posts/:cat/:title", 202)
+
+    var k1 = Vec.new()
+    var v1 = Vec.new()
+    let h1 = router.match_route_with_params("GET", "/api/v1/users/42", k1, v1)
+    if h1 == 101 && k1.len == 1usize && strcmp(k1.ptr[0].as_ptr() as str, "id") == 0 && strcmp(v1.ptr[0].as_ptr() as str, "42") == 0 {
+        print("ROUTE_PARAMS_1_OK\n")
+    } else {
+        print("ROUTE_PARAMS_1_FAIL\n")
+    }
+
+    var k2 = Vec.new()
+    var v2 = Vec.new()
+    let h2 = router.match_route_with_params("GET", "/posts/tech/rad-compiler", k2, v2)
+    if h2 == 202 && k2.len == 2usize {
+        let cat = v2.ptr[0].as_ptr() as str
+        let title = v2.ptr[1].as_ptr() as str
+        print("ROUTE_PARAMS_2: {cat} / {title}\n")
+    }
+}
+
+fn test_ws_handshake() {
+    var req = HttpRequest.new()
+    req.method = String.from_str("GET")
+    req.path = String.from_str("/ws")
+    req.set_header("Upgrade", "websocket")
+    req.set_header("Connection", "Upgrade")
+    req.set_header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+    match ws_upgrade_handshake(req) {
+        Option.Some(resp) => {
+            if resp.status_code == 101 {
+                match resp.get_header("Sec-WebSocket-Accept") {
+                    Option.Some(accept) => {
+                        let acc_str = accept.as_ptr() as str
+                        if strcmp(acc_str, "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=") == 0 {
+                            print("WS_HANDSHAKE_OK: {acc_str}\n")
+                        } else {
+                            print("WS_ACCEPT_MISMATCH: {acc_str}\n")
+                        }
+                    },
+                    Option.None => print("WS_NO_ACCEPT_HDR\n"),
+                }
+            } else {
+                print("WS_STATUS_FAIL\n")
+            }
+        },
+        Option.None => print("WS_HANDSHAKE_FAIL\n"),
+    }
+}
+
+fn test_static_file() {
+    let resp = handle_static_file("tests/radtest/fixtures/non_existent.txt", true)
+    if resp.status_code == 404 {
+        print("STATIC_404_OK\n")
+    }
+}
+
+fn main() {
+    test_router_params()
+    test_ws_handshake()
+    test_static_file()
+    print("HTTP_ASYNC_ALL_PASS\n")
+}

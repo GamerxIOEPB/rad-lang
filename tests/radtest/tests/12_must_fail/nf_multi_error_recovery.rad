@@ -1,0 +1,11 @@
+// Spec: Multi-error recovery synchronizing across independent syntax/type errors in a single compilation run.
+struct Config {
+    port: i64,
+}
+
+fn main() {
+    let timeout = 5000;
+    let t = timout + 1;
+    let cfg = Config { port: 8080 };
+    let bad = cfg.prt;
+}

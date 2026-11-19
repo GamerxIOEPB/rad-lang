@@ -5,6 +5,10 @@
 // ==============================================================================
 
 import std/net;
+import std/event;
+import std/compress;
+import std/tls;
+import std/os/linux/syscall;
 
 pub struct HttpHeader {
     pub name: String,
@@ -18,6 +22,8 @@ pub struct HttpRequest {
     pub version: String,
     pub header_names: Vec<String>,
     pub header_values: Vec<String>,
+    pub param_keys: Vec<String>,
+    pub param_vals: Vec<String>,
     pub body: String,
 }
 
@@ -30,8 +36,21 @@ impl HttpRequest {
             version: String.from_str("HTTP/1.1"),
             header_names: Vec.new(),
             header_values: Vec.new(),
+            param_keys: Vec.new(),
+            param_vals: Vec.new(),
             body: String.new(),
         }
+    }
+
+    pub fn get_param(self, name: str) -> Option<String> {
+        var i = 0usize
+        while i < self.param_keys.len {
+            if http_str_eq(self.param_keys.ptr[i].as_ptr() as str, name) {
+                return Option.Some(self.param_vals.ptr[i])
+            }
+            i = i + 1usize
+        }
+        return Option.None
     }
 
     pub fn get_header(self, name: str) -> Option<String> {
@@ -44,6 +63,23 @@ impl HttpRequest {
             i = i + 1usize
         }
         return Option.None
+    }
+
+    pub fn set_header(var self, name: str, value: str) {
+        var found = false
+        var i = 0usize
+        while i < self.header_names.len {
+            if http_case_insensitive_eq(self.header_names.ptr[i].as_ptr() as str, name) {
+                self.header_values.ptr[i] = String.from_str(value)
+                found = true
+                break
+            }
+            i = i + 1usize
+        }
+        if !found {
+            self.header_names.push(String.from_str(name))
+            self.header_values.push(String.from_str(value))
+        }
     }
 
     pub fn get_query_param(self, key: str) -> Option<String> {
@@ -248,6 +284,60 @@ fn http_str_eq(a: str, b: str) -> bool {
     return pa[i] == 0u8 && pb[i] == 0u8
 }
 
+fn http_str_starts_with(s: str, prefix: str) -> bool {
+    let ps = s as *raw u8
+    let pp = prefix as *raw u8
+    var i = 0usize
+    while pp[i] != 0u8 {
+        if ps[i] == 0u8 || ps[i] != pp[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn http_str_ends_with(s: str, suffix: str) -> bool {
+    let slen = http_str_len(s)
+    let sublen = http_str_len(suffix)
+    if sublen > slen { return false }
+    let ps = s as *raw u8
+    let psub = suffix as *raw u8
+    var i = 0usize
+    let offset = slen - sublen
+    while i < sublen {
+        if ps[offset + i] != psub[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn http_str_contains(s: str, sub: str) -> bool {
+    let slen = http_str_len(s)
+    let sublen = http_str_len(sub)
+    if sublen == 0usize { return true }
+    if sublen > slen { return false }
+    let ps = s as *raw u8
+    let psub = sub as *raw u8
+    var i = 0usize
+    while i + sublen <= slen {
+        var j = 0usize
+        var matched = true
+        while j < sublen {
+            if ps[i + j] != psub[j] {
+                matched = false
+                break
+            }
+            j = j + 1usize
+        }
+        if matched { return true }
+        i = i + 1usize
+    }
+    return false
+}
+
 fn http_to_lower(c: u8) -> u8 {
     if c >= 65u8 && c <= 90u8 {
         return c + 32u8
@@ -438,6 +528,8 @@ pub fn parse_http_request(raw: str) -> Option<HttpRequest> {
         version: version,
         header_names: header_names,
         header_values: header_values,
+        param_keys: Vec.new(),
+        param_vals: Vec.new(),
         body: body,
     })
 }
@@ -555,6 +647,14 @@ impl HttpRouter {
         }
     }
 
+    pub fn add_route(var self, method: str, path: str, handler_id: i32) {
+        self.routes.push(HttpRoute {
+            method: String.from_str(method),
+            path: String.from_str(path),
+            handler_id: handler_id,
+        })
+    }
+
     pub fn get(var self, path: str, handler_id: i32) {
         self.routes.push(HttpRoute {
             method: String.from_str("GET"),
@@ -571,18 +671,406 @@ impl HttpRouter {
         })
     }
 
-    pub fn match_route(self, method: str, path: str) -> i32 {
+    pub fn match_route_with_params(self, method: str, path: str, out_keys: Vec<String>, out_vals: Vec<String>) -> i32 {
         var i = 0usize
         while i < self.routes.len {
             let r = self.routes.ptr[i]
-            let m_eq = http_str_eq(r.method.as_ptr() as str, method)
-            let p_eq = http_str_eq(r.path.as_ptr() as str, path)
-            if m_eq && p_eq {
-                return r.handler_id
+            if http_str_eq(r.method.as_ptr() as str, method) {
+                let r_path = r.path.as_ptr() as str
+                if http_str_eq(r_path, path) {
+                    return r.handler_id
+                }
+                if http_str_contains(r_path, ":") {
+                    var tmp_keys = Vec.new()
+                    var tmp_vals = Vec.new()
+                    if match_path_pattern(r_path, path, tmp_keys, tmp_vals) {
+                        var ki = 0usize
+                        while ki < tmp_keys.len {
+                            out_keys.push(tmp_keys.ptr[ki])
+                            out_vals.push(tmp_vals.ptr[ki])
+                            ki = ki + 1usize
+                        }
+                        return r.handler_id
+                    }
+                }
             }
             i = i + 1usize
         }
         return -1
+    }
+
+    pub fn match_route(self, method: str, path: str) -> i32 {
+        let dummy_k = Vec.new()
+        let dummy_v = Vec.new()
+        return self.match_route_with_params(method, path, dummy_k, dummy_v)
+    }
+}
+
+fn match_path_pattern(pattern: str, actual: str, out_keys: Vec<String>, out_vals: Vec<String>) -> bool {
+    let p_len = http_str_len(pattern)
+    let a_len = http_str_len(actual)
+    if p_len == 0usize && a_len == 0usize { return true }
+    if p_len == 0usize || a_len == 0usize { return false }
+
+    let pp = pattern as *raw u8
+    let ap = actual as *raw u8
+    var pi = 0usize
+    var ai = 0usize
+    while pi < p_len && ai < a_len {
+        while pi < p_len && pp[pi] == 47u8 { pi = pi + 1usize }
+        while ai < a_len && ap[ai] == 47u8 { ai = ai + 1usize }
+        if pi >= p_len && ai >= a_len { return true }
+        if pi >= p_len || ai >= a_len { return false }
+
+        var p_seg = String.new()
+        while pi < p_len && pp[pi] != 47u8 {
+            p_seg.push_byte(pp[pi])
+            pi = pi + 1usize
+        }
+        p_seg.push_byte(0u8)
+
+        var a_seg = String.new()
+        while ai < a_len && ap[ai] != 47u8 {
+            a_seg.push_byte(ap[ai])
+            ai = ai + 1usize
+        }
+        a_seg.push_byte(0u8)
+
+        let ps = p_seg.as_ptr() as str
+        let as_str = a_seg.as_ptr() as str
+        if http_str_starts_with(ps, ":") {
+            let key = (ps as usize + 1usize) as str
+            out_keys.push(String.from_str(key))
+            out_vals.push(String.from_str(as_str))
+        } else {
+            if !http_str_eq(ps, as_str) {
+                return false
+            }
+        }
+    }
+    while pi < p_len && pp[pi] == 47u8 { pi = pi + 1usize }
+    while ai < a_len && ap[ai] == 47u8 { ai = ai + 1usize }
+    return pi == p_len && ai == a_len
+}
+
+// ------------------------------------------------------------------------------
+// SHA-1 & Base64 Primitives for WebSocket Handshake (RFC 6455)
+// ------------------------------------------------------------------------------
+
+fn sha1_rotl(v: u32, n: u32) -> u32 {
+    let uv = (v as u64) & 4294967295u64
+    let r1 = (uv << (n as u64)) & 4294967295u64
+    let r2 = uv >> ((32u32 - n) as u64)
+    return (((r1 | r2) & 4294967295u64) as u32)
+}
+
+fn sha1_digest_20bytes(msg: str, out_buf: *raw var u8) {
+    let len = http_str_len(msg)
+    let p_msg = msg as *raw u8
+
+    var h0: u32 = 0x67452301u32
+    var h1: u32 = 0xEFCDAB89u32
+    var h2: u32 = 0x98BADCFEu32
+    var h3: u32 = 0x10325476u32
+    var h4: u32 = 0xC3D2E1F0u32
+
+    let padded_len = ((len + 9usize + 63usize) / 64usize) * 64usize
+    let buf = malloc(padded_len) as *raw var u8
+    var i = 0usize
+    while i < padded_len {
+        buf[i] = 0u8
+        i = i + 1usize
+    }
+    i = 0usize
+    while i < len {
+        buf[i] = p_msg[i]
+        i = i + 1usize
+    }
+    buf[len] = 0x80u8
+
+    let bit_len = (len as u64) * 8u64
+    var bi = 0usize
+    while bi < 8usize {
+        let shift = ((7usize - bi) * 8usize) as u64
+        buf[padded_len - 8usize + bi] = ((bit_len >> shift) & 255u64) as u8
+        bi = bi + 1usize
+    }
+
+    var chunk = 0usize
+    let w = malloc(80usize * 4usize) as *raw var u32
+    while chunk < padded_len {
+        var t = 0usize
+        while t < 16usize {
+            let idx = chunk + t * 4usize
+            w[t] = ((buf[idx] as u32) << 24u32) |
+                   ((buf[idx + 1usize] as u32) << 16u32) |
+                   ((buf[idx + 2usize] as u32) << 8u32) |
+                   (buf[idx + 3usize] as u32)
+            t = t + 1usize
+        }
+        while t < 80usize {
+            let xor_val = w[t - 3usize] ^ w[t - 8usize] ^ w[t - 14usize] ^ w[t - 16usize]
+            w[t] = sha1_rotl(xor_val, 1u32)
+            t = t + 1usize
+        }
+
+        var a = h0
+        var b = h1
+        var c = h2
+        var d = h3
+        var e = h4
+
+        var round = 0usize
+        while round < 80usize {
+            var f: u32 = 0u32
+            var k: u32 = 0u32
+            if round < 20usize {
+                f = d ^ (b & (c ^ d))
+                k = 0x5A827999u32
+            } else if round < 40usize {
+                f = b ^ c ^ d
+                k = 0x6ED9EBA1u32
+            } else if round < 60usize {
+                f = (b & c) | (b & d) | (c & d)
+                k = 0x8F1BBCDCu32
+            } else {
+                f = b ^ c ^ d
+                k = 0xCA62C1D6u32
+            }
+            let temp = (((sha1_rotl(a, 5u32) as u64 + f as u64 + e as u64 + k as u64 + w[round] as u64) & 4294967295u64) as u32)
+            e = d
+            d = c
+            c = sha1_rotl(b, 30u32)
+            b = a
+            a = temp
+            round = round + 1usize
+        }
+
+        h0 = ((h0 as u64 + a as u64) & 4294967295u64) as u32
+        h1 = ((h1 as u64 + b as u64) & 4294967295u64) as u32
+        h2 = ((h2 as u64 + c as u64) & 4294967295u64) as u32
+        h3 = ((h3 as u64 + d as u64) & 4294967295u64) as u32
+        h4 = ((h4 as u64 + e as u64) & 4294967295u64) as u32
+
+        chunk = chunk + 64usize
+    }
+
+    free(w as *raw var u8)
+    free(buf as *raw var u8)
+
+    let h_arr = [h0, h1, h2, h3, h4]
+    var hi = 0usize
+    while hi < 5usize {
+        let val = h_arr[hi]
+        out_buf[hi * 4usize] = ((val >> 24u32) & 255u32) as u8
+        out_buf[hi * 4usize + 1usize] = ((val >> 16u32) & 255u32) as u8
+        out_buf[hi * 4usize + 2usize] = ((val >> 8u32) & 255u32) as u8
+        out_buf[hi * 4usize + 3usize] = (val & 255u32) as u8
+        hi = hi + 1usize
+    }
+}
+
+fn base64_encode(bytes: *raw u8, len: usize) -> String {
+    var s = String.new()
+    var i = 0usize
+    while i < len {
+        let b0 = bytes[i] as u32
+        var b1 = 0u32
+        var b2 = 0u32
+        if i + 1usize < len { b1 = bytes[i + 1usize] as u32 }
+        if i + 2usize < len { b2 = bytes[i + 2usize] as u32 }
+        let trip = (b0 << 16u32) | (b1 << 8u32) | b2
+        let c0 = ((trip >> 18u32) & 63u32) as usize
+        let c1 = ((trip >> 12u32) & 63u32) as usize
+        let c2 = ((trip >> 6u32) & 63u32) as usize
+        let c3 = (trip & 63u32) as usize
+        let table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" as *raw u8
+        s.push_byte(table[c0])
+        s.push_byte(table[c1])
+        if i + 1usize < len {
+            s.push_byte(table[c2])
+        } else {
+            s.push_byte(61u8) // '='
+        }
+        if i + 2usize < len {
+            s.push_byte(table[c3])
+        } else {
+            s.push_byte(61u8) // '='
+        }
+        i = i + 3usize
+    }
+    s.push_byte(0u8)
+    return s
+}
+
+pub fn ws_upgrade_handshake(req: HttpRequest) -> Option<HttpResponse> {
+    match req.get_header("Sec-WebSocket-Key") {
+        Option.Some(key) => {
+            var full_key = String.new()
+            full_key.push_str(key.as_ptr() as str)
+            full_key.push_str("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+            full_key.push_byte(0u8)
+            let out_digest = malloc(20usize) as *raw var u8
+            sha1_digest_20bytes(full_key.as_ptr() as str, out_digest)
+            let accept = base64_encode(out_digest as *raw u8, 20usize)
+            free(out_digest as *raw var u8)
+
+            var resp = HttpResponse.new(101, "Switching Protocols")
+            resp.set_header("Upgrade", "websocket")
+            resp.set_header("Connection", "Upgrade")
+            resp.set_header("Sec-WebSocket-Accept", accept.as_ptr() as str)
+            return Option.Some(resp)
+        },
+        Option.None => {
+            return Option.None
+        },
+    }
+}
+
+pub fn handle_static_file(filepath: str, enable_gzip: bool) -> HttpResponse {
+    let fp = fopen(filepath, "rb")
+    if (fp as usize) == 0usize {
+        return HttpResponse.not_found()
+    }
+    fseek(fp, 0i64, 2)
+    let fsize = ftell(fp) as usize
+    fseek(fp, 0i64, 0)
+    let buf = malloc(fsize + 1usize) as *raw var u8
+    fread(buf as ptr, 1usize, fsize, fp)
+    fclose(fp)
+    buf[fsize] = 0u8
+
+    var mime = "text/plain"
+    if http_str_ends_with(filepath, ".html") { mime = "text/html; charset=utf-8" }
+    else if http_str_ends_with(filepath, ".css") { mime = "text/css" }
+    else if http_str_ends_with(filepath, ".js") { mime = "application/javascript" }
+    else if http_str_ends_with(filepath, ".json") { mime = "application/json" }
+    else if http_str_ends_with(filepath, ".png") { mime = "image/png" }
+    else if http_str_ends_with(filepath, ".wasm") { mime = "application/wasm" }
+
+    var resp = HttpResponse.new(200, "OK")
+    resp.set_header("Content-Type", mime)
+    if enable_gzip && fsize > 128usize {
+        let gzipped = gzip_compress(buf as str)
+        resp.body = gzipped
+        resp.set_header("Content-Encoding", "gzip")
+        resp.set_header("Content-Length", http_int_to_str(gzipped.len as i64).as_ptr() as str)
+    } else {
+        resp.body = String.from_str(buf as str)
+        resp.set_header("Content-Length", http_int_to_str(fsize as i64).as_ptr() as str)
+    }
+    free(buf as *raw var u8)
+    return resp
+}
+
+// ------------------------------------------------------------------------------
+// HTTP Server (Event-Driven Async Reactor via Linux epoll)
+// ------------------------------------------------------------------------------
+
+pub struct HttpServer {
+    pub port: u16,
+    pub router: HttpRouter,
+    pub is_running: bool,
+}
+
+impl HttpServer {
+    pub fn new(port: u16) -> HttpServer {
+        return HttpServer {
+            port: port,
+            router: HttpRouter.new(),
+            is_running: false,
+        }
+    }
+
+    pub fn set_router(var self, r: HttpRouter) {
+        self.router = r
+    }
+
+    pub fn serve_event_loop(var self, max_iterations: i32) -> i32 {
+        var listener: TcpListener = TcpListener { fd: -1, is_bound: false }
+        match TcpListener.bind("127.0.0.1", self.port) {
+            Option.Some(l) => { listener = l },
+            Option.None => { return -1 },
+        }
+        var el = EventLoop { epoll_fd: -1, is_closed: false }
+        match EventLoop.new() {
+            Option.Some(l) => { el = l },
+            Option.None => {
+                listener.close()
+                return -2
+            },
+        }
+
+        // Set listener non-blocking via syscall fcntl (SYS_fcntl = 72, F_GETFL = 3, F_SETFL = 4, O_NONBLOCK = 2048)
+        let flags = syscall3(72i64, listener.fd as i64, 3i64, 0i64)
+        let _ = syscall3(72i64, listener.fd as i64, 4i64, flags | 2048i64)
+        let _ = el.add(listener.fd, EPOLLIN | EPOLLET, listener.fd as u64)
+        self.is_running = true
+
+        var processed_requests = 0i32
+        let events = malloc(16usize * 64usize) as *raw var u8
+        var iter = 0i32
+        while self.is_running && (max_iterations <= 0i32 || iter < max_iterations) {
+            iter = iter + 1i32
+            let num_events = syscall4(232i64, el.epoll_fd as i64, events as i64, 64i64, 50i64) as i32
+            var ei = 0i32
+            while ei < num_events {
+                let ev_ptr = ((events as usize) + (ei as usize) * 16usize) as *raw u32
+                let ev_flags = ev_ptr[0usize]
+                let ev_fd = (((events as usize) + (ei as usize) * 16usize + 4usize) as *raw u64)[0usize] as i32
+
+                if ev_fd == listener.fd {
+                    match listener.accept() {
+                        Option.Some(client) => {
+                            let cflags = syscall3(72i64, client.fd as i64, 3i64, 0i64)
+                            let _ = syscall3(72i64, client.fd as i64, 4i64, cflags | 2048i64)
+                            let _ = el.add(client.fd, EPOLLIN | EPOLLET, client.fd as u64)
+                        },
+                        Option.None => {},
+                    }
+                } else if (ev_flags & EPOLLIN) != 0u32 {
+                    var client = TcpStream { fd: ev_fd, is_connected: true }
+                    let req_buf = malloc(4096usize) as *raw var u8
+                    let bytes_read = client.read(req_buf, 4095usize)
+                    if bytes_read > 0i64 {
+                        req_buf[bytes_read as usize] = 0u8
+                        match parse_http_request(req_buf as str) {
+                            Option.Some(req) => {
+                                var resp = HttpResponse.not_found()
+                                match ws_upgrade_handshake(req) {
+                                    Option.Some(ws_resp) => {
+                                        resp = ws_resp
+                                    },
+                                    Option.None => {
+                                        let h_id = self.router.match_route_with_params(
+                                            req.method.as_ptr() as str,
+                                            req.path.as_ptr() as str,
+                                            req.param_keys,
+                                            req.param_vals
+                                        )
+                                        if h_id >= 0 {
+                                            resp = HttpResponse.ok("OK from async epoll reactor")
+                                        }
+                                    },
+                                }
+                                let wire = resp.to_wire()
+                                let _ = client.write_str(wire.as_ptr() as str)
+                                processed_requests = processed_requests + 1i32
+                            },
+                            Option.None => {},
+                        }
+                    }
+                    free(req_buf as *raw var u8)
+                    el.remove(client.fd)
+                    client.close()
+                }
+                ei = ei + 1i32
+            }
+        }
+        free(events as *raw var u8)
+        el.remove(listener.fd)
+        listener.close()
+        return processed_requests
     }
 }
 
@@ -594,15 +1082,23 @@ pub struct HttpClient {}
 
 impl HttpClient {
     pub fn request(method: str, url: str, body: str, content_type: str) -> Option<HttpResponse> {
-        // Parse URL: http://host:port/path
         let ulen = http_str_len(url)
         if ulen < 7usize {
             return Option.None
         }
         let p = url as *raw u8
         var pos = 0usize
-        if p[0usize] == 104u8 && p[1usize] == 116u8 && p[2usize] == 116u8 && p[3usize] == 112u8 && p[4usize] == 58u8 && p[5usize] == 47u8 && p[6usize] == 47u8 {
+        var is_https = false
+        var port = 80u16
+
+        if http_str_starts_with(url, "https://") {
+            pos = 8usize
+            is_https = true
+            port = 443u16
+        } else if http_str_starts_with(url, "http://") {
             pos = 7usize
+            is_https = false
+            port = 80u16
         }
 
         var host = String.new()
@@ -612,7 +1108,6 @@ impl HttpClient {
         }
         host.push_byte(0u8)
 
-        var port = 80u16
         if pos < ulen && p[pos] == 58u8 { // ':'
             pos = pos + 1usize
             var port_str = String.new()
@@ -644,16 +1139,6 @@ impl HttpClient {
             host_ip = String.from_str("127.0.0.1")
         }
 
-        var stream: TcpStream = TcpStream { fd: -1, is_connected: false }
-        match TcpStream.connect(host_ip.as_ptr() as str, port) {
-            Option.Some(s) => {
-                stream = s
-            },
-            Option.None => {
-                return Option.None
-            },
-        }
-
         // Build wire request
         var req = String.new()
         req.push_str(method)
@@ -682,12 +1167,38 @@ impl HttpClient {
         }
         req.push_byte(0u8)
 
-        let _ = stream.write_str(req.as_ptr() as str)
-
-        // Read response
         let resp_buf = malloc(65536usize) as *raw var u8
-        let bytes_read = stream.read(resp_buf, 65535usize)
-        stream.close()
+        var bytes_read: i64 = 0i64
+
+        if is_https {
+            let tls_opt = TlsStream.connect(host_ip.as_ptr() as str, port)
+            match tls_opt {
+                Option.Some(t) => {
+                    var tls = t
+                    let _ = tls.write_str(req.as_ptr() as str)
+                    bytes_read = tls.read(resp_buf, 65535usize)
+                    tls.close()
+                },
+                Option.None => {
+                    free(resp_buf as *raw var u8)
+                    return Option.None
+                },
+            }
+        } else {
+            let tcp_opt = TcpStream.connect(host_ip.as_ptr() as str, port)
+            match tcp_opt {
+                Option.Some(s) => {
+                    var stream = s
+                    let _ = stream.write_str(req.as_ptr() as str)
+                    bytes_read = stream.read(resp_buf, 65535usize)
+                    stream.close()
+                },
+                Option.None => {
+                    free(resp_buf as *raw var u8)
+                    return Option.None
+                },
+            }
+        }
 
         if bytes_read <= 0i64 {
             free(resp_buf as *raw var u8)
