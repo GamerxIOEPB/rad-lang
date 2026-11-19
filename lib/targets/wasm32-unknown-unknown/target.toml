@@ -1,0 +1,10 @@
+# Rad Built-in WebAssembly Target Specification
+[target]
+triple = "wasm32-unknown-unknown"
+arch = "wasm32"
+os = "unknown"
+env = "unknown"
+format = "wasm"
+linker = "wasm-ld"
+storage_overhead = "0 KB (embedded LLD)"
+builtin = true

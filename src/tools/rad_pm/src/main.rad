@@ -71,6 +71,7 @@ fn str_ends_with(s: str, suffix: str) -> bool {
 
 extern "C" {
     fn access(path: str, mode: i32) -> i32;
+    fn getpid() -> i32;
 }
 
 fn file_exists(path: str) -> bool {
@@ -525,6 +526,64 @@ fn clean_semver_req(req: str) -> String {
     }
     while i < len && p[i] != 32u8 {
         res.push_byte(p[i])
+        i = i + 1usize
+    }
+    return res
+}
+
+fn extract_git_repo_name(url: str) -> String {
+    let slen = str_len(url)
+    if slen == 0usize {
+        return String.new()
+    }
+    let sp = url as *raw u8
+    var end_pos = slen
+    while end_pos > 0usize && sp[end_pos - 1usize] == 47u8 {
+        end_pos = end_pos - 1usize
+    }
+    if end_pos > 4usize && sp[end_pos - 4usize] == 46u8 && sp[end_pos - 3usize] == 103u8 && sp[end_pos - 2usize] == 105u8 && sp[end_pos - 1usize] == 116u8 {
+        end_pos = end_pos - 4usize
+    }
+    while end_pos > 0usize && sp[end_pos - 1usize] == 47u8 {
+        end_pos = end_pos - 1usize
+    }
+    var last_slash = 0usize
+    var si = 0usize
+    while si < end_pos {
+        if sp[si] == 47u8 || sp[si] == 58u8 {
+            last_slash = si + 1usize
+        }
+        si = si + 1usize
+    }
+    var res = String.new()
+    si = last_slash
+    while si < end_pos {
+        res.push_byte(sp[si])
+        si = si + 1usize
+    }
+    return res
+}
+
+fn parse_git_url(line: str) -> String {
+    let len = str_len(line)
+    let p = line as *raw u8
+    var res = String.new()
+    var i = 0usize
+    while i + 3usize < len {
+        if p[i] == 103u8 && p[i + 1usize] == 105u8 && p[i + 2usize] == 116u8 { // "git"
+            i = i + 3usize
+            while i < len && p[i] != 34u8 {
+                i = i + 1usize
+            }
+            if i < len && p[i] == 34u8 {
+                i = i + 1usize
+                while i < len && p[i] != 34u8 {
+                    res.push_byte(p[i])
+                    i = i + 1usize
+                }
+                return res
+            }
+        }
         i = i + 1usize
     }
     return res
@@ -1114,47 +1173,151 @@ fn cmd_install(single_pkg: str, is_locked: bool) -> i32 {
             let dep_ver_req = parse_dep_version(l)
             if dep_name.len() > 0usize {
                 let d_name = dep_name.as_ptr() as str
-                let resolved_ver = clean_semver_req(dep_ver_req.as_ptr() as str)
+                if str_contains(l, "git =") || str_contains(l, "git=") {
+                    let git_url = parse_git_url(l)
+                    var prog_msg = String.new()
+                    prog_msg.push_str("Resolving ")
+                    prog_msg.push_str(d_name)
+                    prog_msg.push_str(" (git)")
+                    render_tui_progress(prog_msg.as_ptr() as str, 40)
 
-                var prog_msg = String.new()
-                prog_msg.push_str("Resolving ")
-                prog_msg.push_str(d_name)
-                prog_msg.push_str(" v")
-                prog_msg.push_str(resolved_ver.as_ptr() as str)
-                render_tui_progress(prog_msg.as_ptr() as str, 40)
+                    let env_home = getenv("HOME")
+                    var global_pkg_path = String.new()
+                    if (env_home as usize) != 0usize {
+                        global_pkg_path.push_str(env_home as str)
+                        global_pkg_path.push_str("/.rad/packages/git/")
+                        global_pkg_path.push_str(d_name)
+                    } else {
+                        global_pkg_path.push_str(".rad/packages/git/")
+                        global_pkg_path.push_str(d_name)
+                    }
 
-                // 1. Install globally to ~/.rad/packages/
-                let ok = ensure_library_installed_global(reg_root.as_ptr() as str, d_name, resolved_ver.as_ptr() as str)
-                if !ok {
-                    println("")
-                    var fail_msg = String.new()
-                    fail_msg.push_str("error: package '")
-                    fail_msg.push_str(d_name)
-                    fail_msg.push_str("' version '")
-                    fail_msg.push_str(resolved_ver.as_ptr() as str)
-                    fail_msg.push_str("' could not be resolved or downloaded")
-                    println(fail_msg.as_ptr() as str)
-                    return 1
+                    if !file_exists(global_pkg_path.as_ptr() as str) && git_url.len() > 0usize {
+                        let pid = getpid()
+                        let pid_str = int_to_str(pid as i64)
+                        var stage_dir = String.new()
+                        stage_dir.push_str("/tmp/rad_git_stage_")
+                        stage_dir.push_str(d_name)
+                        stage_dir.push_byte(95u8)
+                        stage_dir.push_str(pid_str.as_ptr() as str)
+
+                        var clean_stage = String.new()
+                        clean_stage.push_str("rm -rf \"")
+                        clean_stage.push_str(stage_dir.as_ptr() as str)
+                        clean_stage.push_str("\"")
+                        let _ = system(clean_stage.as_ptr() as str)
+
+                        var clone_cmd = String.new()
+                        clone_cmd.push_str("git clone --depth 1 \"")
+                        clone_cmd.push_str(git_url.as_ptr() as str)
+                        clone_cmd.push_str("\" \"")
+                        clone_cmd.push_str(stage_dir.as_ptr() as str)
+                        clone_cmd.push_str("\" 2>&1")
+
+                        let clone_res = system(clone_cmd.as_ptr() as str)
+                        if clone_res != 0 {
+                            let _ = system(clean_stage.as_ptr() as str)
+                            println("")
+                            var err_m = String.new()
+                            err_m.push_str("\x1b[1;31mrad: error:\x1b[0m failed to clone git dependency '")
+                            err_m.push_str(d_name)
+                            err_m.push_str("' from '")
+                            err_m.push_str(git_url.as_ptr() as str)
+                            err_m.push_str("'\n  Dependency rejected.")
+                            println(err_m.as_ptr() as str)
+                            return 1
+                        }
+
+                        var chk_manifest = String.new()
+                        chk_manifest.push_str(stage_dir.as_ptr() as str)
+                        chk_manifest.push_str("/rad.toml")
+
+                        var chk_lib = String.new()
+                        chk_lib.push_str(stage_dir.as_ptr() as str)
+                        chk_lib.push_str("/src/lib.rad")
+
+                        var chk_lib2 = String.new()
+                        chk_lib2.push_str(stage_dir.as_ptr() as str)
+                        chk_lib2.push_str("/lib.rad")
+
+                        let has_manifest = file_exists(chk_manifest.as_ptr() as str)
+                        let has_lib = file_exists(chk_lib.as_ptr() as str) || file_exists(chk_lib2.as_ptr() as str)
+
+                        if !has_manifest && !has_lib {
+                            let _ = system(clean_stage.as_ptr() as str)
+                            println("")
+                            var err_m = String.new()
+                            err_m.push_str("\x1b[1;31mrad: error:\x1b[0m git repository for '")
+                            err_m.push_str(d_name)
+                            err_m.push_str("' is not a valid Rad package.\n")
+                            err_m.push_str("  Missing 'rad.toml' manifest or library entrypoint ('src/lib.rad' / 'lib.rad').\n  Dependency rejected.")
+                            println(err_m.as_ptr() as str)
+                            return 1
+                        }
+
+                        var mv_cmd = String.new()
+                        mv_cmd.push_str("mkdir -p \"${HOME}/.rad/packages/git\" && rm -rf \"")
+                        mv_cmd.push_str(global_pkg_path.as_ptr() as str)
+                        mv_cmd.push_str("\" && mv \"")
+                        mv_cmd.push_str(stage_dir.as_ptr() as str)
+                        mv_cmd.push_str("\" \"")
+                        mv_cmd.push_str(global_pkg_path.as_ptr() as str)
+                        mv_cmd.push_str("\"")
+                        let _ = system(mv_cmd.as_ptr() as str)
+                    }
+
+                    var link_cmd = String.new()
+                    link_cmd.push_str("mkdir -p packages && ln -sfn \"")
+                    link_cmd.push_str(global_pkg_path.as_ptr() as str)
+                    link_cmd.push_str("\" \"packages/")
+                    link_cmd.push_str(d_name)
+                    link_cmd.push_str("\"")
+                    let _ = system(link_cmd.as_ptr() as str)
+
+                    installed_count = installed_count + 1
+                } else {
+                    let resolved_ver = clean_semver_req(dep_ver_req.as_ptr() as str)
+
+                    var prog_msg = String.new()
+                    prog_msg.push_str("Resolving ")
+                    prog_msg.push_str(d_name)
+                    prog_msg.push_str(" v")
+                    prog_msg.push_str(resolved_ver.as_ptr() as str)
+                    render_tui_progress(prog_msg.as_ptr() as str, 40)
+
+                    // 1. Install globally to ~/.rad/packages/
+                    let ok = ensure_library_installed_global(reg_root.as_ptr() as str, d_name, resolved_ver.as_ptr() as str)
+                    if !ok {
+                        println("")
+                        var fail_msg = String.new()
+                        fail_msg.push_str("error: package '")
+                        fail_msg.push_str(d_name)
+                        fail_msg.push_str("' version '")
+                        fail_msg.push_str(resolved_ver.as_ptr() as str)
+                        fail_msg.push_str("' could not be resolved or downloaded")
+                        println(fail_msg.as_ptr() as str)
+                        return 1
+                    }
+
+                    // 2. Copy into local project ./packages/<d_name>/
+                    render_tui_progress("Copying to ./packages/...", 70)
+                    let env_home = getenv("HOME")
+                    if (env_home as usize) != 0usize {
+                        var copy_cmd = String.new()
+                        copy_cmd.push_str("mkdir -p packages/")
+                        copy_cmd.push_str(d_name)
+                        copy_cmd.push_str(" && cp -rf ")
+                        copy_cmd.push_str(env_home as str)
+                        copy_cmd.push_str("/.rad/packages/")
+                        copy_cmd.push_str(d_name)
+                        copy_cmd.push_str("/* packages/")
+                        copy_cmd.push_str(d_name)
+                        copy_cmd.push_str("/ 2>/dev/null")
+                        let _c = system(copy_cmd.as_ptr() as str)
+                    }
+
+                    installed_count = installed_count + 1
                 }
-
-                // 2. Copy into local project ./packages/<d_name>/
-                render_tui_progress("Copying to ./packages/...", 70)
-                let env_home = getenv("HOME")
-                if (env_home as usize) != 0usize {
-                    var copy_cmd = String.new()
-                    copy_cmd.push_str("mkdir -p packages/")
-                    copy_cmd.push_str(d_name)
-                    copy_cmd.push_str(" && cp -rf ")
-                    copy_cmd.push_str(env_home as str)
-                    copy_cmd.push_str("/.rad/packages/")
-                    copy_cmd.push_str(d_name)
-                    copy_cmd.push_str("/* packages/")
-                    copy_cmd.push_str(d_name)
-                    copy_cmd.push_str("/ 2>/dev/null")
-                    let _c = system(copy_cmd.as_ptr() as str)
-                }
-
-                installed_count = installed_count + 1
             }
         }
         li = li + 1usize
@@ -1188,23 +1351,11 @@ fn cmd_add(pkg_spec: str) -> i32 {
 
     let is_git = str_starts_with(pkg_spec, "https://") || str_starts_with(pkg_spec, "http://") || str_starts_with(pkg_spec, "git@") || str_ends_with(pkg_spec, ".git")
     if is_git {
-        var repo_name = String.new()
-        let slen = str_len(pkg_spec)
-        let sp = pkg_spec as *raw u8
-        var last_slash = 0usize
-        var si = 0usize
-        while si < slen {
-            if sp[si] == 47u8 { last_slash = si + 1usize }
-            si = si + 1usize
+        let repo_name = extract_git_repo_name(pkg_spec)
+        if repo_name.len() == 0usize {
+            println("\x1b[1;31mrad: error:\x1b[0m could not determine package name from git repository URL")
+            return 1
         }
-        var end_pos = slen
-        if str_ends_with(pkg_spec, ".git") { end_pos = slen - 4usize }
-        si = last_slash
-        while si < end_pos {
-            repo_name.push_byte(sp[si])
-            si = si + 1usize
-        }
-        repo_name.push_byte(0u8)
 
         println("\x1b[1;36mAdding Git Dependency:\x1b[0m")
         var adding_msg = String.new()
@@ -1215,19 +1366,95 @@ fn cmd_add(pkg_spec: str) -> i32 {
         adding_msg.push_str(")")
         println(adding_msg.as_ptr() as str)
 
+        // 1. Stage clone into isolated temporary staging directory
+        let pid = getpid()
+        let pid_str = int_to_str(pid as i64)
+        var stage_dir = String.new()
+        stage_dir.push_str("/tmp/rad_git_stage_")
+        stage_dir.push_str(repo_name.as_ptr() as str)
+        stage_dir.push_byte(95u8) // '_'
+        stage_dir.push_str(pid_str.as_ptr() as str)
+
+        var clean_stage = String.new()
+        clean_stage.push_str("rm -rf \"")
+        clean_stage.push_str(stage_dir.as_ptr() as str)
+        clean_stage.push_str("\"")
+        let _ = system(clean_stage.as_ptr() as str)
+
+        println("  Cloning remote git repository...")
         var clone_cmd = String.new()
-        clone_cmd.push_str("mkdir -p \"${HOME}/.rad/packages/git\" && (git clone --depth 1 \"")
+        clone_cmd.push_str("git clone --depth 1 \"")
         clone_cmd.push_str(pkg_spec)
-        clone_cmd.push_str("\" \"${HOME}/.rad/packages/git/")
-        clone_cmd.push_str(repo_name.as_ptr() as str)
-        clone_cmd.push_str("\" 2>/dev/null || (cd \"${HOME}/.rad/packages/git/")
-        clone_cmd.push_str(repo_name.as_ptr() as str)
-        clone_cmd.push_str("\" && git pull 2>/dev/null))")
-        let _ = system(clone_cmd.as_ptr() as str)
+        clone_cmd.push_str("\" \"")
+        clone_cmd.push_str(stage_dir.as_ptr() as str)
+        clone_cmd.push_str("\" 2>&1")
+
+        let clone_res = system(clone_cmd.as_ptr() as str)
+        if clone_res != 0 {
+            let _ = system(clean_stage.as_ptr() as str)
+            println("")
+            var err_m = String.new()
+            err_m.push_str("\x1b[1;31mrad: error:\x1b[0m failed to clone git repository '")
+            err_m.push_str(pkg_spec)
+            err_m.push_str("'\n  Verify that the repository URL exists and is publicly accessible.\n  Dependency rejected: no changes made to rad.toml or rad.lock.")
+            println(err_m.as_ptr() as str)
+            return 1
+        }
+
+        // 2. Validate repository contents to ensure it is a valid Rad package
+        var chk_manifest = String.new()
+        chk_manifest.push_str(stage_dir.as_ptr() as str)
+        chk_manifest.push_str("/rad.toml")
+
+        var chk_lib = String.new()
+        chk_lib.push_str(stage_dir.as_ptr() as str)
+        chk_lib.push_str("/src/lib.rad")
+
+        var chk_lib2 = String.new()
+        chk_lib2.push_str(stage_dir.as_ptr() as str)
+        chk_lib2.push_str("/lib.rad")
+
+        let has_manifest = file_exists(chk_manifest.as_ptr() as str)
+        let has_lib = file_exists(chk_lib.as_ptr() as str) || file_exists(chk_lib2.as_ptr() as str)
+
+        if !has_manifest && !has_lib {
+            let _ = system(clean_stage.as_ptr() as str)
+            println("")
+            var err_m = String.new()
+            err_m.push_str("\x1b[1;31mrad: error:\x1b[0m repository '")
+            err_m.push_str(pkg_spec)
+            err_m.push_str("' is not a valid Rad package.\n")
+            err_m.push_str("  Missing package manifest ('rad.toml') or library entrypoint ('src/lib.rad' / 'lib.rad').\n")
+            err_m.push_str("  Dependency rejected: no changes made to rad.toml or rad.lock.")
+            println(err_m.as_ptr() as str)
+            return 1
+        }
+
+        // 3. Promote staged repository to ~/.rad/packages/git/<repo_name>
+        let env_home = getenv("HOME")
+        var dest_dir = String.new()
+        if (env_home as usize) != 0usize {
+            dest_dir.push_str(env_home as str)
+            dest_dir.push_str("/.rad/packages/git/")
+            dest_dir.push_str(repo_name.as_ptr() as str)
+        } else {
+            dest_dir.push_str(".rad/packages/git/")
+            dest_dir.push_str(repo_name.as_ptr() as str)
+        }
+
+        var mv_cmd = String.new()
+        mv_cmd.push_str("mkdir -p \"${HOME}/.rad/packages/git\" && rm -rf \"")
+        mv_cmd.push_str(dest_dir.as_ptr() as str)
+        mv_cmd.push_str("\" && mv \"")
+        mv_cmd.push_str(stage_dir.as_ptr() as str)
+        mv_cmd.push_str("\" \"")
+        mv_cmd.push_str(dest_dir.as_ptr() as str)
+        mv_cmd.push_str("\"")
+        let _ = system(mv_cmd.as_ptr() as str)
 
         var link_cmd = String.new()
-        link_cmd.push_str("mkdir -p packages && ln -sfn \"${HOME}/.rad/packages/git/")
-        link_cmd.push_str(repo_name.as_ptr() as str)
+        link_cmd.push_str("mkdir -p packages && ln -sfn \"")
+        link_cmd.push_str(dest_dir.as_ptr() as str)
         link_cmd.push_str("\" \"packages/")
         link_cmd.push_str(repo_name.as_ptr() as str)
         link_cmd.push_str("\"")
@@ -2625,8 +2852,7 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
         println("Subcommands:")
         println("  info                  Display active toolchain version and configuration")
         println("  list                  List available official Rad releases")
-        println("  target <list|add|rm>  Manage compilation targets (e.g. wasm32-unknown-unknown)")
-        println("  install <target>      Install a target toolchain payload (e.g. wasm32-unknown-unknown)")
+        println("  target <list|add|rm>  Manage compilation targets")
         println("  update                Update toolchain to latest stable release")
         println("  update --check        Check for available updates without installing")
         println("  update --version <v>  Update or switch to a specific version")
@@ -2662,63 +2888,79 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
         }
 
         if str_eq(action, "list") {
-            println("Installed & Available Targets:")
-            println("  * x86_64-unknown-linux-musl (host / default, installed)")
-            var wasm_dir = String.new()
-            wasm_dir.push_str(target_base.as_ptr() as str)
-            wasm_dir.push_str("/wasm32-unknown-unknown")
-            if file_exists(wasm_dir.as_ptr() as str) {
-                println("  * wasm32-unknown-unknown (installed, zero-storage: in-process LLD)")
-            } else {
-                println("  * wasm32-unknown-unknown (available)")
-            }
+            println("Rad Toolchain Targets:")
             println("")
-            println("To install a target:")
+            println("  \x1b[1;32mBuilt-in Targets\x1b[0m (0 KB overhead, natively supported):")
+            println("    * x86_64-unknown-linux-musl (host / default)")
+            println("    * wasm32-unknown-unknown (WebAssembly / browser, embedded LLD)")
+            println("")
+            println("  \x1b[1;33mAvailable Cross-Compilation Targets\x1b[0m (require external OS sysroot):")
+            println("    - aarch64-unknown-linux-musl (Linux ARM64)")
+            println("    - x86_64-apple-darwin (macOS Intel x86_64)")
+            println("    - aarch64-apple-darwin (macOS Apple Silicon)")
+            println("    - x86_64-pc-windows-msvc (Windows x64)")
+            println("")
+            println("To install an external cross-compilation target:")
             println("  rad toolchain target add <target>")
-            println("  (or: rad toolchain install <target>)")
             return 0
         }
 
         if str_eq(action, "add") || str_eq(action, "install") {
-            if !str_eq(target_name, "wasm32-unknown-unknown") && !str_eq(target_name, "wasm32") {
-                var err_m = String.new()
-                err_m.push_str("error: unknown target triple '")
-                err_m.push_str(target_name)
-                err_m.push_str("'")
-                println(err_m.as_ptr() as str)
-                return 1
+            if str_eq(target_name, "wasm32-unknown-unknown") || str_eq(target_name, "wasm32") {
+                var mkdir_cmd = String.new()
+                mkdir_cmd.push_str("mkdir -p \"")
+                mkdir_cmd.push_str(target_base.as_ptr() as str)
+                mkdir_cmd.push_str("/wasm32-unknown-unknown\"")
+                let _ = system(mkdir_cmd.as_ptr() as str)
+
+                var meta_path = String.new()
+                meta_path.push_str(target_base.as_ptr() as str)
+                meta_path.push_str("/wasm32-unknown-unknown/target.toml")
+                let meta_content = "[target]\ntriple = \"wasm32-unknown-unknown\"\narch = \"wasm32\"\nos = \"unknown\"\nformat = \"wasm\"\nlinker = \"wasm-ld\"\nstorage_overhead = \"0 KB (embedded LLD)\"\nbuiltin = true\n"
+                let _ = write_file_str(meta_path.as_ptr() as str, meta_content)
+
+                println("info: target 'wasm32-unknown-unknown' is already built-in to the toolchain (0 KB overhead, no installation needed).")
+                return 0
             }
-            var info_m = String.new()
-            info_m.push_str("info: installing target '")
-            info_m.push_str(target_name)
-            info_m.push_str("'...")
-            println(info_m.as_ptr() as str)
 
-            var mkdir_cmd = String.new()
-            mkdir_cmd.push_str("mkdir -p \"")
-            mkdir_cmd.push_str(target_base.as_ptr() as str)
-            mkdir_cmd.push_str("/wasm32-unknown-unknown\"")
-            let _ = system(mkdir_cmd.as_ptr() as str)
+            if str_eq(target_name, "x86_64-unknown-linux-musl") || str_eq(target_name, "x86_64") {
+                println("info: target 'x86_64-unknown-linux-musl' is the default host target (already installed).")
+                return 0
+            }
 
-            var meta_path = String.new()
-            meta_path.push_str(target_base.as_ptr() as str)
-            meta_path.push_str("/wasm32-unknown-unknown/target.toml")
-            let meta_content = "[target]\ntriple = \"wasm32-unknown-unknown\"\narch = \"wasm32\"\nos = \"unknown\"\nformat = \"wasm\"\nlinker = \"wasm-ld\"\nstorage_overhead = \"0 KB (embedded LLD)\"\n"
-            let _ = write_file_str(meta_path.as_ptr() as str, meta_content)
+            let is_known_cross = str_eq(target_name, "aarch64-unknown-linux-musl") ||
+                                 str_eq(target_name, "x86_64-apple-darwin") ||
+                                 str_eq(target_name, "aarch64-apple-darwin") ||
+                                 str_eq(target_name, "x86_64-pc-windows-msvc")
 
-            println("  \x1b[1;32m✓\x1b[0m In-process LLD WebAssembly driver verified")
-            println("  \x1b[1;32m✓\x1b[0m Target metadata provisioned to ~/.rad/lib/targets/wasm32-unknown-unknown")
-            var done_m = String.new()
-            done_m.push_str("  \x1b[1;32m✓\x1b[0m Successfully installed target '")
-            done_m.push_str(target_name)
-            done_m.push_str("'! (storage overhead: 0 KB)")
-            println(done_m.as_ptr() as str)
-            return 0
+            if is_known_cross {
+                var info_m = String.new()
+                info_m.push_str("info: cross-compilation target '")
+                info_m.push_str(target_name)
+                info_m.push_str("' requires an external OS sysroot (~15-45 MB).\n")
+                info_m.push_str("info: sysroot package distribution for '")
+                info_m.push_str(target_name)
+                info_m.push_str("' will be downloaded when official sysroots are hosted.\n")
+                info_m.push_str("  Note: Built-in wasm32-unknown-unknown requires 0 KB overhead and is already active.")
+                println(info_m.as_ptr() as str)
+                return 0
+            }
+
+            var err_m = String.new()
+            err_m.push_str("error: unknown target triple '")
+            err_m.push_str(target_name)
+            err_m.push_str("'\nRun `rad toolchain target list` to see available targets.")
+            println(err_m.as_ptr() as str)
+            return 1
         }
 
         if str_eq(action, "remove") || str_eq(action, "rm") {
             if str_starts_with(target_name, "x86_64") {
-                println("error: cannot remove default host target")
+                println("error: cannot remove default host target 'x86_64-unknown-linux-musl'")
+                return 1
+            }
+            if str_eq(target_name, "wasm32-unknown-unknown") || str_eq(target_name, "wasm32") {
+                println("error: cannot remove built-in target 'wasm32-unknown-unknown' (it is natively embedded in the toolchain)")
                 return 1
             }
             var rm_cmd = String.new()
