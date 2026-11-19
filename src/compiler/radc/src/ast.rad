@@ -16,6 +16,7 @@ const EXPR_CAST: i32 = 11
 const EXPR_FLOAT: i32 = 12
 const EXPR_ARRAY_LITERAL: i32 = 13
 const EXPR_RANGE: i32 = 14
+const EXPR_TRY: i32 = 15
 
 struct Expr {
     kind: i32,

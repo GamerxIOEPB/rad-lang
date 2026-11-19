@@ -34,6 +34,9 @@ extern "C" {
     fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
     fn bind(sockfd: i32, addr: *raw u8, addrlen: u32) -> i32;
     fn connect(sockfd: i32, addr: *raw u8, addrlen: u32) -> i32;
+    fn listen(sockfd: i32, backlog: i32) -> i32;
+    fn accept(sockfd: i32, addr: *raw var u8, addrlen: *raw var u32) -> i32;
+    fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: *raw u8, optlen: u32) -> i32;
     fn close(fd: i32) -> i32;
     fn send(sockfd: i32, buf: *raw u8, len: usize, flags: i32) -> i64;
     fn recv(sockfd: i32, buf: *raw var u8, len: usize, flags: i32) -> i64;
@@ -199,6 +202,98 @@ impl TcpStream {
         if self.is_connected {
             let _ = close(self.fd)
             self.is_connected = false
+        }
+    }
+
+    pub fn drop(var self) {
+        self.close()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// TCP Listener (Server Socket)
+// ------------------------------------------------------------------------------
+
+pub struct TcpListener {
+    pub fd: i32,
+    pub is_bound: bool,
+}
+
+impl TcpListener {
+    pub fn bind(host_ip: str, port: u16) -> Option<TcpListener> {
+        let sock = socket(2, 1, 0) // AF_INET = 2, SOCK_STREAM = 1
+        if sock < 0 {
+            return Option.None
+        }
+
+        // Enable SO_REUSEADDR
+        let opt = malloc(4usize) as *raw var i32
+        opt[0] = 1
+        let _ = setsockopt(sock, 1, 2, opt as *raw u8, 4u32) // SOL_SOCKET = 1, SO_REUSEADDR = 2
+        free(opt as *raw var u8)
+
+        let raw = malloc(16usize) as *raw var u8
+        var i = 0usize
+        while i < 16usize {
+            raw[i] = 0u8
+            i = i + 1usize
+        }
+
+        raw[0usize] = 2u8 // AF_INET
+        raw[2usize] = ((port >> 8u16) & 255u16) as u8
+        raw[3usize] = (port & 255u16) as u8
+
+        if net_str_len(host_ip) > 0usize && !net_str_eq(host_ip, "0.0.0.0") {
+            let _ = inet_pton(2, host_ip, (raw as usize + 4usize) as *raw var u8)
+        }
+
+        let b_res = bind(sock, raw as *raw u8, 16u32)
+        free(raw)
+
+        if b_res < 0 {
+            let _ = close(sock)
+            return Option.None
+        }
+
+        let l_res = listen(sock, 128)
+        if l_res < 0 {
+            let _ = close(sock)
+            return Option.None
+        }
+
+        return Option.Some(TcpListener {
+            fd: sock,
+            is_bound: true,
+        })
+    }
+
+    pub fn accept(self) -> Option<TcpStream> {
+        if !self.is_bound || self.fd < 0 {
+            return Option.None
+        }
+        let raw = malloc(16usize) as *raw var u8
+        let p_len = malloc(4usize) as *raw var u32
+        p_len[0usize] = 16u32
+
+        let client_fd = accept(self.fd, raw, p_len)
+        free(raw)
+        free(p_len as *raw var u8)
+
+        if client_fd < 0 {
+            return Option.None
+        }
+
+        return Option.Some(TcpStream {
+            fd: client_fd,
+            is_connected: true,
+        })
+    }
+
+    pub fn close(var self) {
+        if self.is_bound && self.fd >= 0 {
+            let _ = close(self.fd)
+            self.fd = -1
+            self.is_bound = false
         }
     }
 

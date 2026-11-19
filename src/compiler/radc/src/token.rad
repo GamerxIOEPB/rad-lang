@@ -46,6 +46,8 @@ const TOK_COLONCOLON: i32 = 41 // ::
 const TOK_FAT_ARROW: i32 = 42  // =>
 const TOK_HASH: i32 = 43       // #
 const TOK_DOTDOT: i32 = 44     // ..
+const TOK_QUESTION: i32 = 45   // ?
+const TOK_TRAIT: i32 = 71      // trait
 
 // Operators
 const TOK_PLUS: i32 = 50      // +
@@ -289,6 +291,8 @@ fn lex_source(src: String) -> Vec<Token> {
                     k = TOK_IN
                 } else if str_eq(s, "defer") {
                     k = TOK_DEFER
+                } else if str_eq(s, "trait") {
+                    k = TOK_TRAIT
                 }
 
                 let tok_len = (cur_col - tok_col) as i64
@@ -514,6 +518,8 @@ fn lex_source(src: String) -> Vec<Token> {
                     }
                 } else if ch == 35u8 { // '#'
                     k = TOK_HASH
+                } else if ch == 63u8 { // '?'
+                    k = TOK_QUESTION
                 } else if ch == 61u8 {
                     if i + 1usize < len && p[i + 1usize] == 61u8 { // ==
                         k = TOK_EQEQ

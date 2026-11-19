@@ -1,0 +1,608 @@
+// ==============================================================================
+// Rad GUI (rad-gui): Immediate-Mode Graphical User Interface Kit
+// ==============================================================================
+// Reusable, lightweight, zero-dependency immediate-mode widgets built on top of rad-gfx:
+// - Buttons, Sliders (i64 & f64), Checkboxes, Text Inputs, Progress Bars
+// - Draggable Floating Windows, Panels, Separators, and Status Labels
+// - Keyboard focus navigation & Mouse interaction support
+// - Built-in themes: Dark, Cyberpunk, and Classic Light
+// ==============================================================================
+
+import gfx;
+
+pub struct WindowPos {
+    pub x: usize,
+    pub y: usize,
+    pub is_dragging: bool,
+}
+
+pub struct GuiTheme {
+    pub win_bg: Color,
+    pub win_border: Color,
+    pub title_bg: Color,
+    pub title_fg: Color,
+    pub panel_bg: Color,
+    pub panel_border: Color,
+    pub btn_normal: Color,
+    pub btn_hover: Color,
+    pub btn_active: Color,
+    pub btn_text: Color,
+    pub slider_track: Color,
+    pub slider_fill: Color,
+    pub slider_thumb: Color,
+    pub text_col: Color,
+    pub accent_col: Color,
+    pub cursor_col: Color,
+}
+
+impl GuiTheme {
+    pub fn dark() -> GuiTheme {
+        return GuiTheme {
+            win_bg: Color.rgb(24u8, 28u8, 38u8),
+            win_border: Color.rgb(65u8, 80u8, 105u8),
+            title_bg: Color.rgb(40u8, 85u8, 160u8),
+            title_fg: Color.rgb(240u8, 245u8, 255u8),
+            panel_bg: Color.rgb(32u8, 38u8, 50u8),
+            panel_border: Color.rgb(55u8, 68u8, 88u8),
+            btn_normal: Color.rgb(48u8, 58u8, 76u8),
+            btn_hover: Color.rgb(72u8, 92u8, 126u8),
+            btn_active: Color.rgb(96u8, 130u8, 185u8),
+            btn_text: Color.rgb(235u8, 240u8, 250u8),
+            slider_track: Color.rgb(36u8, 44u8, 58u8),
+            slider_fill: Color.rgb(0u8, 180u8, 230u8),
+            slider_thumb: Color.rgb(255u8, 255u8, 255u8),
+            text_col: Color.rgb(215u8, 225u8, 238u8),
+            accent_col: Color.rgb(0u8, 210u8, 255u8),
+            cursor_col: Color.rgb(255u8, 220u8, 40u8),
+        };
+    }
+
+    pub fn cyber() -> GuiTheme {
+        return GuiTheme {
+            win_bg: Color.rgb(12u8, 14u8, 22u8),
+            win_border: Color.rgb(0u8, 230u8, 255u8),
+            title_bg: Color.rgb(255u8, 0u8, 110u8),
+            title_fg: Color.rgb(255u8, 255u8, 255u8),
+            panel_bg: Color.rgb(18u8, 22u8, 34u8),
+            panel_border: Color.rgb(0u8, 160u8, 190u8),
+            btn_normal: Color.rgb(28u8, 35u8, 52u8),
+            btn_hover: Color.rgb(0u8, 200u8, 230u8),
+            btn_active: Color.rgb(255u8, 0u8, 128u8),
+            btn_text: Color.rgb(255u8, 255u8, 255u8),
+            slider_track: Color.rgb(25u8, 30u8, 45u8),
+            slider_fill: Color.rgb(255u8, 0u8, 120u8),
+            slider_thumb: Color.rgb(0u8, 255u8, 240u8),
+            text_col: Color.rgb(200u8, 245u8, 255u8),
+            accent_col: Color.rgb(0u8, 255u8, 220u8),
+            cursor_col: Color.rgb(255u8, 240u8, 0u8),
+        };
+    }
+
+    pub fn light() -> GuiTheme {
+        return GuiTheme {
+            win_bg: Color.rgb(230u8, 235u8, 242u8),
+            win_border: Color.rgb(160u8, 175u8, 195u8),
+            title_bg: Color.rgb(60u8, 110u8, 190u8),
+            title_fg: Color.rgb(255u8, 255u8, 255u8),
+            panel_bg: Color.rgb(215u8, 222u8, 232u8),
+            panel_border: Color.rgb(180u8, 192u8, 208u8),
+            btn_normal: Color.rgb(195u8, 205u8, 218u8),
+            btn_hover: Color.rgb(175u8, 190u8, 210u8),
+            btn_active: Color.rgb(140u8, 165u8, 195u8),
+            btn_text: Color.rgb(30u8, 35u8, 45u8),
+            slider_track: Color.rgb(185u8, 195u8, 208u8),
+            slider_fill: Color.rgb(50u8, 125u8, 215u8),
+            slider_thumb: Color.rgb(30u8, 40u8, 55u8),
+            text_col: Color.rgb(35u8, 45u8, 60u8),
+            accent_col: Color.rgb(30u8, 110u8, 200u8),
+            cursor_col: Color.rgb(20u8, 20u8, 20u8),
+        };
+    }
+}
+
+fn gui_text_len(s: str) -> usize {
+    let p = s as *raw u8;
+    var len = 0usize;
+    while p[len] != 0u8 {
+        len = len + 1usize;
+    }
+    return len;
+}
+
+pub struct GuiContext {
+    pub mouse_x: i32,
+    pub mouse_y: i32,
+    pub mouse_down: bool,
+    pub mouse_clicked: bool,
+    pub mouse_released: bool,
+    pub last_key: u8,
+    pub key_pressed: bool,
+    pub active_id: usize,
+    pub hot_id: usize,
+    pub focused_id: usize,
+    pub drag_win_id: usize,
+    pub drag_off_x: i32,
+    pub drag_off_y: i32,
+    pub cursor_blink: u64,
+    pub theme: GuiTheme,
+}
+
+impl GuiContext {
+    pub fn new() -> GuiContext {
+        return GuiContext {
+            mouse_x: 0i32,
+            mouse_y: 0i32,
+            mouse_down: false,
+            mouse_clicked: false,
+            mouse_released: false,
+            last_key: 0u8,
+            key_pressed: false,
+            active_id: 0usize,
+            hot_id: 0usize,
+            focused_id: 0usize,
+            drag_win_id: 0usize,
+            drag_off_x: 0i32,
+            drag_off_y: 0i32,
+            cursor_blink: 0u64,
+            theme: GuiTheme.dark(),
+        };
+    }
+
+    pub fn set_theme(var self, theme: GuiTheme) {
+        self.theme = theme;
+    }
+
+    pub fn begin_frame(var self) {
+        self.mouse_clicked = false;
+        self.mouse_released = false;
+        self.key_pressed = false;
+        self.last_key = 0u8;
+        self.hot_id = 0usize;
+        self.cursor_blink = self.cursor_blink + 1u64;
+    }
+
+    pub fn handle_event(var self, ev: Event) {
+        if ev.kind == EVENT_KEY {
+            self.last_key = ev.key;
+            self.key_pressed = true;
+        } else if ev.kind == EVENT_MOUSE {
+            self.mouse_x = ev.mouse_x;
+            self.mouse_y = ev.mouse_y;
+            // Left click event handling
+            if !self.mouse_down {
+                self.mouse_clicked = true;
+                self.mouse_down = true;
+            }
+        }
+    }
+
+    pub fn set_mouse_pos(var self, x: i32, y: i32) {
+        self.mouse_x = x;
+        self.mouse_y = y;
+    }
+
+    pub fn set_mouse_down(var self, down: bool) {
+        if down && !self.mouse_down {
+            self.mouse_clicked = true;
+        } else if !down && self.mouse_down {
+            self.mouse_released = true;
+        }
+        self.mouse_down = down;
+    }
+
+    pub fn hit_test(self, x: usize, y: usize, w: usize, h: usize) -> bool {
+        let mx = self.mouse_x;
+        let my = self.mouse_y;
+        let x0 = x as i32;
+        let y0 = y as i32;
+        let x1 = (x + w) as i32;
+        let y1 = (y + h) as i32;
+        return mx >= x0 && mx < x1 && my >= y0 && my < y1;
+    }
+
+    // -------------------------------------------------------------------------
+    // Visual Elements: Labels & Separators
+    // -------------------------------------------------------------------------
+    pub fn label(self, canvas: var Canvas, text: str, x: usize, y: usize, col: Color) {
+        canvas.draw_text(x, y, text, col);
+    }
+
+    pub fn separator(self, canvas: var Canvas, x: usize, y: usize, w: usize, col: Color) {
+        canvas.draw_line(x as i64, y as i64, (x + w) as i64, y as i64, col);
+    }
+
+    pub fn progress_bar(self, canvas: var Canvas, fraction: f64, x: usize, y: usize, w: usize, h: usize, fg_col: Color, bg_col: Color) {
+        canvas.fill_rect(x, y, w, h, bg_col);
+        canvas.draw_rect(x, y, w, h, self.theme.panel_border);
+        var f = fraction;
+        if f < 0.0 { f = 0.0; }
+        if f > 1.0 { f = 1.0; }
+        let fill_w = ((w as f64) * f) as usize;
+        if fill_w > 0usize && h > 2usize {
+            var actual_w = fill_w;
+            if actual_w >= 2usize { actual_w = actual_w - 2usize; }
+            canvas.fill_rect(x + 1usize, y + 1usize, actual_w, h - 2usize, fg_col);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Panel Container
+    // -------------------------------------------------------------------------
+    pub fn panel(self, canvas: var Canvas, title: str, x: usize, y: usize, w: usize, h: usize) {
+        canvas.fill_rect(x, y, w, h, self.theme.panel_bg);
+        canvas.draw_rect(x, y, w, h, self.theme.panel_border);
+        if gui_text_len(title) > 0usize && h > 6usize {
+            canvas.fill_rect(x, y, w, 5usize, self.theme.title_bg);
+            canvas.draw_text(x + 2usize, y + 1usize, title, self.theme.title_fg);
+            canvas.draw_line(x as i64, (y + 5usize) as i64, (x + w) as i64, (y + 5usize) as i64, self.theme.panel_border);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Button Widget
+    // -------------------------------------------------------------------------
+    pub fn button(var self, canvas: var Canvas, id: usize, text: str, x: usize, y: usize, w: usize, h: usize) -> bool {
+        let is_hover = self.hit_test(x, y, w, h);
+        if is_hover {
+            self.hot_id = id;
+            if self.mouse_clicked {
+                self.active_id = id;
+                self.focused_id = id;
+            }
+        }
+
+        var clicked = false;
+        var bg_color = self.theme.btn_normal;
+
+        if self.active_id == id {
+            bg_color = self.theme.btn_active;
+            if self.mouse_released {
+                if is_hover {
+                    clicked = true;
+                }
+                self.active_id = 0usize;
+            }
+        } else if self.hot_id == id {
+            bg_color = self.theme.btn_hover;
+        }
+
+        // Keyboard trigger: Enter (10) or Space (32) when focused
+        if self.focused_id == id && self.key_pressed && (self.last_key == 10u8 || self.last_key == 32u8) {
+            clicked = true;
+            bg_color = self.theme.btn_active;
+        }
+
+        // Render button body and border
+        canvas.fill_rect(x, y, w, h, bg_color);
+        var border_col = self.theme.panel_border;
+        if self.focused_id == id {
+            border_col = self.theme.accent_col;
+        }
+        canvas.draw_rect(x, y, w, h, border_col);
+
+        // Center text horizontally & vertically
+        let t_len = gui_text_len(text);
+        let t_w = t_len;
+        var tx = x + 1usize;
+        if w > t_w {
+            tx = x + ((w - t_w) / 2usize);
+        }
+        var ty = y;
+        if h > 2usize {
+            ty = y + ((h - 2usize) / 2usize);
+        }
+        canvas.draw_text(tx, ty, text, self.theme.btn_text);
+
+        return clicked;
+    }
+
+    // -------------------------------------------------------------------------
+    // Checkbox Widget
+    // -------------------------------------------------------------------------
+    pub fn checkbox(var self, canvas: var Canvas, id: usize, label: str, checked: bool, x: usize, y: usize) -> bool {
+        let box_w = 4usize;
+        let box_h = 4usize;
+        let total_w = box_w + 2usize + gui_text_len(label);
+        let is_hover = self.hit_test(x, y, total_w, box_h);
+
+        var cur_checked = checked;
+        if is_hover {
+            self.hot_id = id;
+            if self.mouse_clicked {
+                self.focused_id = id;
+                cur_checked = !cur_checked;
+            }
+        }
+
+        // Keyboard trigger: Space (32) when focused
+        if self.focused_id == id && self.key_pressed && self.last_key == 32u8 {
+            cur_checked = !cur_checked;
+        }
+
+        // Render checkbox box
+        var bg = self.theme.slider_track;
+        if is_hover { bg = self.theme.btn_hover; }
+        canvas.fill_rect(x, y, box_w, box_h, bg);
+        var border_col = self.theme.panel_border;
+        if self.focused_id == id { border_col = self.theme.accent_col; }
+        canvas.draw_rect(x, y, box_w, box_h, border_col);
+
+        // If checked, draw inner filled indicator
+        if cur_checked {
+            canvas.fill_rect(x + 1usize, y + 1usize, 2usize, 2usize, self.theme.accent_col);
+        }
+
+        // Draw label text beside checkbox
+        canvas.draw_text(x + box_w + 2usize, y, label, self.theme.text_col);
+        return cur_checked;
+    }
+
+    // -------------------------------------------------------------------------
+    // Slider i64 Widget
+    // -------------------------------------------------------------------------
+    pub fn slider_i64(var self, canvas: var Canvas, id: usize, label: str, val: i64, min_val: i64, max_val: i64, x: usize, y: usize, w: usize, h: usize) -> i64 {
+        if max_val <= min_val || w <= 4usize {
+            return val;
+        }
+
+        let is_hover = self.hit_test(x, y, w, h);
+        if is_hover {
+            self.hot_id = id;
+            if self.mouse_clicked {
+                self.active_id = id;
+                self.focused_id = id;
+            }
+        }
+
+        var cur_val = val;
+
+        // Mouse drag tracking
+        if self.active_id == id {
+            if self.mouse_down {
+                var mx = self.mouse_x - (x as i32);
+                if mx < 0i32 { mx = 0i32; }
+                if mx > (w as i32) { mx = w as i32; }
+                let frac = (mx as f64) / (w as f64);
+                let range = (max_val - min_val) as f64;
+                cur_val = min_val + ((frac * range) as i64);
+            } else {
+                self.active_id = 0usize;
+            }
+        }
+
+        // Keyboard arrow controls when focused
+        if self.focused_id == id && self.key_pressed {
+            if self.last_key == KEY_LEFT || self.last_key == 104u8 { // Left or 'h'
+                if cur_val > min_val {
+                    cur_val = cur_val - 1i64;
+                }
+            } else if self.last_key == KEY_RIGHT || self.last_key == 108u8 { // Right or 'l'
+                if cur_val < max_val {
+                    cur_val = cur_val + 1i64;
+                }
+            }
+        }
+
+        // Clamp value
+        if cur_val < min_val { cur_val = min_val; }
+        if cur_val > max_val { cur_val = max_val; }
+
+        // Render slider track
+        canvas.fill_rect(x, y + (h / 2usize) - 1usize, w, 3usize, self.theme.slider_track);
+        canvas.draw_rect(x, y + (h / 2usize) - 1usize, w, 3usize, self.theme.panel_border);
+
+        // Fill active portion
+        let frac = ((cur_val - min_val) as f64) / ((max_val - min_val) as f64);
+        let fill_w = ((w as f64) * frac) as usize;
+        if fill_w > 0usize {
+            canvas.fill_rect(x, y + (h / 2usize) - 1usize, fill_w, 3usize, self.theme.slider_fill);
+        }
+
+        // Render thumb handle
+        var thumb_x = x + fill_w;
+        if thumb_x >= 2usize { thumb_x = thumb_x - 2usize; }
+        var thumb_col = self.theme.slider_thumb;
+        if self.active_id == id || self.focused_id == id { thumb_col = self.theme.accent_col; }
+        canvas.fill_rect(thumb_x, y, 4usize, h, thumb_col);
+
+        // Render label and current value
+        var str_buf = String.from_str(label);
+        str_buf.push_str(": ");
+        push_i64_str(str_buf, cur_val);
+        var label_y = 0usize;
+        if y >= 3usize { label_y = y - 3usize; }
+        canvas.draw_text(x, label_y, str_buf.as_ptr() as str, self.theme.text_col);
+        str_buf.drop();
+
+        return cur_val;
+    }
+
+    // -------------------------------------------------------------------------
+    // Slider f64 Widget
+    // -------------------------------------------------------------------------
+    pub fn slider_f64(var self, canvas: var Canvas, id: usize, label: str, val: f64, min_val: f64, max_val: f64, x: usize, y: usize, w: usize, h: usize) -> f64 {
+        if max_val <= min_val || w <= 4usize {
+            return val;
+        }
+
+        let is_hover = self.hit_test(x, y, w, h);
+        if is_hover {
+            self.hot_id = id;
+            if self.mouse_clicked {
+                self.active_id = id;
+                self.focused_id = id;
+            }
+        }
+
+        var cur_val = val;
+
+        if self.active_id == id {
+            if self.mouse_down {
+                var mx = self.mouse_x - (x as i32);
+                if mx < 0i32 { mx = 0i32; }
+                if mx > (w as i32) { mx = w as i32; }
+                let frac = (mx as f64) / (w as f64);
+                let range = max_val - min_val;
+                cur_val = min_val + (frac * range);
+            } else {
+                self.active_id = 0usize;
+            }
+        }
+
+        if cur_val < min_val { cur_val = min_val; }
+        if cur_val > max_val { cur_val = max_val; }
+
+        canvas.fill_rect(x, y + (h / 2usize) - 1usize, w, 3usize, self.theme.slider_track);
+        canvas.draw_rect(x, y + (h / 2usize) - 1usize, w, 3usize, self.theme.panel_border);
+
+        let frac = (cur_val - min_val) / (max_val - min_val);
+        let fill_w = ((w as f64) * frac) as usize;
+        if fill_w > 0usize {
+            canvas.fill_rect(x, y + (h / 2usize) - 1usize, fill_w, 3usize, self.theme.slider_fill);
+        }
+
+        var thumb_x = x + fill_w;
+        if thumb_x >= 2usize { thumb_x = thumb_x - 2usize; }
+        var thumb_col = self.theme.slider_thumb;
+        if self.active_id == id || self.focused_id == id { thumb_col = self.theme.accent_col; }
+        canvas.fill_rect(thumb_x, y, 4usize, h, thumb_col);
+
+        var str_buf = String.from_str(label);
+        str_buf.push_str(": ");
+        push_f64_str(str_buf, cur_val, 2usize);
+        var label_y = 0usize;
+        if y >= 3usize { label_y = y - 3usize; }
+        canvas.draw_text(x, label_y, str_buf.as_ptr() as str, self.theme.text_col);
+        str_buf.drop();
+
+        return cur_val;
+    }
+
+    // -------------------------------------------------------------------------
+    // Text Input Box Widget
+    // -------------------------------------------------------------------------
+    pub fn text_input(var self, canvas: var Canvas, id: usize, label: str, var text: String, max_len: usize, x: usize, y: usize, w: usize, h: usize) -> String {
+        let is_hover = self.hit_test(x, y, w, h);
+        if is_hover {
+            self.hot_id = id;
+            if self.mouse_clicked {
+                self.focused_id = id;
+            }
+        } else if self.mouse_clicked && self.focused_id == id {
+            self.focused_id = 0usize;
+        }
+
+        // Process typing if focused
+        if self.focused_id == id && self.key_pressed {
+            let k = self.last_key;
+            if (k == 127u8 || k == 8u8) && text.len() > 0usize { // Backspace
+                let cur_len = text.len() - 1usize;
+                var next_s = String.new();
+                var i = 0usize;
+                let p = text.as_ptr();
+                while i < cur_len {
+                    next_s.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                text.drop();
+                text = next_s;
+            } else if k >= 32u8 && k <= 126u8 && text.len() < max_len { // Printable ASCII
+                text.push_byte(k);
+            }
+        }
+
+        // Render input background and outline
+        canvas.fill_rect(x, y, w, h, self.theme.slider_track);
+        var border_col = self.theme.panel_border;
+        if self.focused_id == id { border_col = self.theme.accent_col; }
+        canvas.draw_rect(x, y, w, h, border_col);
+
+        // Render text
+        var ty = y;
+        if h > 2usize {
+            ty = y + ((h - 2usize) / 2usize);
+        }
+        canvas.draw_text(x + 2usize, ty, text.as_ptr() as str, self.theme.text_col);
+
+        // Flashing cursor when focused
+        if self.focused_id == id && ((self.cursor_blink / 20u64) % 2u64 == 0u64) {
+            let cursor_x = x + 2usize + text.len();
+            if cursor_x + 1usize < x + w {
+                canvas.draw_line(cursor_x as i64, ty as i64, cursor_x as i64, (ty + 2usize) as i64, self.theme.cursor_col);
+            }
+        }
+
+        // Draw label above if provided
+        if gui_text_len(label) > 0usize && y >= 3usize {
+            canvas.draw_text(x, y - 3usize, label, self.theme.text_col);
+        }
+
+        return text;
+    }
+
+    // -------------------------------------------------------------------------
+    // Draggable Floating Window Container
+    // -------------------------------------------------------------------------
+    pub fn draggable_window(var self, canvas: var Canvas, id: usize, title: str, win_x: usize, win_y: usize, w: usize, h: usize) -> WindowPos {
+        let title_h = 6usize;
+        let is_title_hover = self.hit_test(win_x, win_y, w, title_h);
+
+        // Click on title bar initiates drag
+        if is_title_hover && self.mouse_clicked {
+            self.drag_win_id = id;
+            self.focused_id = id;
+            self.drag_off_x = self.mouse_x - (win_x as i32);
+            self.drag_off_y = self.mouse_y - (win_y as i32);
+        }
+
+        var cur_wx = win_x;
+        var cur_wy = win_y;
+
+        // Drag updates coordinates
+        if self.drag_win_id == id {
+            if self.mouse_down {
+                var nx = self.mouse_x - self.drag_off_x;
+                var ny = self.mouse_y - self.drag_off_y;
+
+                // Clamp to canvas boundaries
+                if nx < 0i32 { nx = 0i32; }
+                if ny < 0i32 { ny = 0i32; }
+                if (nx as usize) + w > canvas.width {
+                    nx = (canvas.width - w) as i32;
+                }
+                if (ny as usize) + h > canvas.height {
+                    ny = (canvas.height - h) as i32;
+                }
+                cur_wx = nx as usize;
+                cur_wy = ny as usize;
+            } else {
+                self.drag_win_id = 0usize;
+            }
+        }
+
+        let wx = cur_wx;
+        let wy = cur_wy;
+
+        // Render drop shadow for depth
+        if wx + w + 2usize <= canvas.width && wy + h + 2usize <= canvas.height {
+            canvas.fill_rect(wx + 2usize, wy + 2usize, w, h, Color.rgb(10u8, 12u8, 16u8));
+        }
+
+        // Window background body
+        canvas.fill_rect(wx, wy, w, h, self.theme.win_bg);
+        canvas.draw_rect(wx, wy, w, h, self.theme.win_border);
+
+        // Title bar
+        var title_color = self.theme.title_bg;
+        if self.drag_win_id == id { title_color = self.theme.accent_col; }
+        canvas.fill_rect(wx, wy, w, title_h, title_color);
+        canvas.draw_text(wx + 3usize, wy + 2usize, title, self.theme.title_fg);
+        canvas.draw_line(wx as i64, (wy + title_h) as i64, (wx + w) as i64, (wy + title_h) as i64, self.theme.win_border);
+
+        return WindowPos {
+            x: cur_wx,
+            y: cur_wy,
+            is_dragging: self.drag_win_id == id,
+        };
+    }
+}

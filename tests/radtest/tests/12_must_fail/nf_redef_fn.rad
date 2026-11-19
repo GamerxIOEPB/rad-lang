@@ -1,0 +1,6 @@
+fn duplicate_fn() {
+}
+fn duplicate_fn() {
+}
+fn main() {
+}

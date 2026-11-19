@@ -23,6 +23,7 @@ struct CompilerOptions {
     cli_color_mode: i32,      // 0 = auto, 1 = always, 2 = never
     cli_json_format: bool,
     test_mode: bool,
+    debug_info: bool,
 }
 
 fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
@@ -39,6 +40,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
     var color_mode = 0i32
     var json_format = false
     var test_mode = false
+    var debug_info = false
 
     var i = 1usize
     let total = argc as usize
@@ -47,6 +49,8 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
         let arg = argv[i] as str
         if str_eq(arg, "-V") || str_eq(arg, "--version") {
             show_version = true
+        } else if str_eq(arg, "-g") || str_eq(arg, "--debug") {
+            debug_info = true
         } else if str_eq(arg, "-c") {
             compile_only = true
         } else if str_eq(arg, "-o") && i + 1usize < total {
@@ -155,6 +159,7 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
         cli_color_mode: color_mode,
         cli_json_format: json_format,
         test_mode: test_mode,
+        debug_info: debug_info,
     }
 }
 
@@ -758,6 +763,11 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         return 1
     }
 
+    var main_src = String.from_str("main.rad")
+    if opts.input_paths.len > 0usize {
+        main_src = opts.input_paths.ptr[0usize]
+    }
+
     // Step 2: Direct SSA LLVM IR Generation & Semantic Analysis
     var codegen = Codegen {
         parser: parser,
@@ -773,6 +783,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         loop_end_labels: Vec.new(),
         current_func_idx: 0usize,
         active_defers: Vec.new(),
+        debug_info: opts.debug_info,
+        source_file: main_src,
     }
     let ir = codegen.generate()
     if codegen.parser.error_count > 0i64 {

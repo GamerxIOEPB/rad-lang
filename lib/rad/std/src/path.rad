@@ -289,3 +289,55 @@ impl Path {
         res
     }
 }
+
+// ------------------------------------------------------------------------------
+// PathBuf: Ergonomic Owned Mutable Path Buffer
+// ------------------------------------------------------------------------------
+
+pub struct PathBuf {
+    pub inner: String,
+}
+
+impl PathBuf {
+    pub fn new() -> PathBuf {
+        PathBuf { inner: String.new() }
+    }
+
+    pub fn from(p: str) -> PathBuf {
+        PathBuf { inner: String.from_str(p) }
+    }
+
+    pub fn as_str(self) -> str {
+        self.inner.as_ptr() as str
+    }
+
+    pub fn to_string(self) -> String {
+        String.from_str(self.inner.as_ptr() as str)
+    }
+
+    pub fn join(var self, next: str) -> PathBuf {
+        let joined = Path.join(self.inner.as_ptr() as str, next)
+        self.inner.drop()
+        self.inner = joined
+        self
+    }
+
+    pub fn parent(self) -> PathBuf {
+        PathBuf { inner: Path.dirname(self.inner.as_ptr() as str) }
+    }
+
+    pub fn file_name(self) -> String {
+        Path.basename(self.inner.as_ptr() as str)
+    }
+
+    pub fn extension(self) -> String {
+        Path.extension(self.inner.as_ptr() as str)
+    }
+
+    pub fn with_extension(var self, ext: str) -> PathBuf {
+        let res = Path.with_extension(self.inner.as_ptr() as str, ext)
+        self.inner.drop()
+        self.inner = res
+        self
+    }
+}

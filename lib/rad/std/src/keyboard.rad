@@ -152,28 +152,68 @@ impl KeyboardReader {
             if !follow {
                 return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false, is_release: false }
             }
-            let buf_cont = (buf as usize + 1usize) as *raw var u8
-            let n2 = syscall3(0i64, 0i64, buf_cont, 63i64)
-            if n2 <= 0i64 {
+
+            // Read byte 1
+            let buf1 = (buf as usize + 1usize) as *raw var u8
+            let n1 = syscall3(0i64, 0i64, buf1, 1i64)
+            if n1 <= 0i64 {
                 return KeyEvent { code: KEY_ESC, char_val: 27u8, ctrl: false, alt: false, shift: false, is_release: false }
             }
-            n = n + n2
+            n = 2i64
 
             let b1 = buf[1usize]
 
-            // Alt + character: \x1b followed by ASCII char
-            if n == 2i64 && b1 >= 32u8 && b1 < 127u8 {
-                return KeyEvent { code: KEY_CHAR, char_val: b1, ctrl: false, alt: true, shift: false, is_release: false }
+            // Alt + character: \x1b followed by non-bracket/O ASCII char
+            if b1 != 91u8 && b1 != 79u8 {
+                if b1 >= 32u8 && b1 < 127u8 {
+                    return KeyEvent { code: KEY_CHAR, char_val: b1, ctrl: false, alt: true, shift: false, is_release: false }
+                }
+                return KeyEvent.key(KEY_ESC)
             }
 
-            // SS3 sequence: \x1bO [P, Q, R, S] -> F1, F2, F3, F4
-            if b1 == 79u8 && n >= 3i64 {
+            // SS3 sequence: \x1bO [A-D, P-S] -> exactly 3 bytes
+            if b1 == 79u8 {
+                let p2 = (buf as usize + 2usize) as *raw var u8
+                let n2 = syscall3(0i64, 0i64, p2, 1i64)
+                if n2 <= 0i64 {
+                    return KeyEvent.key(KEY_ESC)
+                }
+                n = 3i64
                 let b2 = buf[2usize]
+                if b2 == 65u8 { return KeyEvent.key(KEY_UP) }
+                if b2 == 66u8 { return KeyEvent.key(KEY_DOWN) }
+                if b2 == 67u8 { return KeyEvent.key(KEY_RIGHT) }
+                if b2 == 68u8 { return KeyEvent.key(KEY_LEFT) }
                 if b2 == 80u8 { return KeyEvent.key(KEY_F1) }
                 if b2 == 81u8 { return KeyEvent.key(KEY_F2) }
                 if b2 == 82u8 { return KeyEvent.key(KEY_F3) }
                 if b2 == 83u8 { return KeyEvent.key(KEY_F4) }
+                return KeyEvent.key(KEY_ESC)
             }
+
+            // CSI sequence: \x1b[ ...
+            // Read byte-by-byte until final terminator (0x40 to 0x7E) to NEVER swallow following sequences
+            var cur_len = 2usize
+            while cur_len < 24usize {
+                let p_cur = (buf as usize + cur_len) as *raw var u8
+                var nr = syscall3(0i64, 0i64, p_cur, 1i64)
+                if nr <= 0i64 {
+                    let r_poll = self.poll(10)
+                    if !r_poll {
+                        break
+                    }
+                    nr = syscall3(0i64, 0i64, p_cur, 1i64)
+                    if nr <= 0i64 {
+                        break
+                    }
+                }
+                let cur_b = buf[cur_len]
+                cur_len = cur_len + 1usize
+                if cur_b >= 64u8 && cur_b <= 126u8 {
+                    break
+                }
+            }
+            n = cur_len as i64
 
             // CSI sequence: \x1b[ ...
             if b1 == 91u8 && n >= 3i64 {

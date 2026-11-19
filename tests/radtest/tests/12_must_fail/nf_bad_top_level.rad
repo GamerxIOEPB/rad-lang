@@ -1,0 +1,3 @@
+invalid_keyword_decl foo;
+fn main() {
+}

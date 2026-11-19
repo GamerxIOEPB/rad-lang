@@ -1199,6 +1199,21 @@ impl Parser {
                     expr_line: base_l,
                     expr_col: base_c,
                 })
+            } else if k == TOK_QUESTION { // Try operator expr?
+                self.advance()
+                base = self.add_expr(Expr {
+                    kind: EXPR_TRY,
+                    op: 0,
+                    int_val: 0i64,
+                    str_val: String.new(),
+                    target_type: String.new(),
+                    left: base,
+                    right: 0usize,
+                    args: Vec.new(),
+                    field_name: String.new(),
+                    expr_line: base_l,
+                    expr_col: base_c,
+                })
             } else {
                 break
             }
@@ -1820,6 +1835,14 @@ impl Parser {
         self.advance() // skip 'fn'
         let raw_fn_name = String.from_str(self.peek_text())
         self.match_tok(TOK_IDENT)
+        if self.peek_kind() == TOK_LT {
+            while self.peek_kind() != TOK_GT && self.peek_kind() != TOK_EOF {
+                self.advance()
+            }
+            if self.peek_kind() == TOK_GT {
+                self.advance()
+            }
+        }
         self.match_tok(TOK_LPAREN)
 
         var param_names = Vec.new()
@@ -1865,9 +1888,14 @@ impl Parser {
             ret_type = self.parse_type_str()
         }
 
-        self.expect_tok(TOK_LBRACE, "{")
-        let body = self.parse_block_stmts()
-        self.expect_tok(TOK_RBRACE, "}")
+        var body = Vec.new()
+        if self.match_tok(TOK_SEMI) {
+            // Prototype / Trait method signature without body
+        } else {
+            self.expect_tok(TOK_LBRACE, "{")
+            body = self.parse_block_stmts()
+            self.expect_tok(TOK_RBRACE, "}")
+        }
 
         let f_is_test = self.cur_is_test
         self.cur_is_test = false
@@ -1886,6 +1914,14 @@ impl Parser {
         self.advance() // skip 'fn'
         let raw_fn_name = String.from_str(self.peek_text())
         self.match_tok(TOK_IDENT)
+        if self.peek_kind() == TOK_LT {
+            while self.peek_kind() != TOK_GT && self.peek_kind() != TOK_EOF {
+                self.advance()
+            }
+            if self.peek_kind() == TOK_GT {
+                self.advance()
+            }
+        }
         self.match_tok(TOK_LPAREN)
 
         var param_names = Vec.new()
@@ -2083,6 +2119,30 @@ impl Parser {
                 self.parse_function("")
             } else if self.peek_kind() == TOK_STRUCT {
                 self.parse_struct()
+            } else if self.peek_kind() == TOK_TRAIT || str_eq(self.peek_text(), "trait") {
+                self.advance() // skip 'trait'
+                let trait_name = String.from_str(self.peek_text())
+                self.match_tok(TOK_IDENT)
+                if self.peek_kind() == TOK_LT {
+                    while self.peek_kind() != TOK_GT && self.peek_kind() != TOK_EOF {
+                        self.advance()
+                    }
+                    if self.peek_kind() == TOK_GT {
+                        self.advance()
+                    }
+                }
+                self.expect_tok(TOK_LBRACE, "{")
+                while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+                    if self.peek_kind() == TOK_PUB {
+                        self.advance()
+                    }
+                    if self.peek_kind() == TOK_FN {
+                        self.parse_function(trait_name.as_ptr() as str)
+                    } else {
+                        self.advance()
+                    }
+                }
+                let _disc_tr = self.expect_tok(TOK_RBRACE, "}")
             } else if str_eq(self.peek_text(), "impl") {
                 self.advance() // skip 'impl'
                 if self.peek_kind() == TOK_LT {
@@ -2093,7 +2153,7 @@ impl Parser {
                         self.advance()
                     }
                 }
-                let struct_name = String.from_str(self.peek_text())
+                var target_name = String.from_str(self.peek_text())
                 self.match_tok(TOK_IDENT)
                 if self.peek_kind() == TOK_LT {
                     while self.peek_kind() != TOK_GT && self.peek_kind() != TOK_EOF {
@@ -2103,6 +2163,20 @@ impl Parser {
                         self.advance()
                     }
                 }
+                if str_eq(self.peek_text(), "for") {
+                    self.advance() // skip 'for'
+                    target_name = String.from_str(self.peek_text())
+                    self.match_tok(TOK_IDENT)
+                    if self.peek_kind() == TOK_LT {
+                        while self.peek_kind() != TOK_GT && self.peek_kind() != TOK_EOF {
+                            self.advance()
+                        }
+                        if self.peek_kind() == TOK_GT {
+                            self.advance()
+                        }
+                    }
+                }
+                let struct_name = target_name
                 self.expect_tok(TOK_LBRACE, "{")
                 while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
                     if self.peek_kind() == TOK_PUB {
@@ -2266,7 +2340,7 @@ impl Parser {
                 let err_line = self.cur_tok_line()
                 let err_col = self.cur_tok_col()
                 var err = String.new()
-                err.push_str("expected top-level item ('fn', 'struct', 'impl', 'enum', 'const', 'import', 'mod'), found '")
+                err.push_str("expected top-level item ('fn', 'struct', 'trait', 'impl', 'enum', 'const', 'import', 'mod'), found '")
                 err.push_str(self.peek_text())
                 err.push_str("'")
                 self.report_error("E0012", err.as_ptr() as str, err_line, err_col)

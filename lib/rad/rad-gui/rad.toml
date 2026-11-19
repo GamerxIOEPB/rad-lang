@@ -1,0 +1,9 @@
+[package]
+name = "rad-gui"
+version = "0.1.0"
+authors = ["Rad Developers"]
+description = "Reusable immediate-mode GUI kit for rad-gfx: buttons, sliders, text boxes, and draggable windows"
+license = "MIT"
+
+[dependencies]
+rad-gfx = "0.1.0"

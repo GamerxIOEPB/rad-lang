@@ -1,0 +1,32 @@
+pub trait Summary {
+    fn summarize(self) -> i64;
+}
+
+struct Article {
+    pub views: i64,
+    pub likes: i64,
+}
+
+impl Summary for Article {
+    pub fn summarize(self) -> i64 {
+        return self.views + self.likes
+    }
+}
+
+fn get_double<T>(x: T) -> T {
+    return x * 2
+}
+
+fn main() -> i32 {
+    let art = Article {
+        views: 100,
+        likes: 42,
+    };
+    let total = art.summarize();
+    printf("Summary: %lld\n", total);
+
+    let d = get_double(21);
+    printf("Double: %lld\n", d);
+
+    return 0;
+}

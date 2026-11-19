@@ -1,0 +1,212 @@
+// ==============================================================================
+// Rad GUI Showcase: Immediate-Mode Widget Framework on rad-gfx
+// ==============================================================================
+// Demonstrates:
+// - Reusable Buttons, Checkboxes, Sliders (i64 & f64), and Text Input
+// - Draggable Floating Windows & Structured Panels
+// - Live Theme Switching (Dark, Cyberpunk, Light)
+// - Mouse and Virtual Cursor interaction (WASD / Arrows + Space to click)
+// ==============================================================================
+
+import gfx;
+import gui;
+
+pub fn main() -> i32 {
+    var window = Window.open_autores("Rad Immediate-Mode GUI Showcase");
+    let term_w = window.width;
+    let term_h = window.height;
+
+    var canvas_w = window.width;
+    var canvas_h = (window.rows - 2usize) * 2usize;
+    if canvas_h < 24usize { canvas_h = 24usize; }
+    if canvas_w < 40usize { canvas_w = 40usize; }
+    var canvas = Canvas.new(canvas_w, canvas_h);
+
+    var gui_ctx = GuiContext.new();
+
+    // Application state
+    var win_x = 32usize;
+    var win_y = 4usize;
+    let win_w = 42usize;
+    let win_h = 36usize;
+
+    var cur_x: i32 = 25i32;
+    var cur_y: i32 = 15i32;
+
+    var volume_val: i64 = 75i64;
+    var sensitivity_val: f64 = 1.25;
+    var vsync_enabled = true;
+    var bloom_enabled = false;
+    var player_tag = String.from_str("NeoRad_42");
+
+    var theme_idx: i64 = 0i64; // 0: Dark, 1: Cyber, 2: Light
+    var click_counter = 0i64;
+
+    var running = true;
+    while running && window.is_open() {
+        gui_ctx.begin_frame();
+
+        // ---------------------------------------------------------------------
+        // Poll input events
+        // ---------------------------------------------------------------------
+        var moved_mouse = false;
+        var has_more_events = true;
+        while has_more_events {
+            let ev_opt = window.poll_event();
+            match ev_opt {
+                Option.Some(ev) => {
+                    if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) { // 'q', 'Q'
+                        running = false;
+                        window.close();
+                        break;
+                    }
+
+                    // Virtual Cursor Controls (WASD or Arrow keys)
+                    if ev.is_up() || ev.is_key(119u8) || ev.is_key(87u8) { // Up / W
+                        cur_y = cur_y - 2i32;
+                        if cur_y < 0i32 { cur_y = 0i32;}
+                        moved_mouse = true;
+                    } else if ev.is_down() || ev.is_key(115u8) || ev.is_key(83u8) { // Down / S
+                        cur_y = cur_y + 2i32;
+                        if (cur_y as usize) >= canvas_h { cur_y =(canvas_h - 1usize) as i32;}
+                        moved_mouse = true;
+                    } else if ev.is_left() || ev.is_key(97u8) || ev.is_key(65u8) { // Left / A
+                        cur_x = cur_x - 2i32;
+                        if cur_x < 0i32 { cur_x = 0i32;}
+                        moved_mouse = true;
+                    } else if ev.is_right() || ev.is_key(100u8) || ev.is_key(68u8) { // Right / D
+                        cur_x = cur_x + 2i32;
+                        if (cur_x as usize) >= canvas_w { cur_x =(canvas_w - 1usize) as i32;}
+                        moved_mouse = true;
+                    } else if ev.is_key(32u8) || ev.is_key(10u8) { // Space or Enter -> Click!
+                        gui_ctx.set_mouse_down(true);
+                    }
+
+                    gui_ctx.handle_event(ev);
+                }
+                Option.None => {
+                    has_more_events = false;
+                }
+            }
+        }
+
+        if !running || !window.is_open() {
+            break;
+        }
+
+        gui_ctx.set_mouse_pos(cur_x, cur_y);
+
+        // ---------------------------------------------------------------------
+        // Render Background Grid
+        // ---------------------------------------------------------------------
+        canvas.clear(Color.rgb(18u8, 22u8, 30u8));
+        var gy = 0usize;
+        while gy < canvas.height {
+            canvas.draw_line(0i64, gy as i64, canvas.width as i64, gy as i64, Color.rgb(24u8, 30u8, 42u8));
+            gy = gy + 8usize;
+        }
+        var gx = 0usize;
+        while gx < canvas.width {
+            canvas.draw_line(gx as i64, 0i64, gx as i64, canvas.height as i64, Color.rgb(24u8, 30u8, 42u8));
+            gx = gx + 8usize;
+        }
+
+        // ---------------------------------------------------------------------
+        // Left Background Panel: Application Overview
+        // ---------------------------------------------------------------------
+        gui_ctx.panel(canvas, "ENGINE CONTROLS", 3usize, 4usize, 26usize, 38usize);
+        gui_ctx.label(canvas, "RAD-GUI V0.1.0", 5usize, 12usize, gui_ctx.theme.accent_col);
+        gui_ctx.label(canvas, "Immediate-Mode", 5usize, 16usize, gui_ctx.theme.text_col);
+        gui_ctx.label(canvas, "60 FPS Desktop", 5usize, 20usize, gui_ctx.theme.text_col);
+
+        gui_ctx.separator(canvas, 5usize, 26usize, 22usize, gui_ctx.theme.panel_border);
+
+        var stat_str = String.from_str("Clicks: ");
+        push_i64_str(stat_str, click_counter);
+        gui_ctx.label(canvas, stat_str.as_ptr() as str, 5usize, 30usize, gui_ctx.theme.accent_col);
+        stat_str.drop();
+
+        // ---------------------------------------------------------------------
+        // Interactive Draggable Window
+        // ---------------------------------------------------------------------
+        let win_pos = gui_ctx.draggable_window(canvas, 100usize, "Preferences Window", win_x, win_y, win_w, win_h);
+        win_x = win_pos.x;
+        win_y = win_pos.y;
+
+        // Widget 1: Audio Volume Slider (i64)
+        volume_val = gui_ctx.slider_i64(canvas, 101usize, "Master Volume", volume_val, 0i64, 100i64, win_x + 4usize, win_y + 10usize, 34usize, 4usize);
+
+        // Widget 2: Mouse Sensitivity Slider (f64)
+        sensitivity_val = gui_ctx.slider_f64(canvas, 102usize, "Sensitivity", sensitivity_val, 0.5, 3.5, win_x + 4usize, win_y + 17usize, 34usize, 4usize);
+
+        // Widget 3 & 4: Checkboxes
+        vsync_enabled = gui_ctx.checkbox(canvas, 103usize, "VSync", vsync_enabled, win_x + 4usize, win_y + 23usize);
+        bloom_enabled = gui_ctx.checkbox(canvas, 104usize, "Bloom", bloom_enabled, win_x + 22usize, win_y + 23usize);
+
+        // Widget 5: Text Input Box
+        player_tag = gui_ctx.text_input(canvas, 105usize, "Callsign", player_tag, 16usize, win_x + 4usize, win_y + 29usize, 18usize, 4usize);
+
+        // Widget 6: Theme Switching Button
+        if gui_ctx.button(canvas, 106usize, "[ THEME ]", win_x + 24usize, win_y + 29usize, 14usize, 4usize) {
+            theme_idx = (theme_idx + 1i64) % 3i64;
+            if theme_idx == 0i64 { gui_ctx.set_theme(GuiTheme.dark()); }
+            else if theme_idx == 1i64 { gui_ctx.set_theme(GuiTheme.cyber()); }
+            else { gui_ctx.set_theme(GuiTheme.light()); }
+            click_counter = click_counter + 1i64;
+        }
+
+        // Widget 7: Increment Counter Button
+        if gui_ctx.button(canvas, 107usize, "Action Test", win_x + 4usize, win_y + 34usize, 20usize, 3usize) {
+            click_counter = click_counter + 1i64;
+        }
+
+        // ---------------------------------------------------------------------
+        // Render Cursor Indicator
+        // ---------------------------------------------------------------------
+        let cx = cur_x as usize;
+        let cy = cur_y as usize;
+        if cx + 4usize < canvas.width && cy + 4usize < canvas.height {
+            // Draw crosshair cursor
+            canvas.draw_line(cur_x as i64,(cur_y - 2i32) as i64, cur_x as i64,(cur_y + 2i32) as i64, gui_ctx.theme.cursor_col);
+            canvas.draw_line((cur_x - 2i32) as i64, cur_y as i64,(cur_x + 2i32) as i64, cur_y as i64, gui_ctx.theme.cursor_col);
+        }
+
+        // Reset mouse down at end of turn if mouse was held
+        if gui_ctx.mouse_down {
+            gui_ctx.set_mouse_down(false);
+        }
+
+        // ---------------------------------------------------------------------
+        // Render Dedicated HUD Top Bar (Zero-Flicker Single Syscall)
+        // ---------------------------------------------------------------------
+        var hud = String.new();
+        hud.push_str("\x1b[1;44;97m RAD-GUI SUITE \x1b[0m ");
+        hud.push_str("\x1b[1;36mCURSOR:\x1b[0m (");
+        push_i64_str(hud, cur_x as i64);
+        hud.push_str(", ");
+        push_i64_str(hud, cur_y as i64);
+        hud.push_str(") ");
+
+        hud.push_str("\x1b[1;33mVOL:\x1b[0m ");
+        push_i64_str(hud, volume_val);
+        hud.push_str("% ");
+
+        hud.push_str("\x1b[1;32mTAG:\x1b[0m ");
+        hud.push_str(player_tag.as_ptr() as str);
+        hud.push_str(" ");
+
+        hud.push_str("\x1b[90m| [WASD/Arrows] Cursor [Space] Click [Q] Quit\x1b[0m");
+
+        window.draw_canvas_with_header(hud.as_ptr() as str, canvas);
+        hud.drop();
+        window.tick_input();
+        Window.sleep_frame(60u64);
+    }
+
+    player_tag.drop();
+    canvas.destroy();
+    window.close();
+
+    println("GUI showcase finished cleanly.");
+    return 0;
+}

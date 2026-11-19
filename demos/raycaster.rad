@@ -63,57 +63,7 @@ fn rad_fract(x: f64) -> f64 {
     return x - int_part;
 }
 
-fn int_to_s(val: i64) -> String {
-    if val == 0i64 {
-        return String.from_str("0");
-    }
-    var v = val;
-    var is_neg = false;
-    if v < 0i64 {
-        is_neg = true;
-        v = -v;
-    }
-    var rev = String.new();
-    while v > 0i64 {
-        let digit = (v % 10i64) as u8;
-        rev.push_byte(48u8 + digit);
-        v = v / 10i64;
-    }
-    if is_neg {
-        rev.push_byte(45u8);
-    }
-    var res = String.new();
-    var len = rev.len();
-    let p = rev.as_ptr();
-    while len > 0usize {
-        len = len - 1usize;
-        res.push_byte(p[len]);
-    }
-    return res;
-}
 
-fn float_to_s(val: f64, decimals: usize) -> String {
-    let int_part = val as i64;
-    var frac_part = val - (int_part as f64);
-    if frac_part < 0.0 { frac_part = 0.0 - frac_part; }
-    var mult = 1.0;
-    var i = 0usize;
-    while i < decimals {
-        mult = mult * 10.0;
-        i = i + 1usize;
-    }
-    let frac_int = (frac_part * mult) as i64;
-    var res = int_to_s(int_part);
-    res.push_byte(46u8); // '.'
-    var frac_str = int_to_s(frac_int);
-    while frac_str.len() < decimals {
-        var padded = String.from_str("0");
-        padded.push_str(frac_str.as_ptr() as str);
-        frac_str = padded;
-    }
-    res.push_str(frac_str.as_ptr() as str);
-    return res;
-}
 
 // -----------------------------------------------------------------------------
 // Maze Configuration (24 x 24 layout)
@@ -169,7 +119,6 @@ fn init_maze_map() -> *raw var u8 {
         m[(5usize * MAP_W) + x] = WALL_BRICK;
         x = x + 1usize;
     }
-    m[(3usize * MAP_W) + 3usize] = WALL_BRICK;
 
     // North Sector: Mossy Stone Hallway
     x = 8usize;
@@ -328,7 +277,7 @@ fn init_texture_atlas() -> *raw var u8 {
 struct EngineSettings {
     pub fov_deg: i64,      // 45 to 90 degrees
     pub fog_dist: f64,     // 6.0 to 20.0 meters
-    pub speed_level: i64,  // 0: Slow (0.05), 1: Normal (0.08), 2: Fast (0.12)
+    pub speed_level: i64,  // 0: Slow (0.7x), 1: Normal (1.0x), 2: Fast (1.4x)
     pub show_minimap: bool,
 }
 
@@ -347,15 +296,15 @@ impl EngineSettings {
     }
 
     pub fn get_move_speed(self) -> f64 {
-        if self.speed_level == 0i64 { return 0.05; }
-        if self.speed_level == 2i64 { return 0.12; }
-        return 0.08;
+        if self.speed_level == 0i64 { return 0.035; }
+        if self.speed_level == 2i64 { return 0.075; }
+        return 0.050;
     }
 
     pub fn speed_name(self) -> str {
-        if self.speed_level == 0i64 { return "Slow (0.05)"; }
-        if self.speed_level == 2i64 { return "Fast (0.12)"; }
-        return "Normal (0.08)";
+        if self.speed_level == 0i64 { return "0.7x (Slow)"; }
+        if self.speed_level == 2i64 { return "1.4x (Fast)"; }
+        return "1.0x (Normal)";
     }
 }
 
@@ -370,52 +319,20 @@ fn is_maze_wall(map: *raw var u8, gx: i32, gy: i32) -> bool {
     return cell > 0u8;
 }
 
-fn apply_movement(
-    map: *raw var u8,
-    var pos_x: f64,
-    var pos_y: f64,
-    angle: f64,
-    forward: f64,
-    strafe: f64
-) -> f64 {
-    let forward_dx = rad_cos(angle) * forward;
-    let forward_dy = rad_sin(angle) * forward;
-    let strafe_dx = rad_cos(angle + rad_half_pi()) * strafe;
-    let strafe_dy = rad_sin(angle + rad_half_pi()) * strafe;
-
-    let dx = forward_dx + strafe_dx;
-    let dy = forward_dy + strafe_dy;
-
-    let margin = 0.25;
-
-    // Check X slide
-    var check_x = pos_x + dx;
-    if dx > 0.0 { check_x = check_x + margin; } else { check_x = check_x - margin; }
-    if !is_maze_wall(map, check_x as i32, pos_y as i32) {
-        pos_x = pos_x + dx;
-    }
-
-    // Check Y slide
-    var check_y = pos_y + dy;
-    if dy > 0.0 { check_y = check_y + margin; } else { check_y = check_y - margin; }
-    if !is_maze_wall(map, pos_x as i32, check_y as i32) {
-        pos_y = pos_y + dy;
-    }
-
-    return pos_x;
-}
-
 // -----------------------------------------------------------------------------
 // Main Entry Point
 // -----------------------------------------------------------------------------
 pub fn main() -> i32 {
     var window = Window.open_autores("Rad 3D Raycaster Engine");
-    let term_w = window.width;
-    let term_h = window.height;
 
-    // Ensure canvas matches terminal width and height
-    let canvas_w = term_w;
-    let canvas_h = (term_h - 2usize) * 2usize;
+    // Proper half-block resolution: terminal rows - 2 gives exact fit with Row 1 HUD
+    var canvas_w = window.width;
+    var canvas_h = 44usize;
+    if window.rows > 2usize {
+        canvas_h = (window.rows - 2usize) * 2usize;
+    }
+    if canvas_h < 24usize { canvas_h = 24usize; }
+    if canvas_w < 40usize { canvas_w = 40usize; }
     var canvas = Canvas.new(canvas_w, canvas_h);
 
     let map = init_maze_map();
@@ -423,13 +340,17 @@ pub fn main() -> i32 {
     var settings = EngineSettings.default();
 
     // Player initial state
-    var pos_x: f64 = 3.5;
-    var pos_y: f64 = 3.5;
+    var pos_x: f64 = 2.5;
+    var pos_y: f64 = 2.5;
     var angle: f64 = 0.0; // Facing east
-    let rot_speed: f64 = 0.055;
+    let rot_speed: f64 = 0.035; // Calibrated smooth camera turning
+
+    // Professional shooter movement & camera controller (Quake/Source style)
+    var fps_ctrl = FpsController.new(settings.get_move_speed(), rot_speed);
 
     var in_menu = false;
     var menu_selected = 0i64; // 0: FOV, 1: Fog, 2: Speed, 3: Minimap, 4: Resume, 5: Quit
+    var menu_cooldown: u64 = 0u64;
 
     // Frame timing
     var frame_count = 0u64;
@@ -438,12 +359,20 @@ pub fn main() -> i32 {
     while running && window.is_open() {
         frame_count = frame_count + 1u64;
 
-        // Process Input Events
-        var moved_forward: f64 = 0.0;
-        var moved_strafe: f64 = 0.0;
-        var rotated: f64 = 0.0;
-        var sprint_mult: f64 = 1.0;
+        // Auto-handle terminal resize dynamically
+        if window.check_resize() {
+            canvas_w = window.width;
+            canvas_h = 44usize;
+            if window.rows > 2usize {
+                canvas_h = (window.rows - 2usize) * 2usize;
+            }
+            if canvas_h < 24usize { canvas_h = 24usize; }
+            if canvas_w < 40usize { canvas_w = 40usize; }
+            canvas.destroy();
+            canvas = Canvas.new(canvas_w, canvas_h);
+        }
 
+        // Process discrete input events (menu, toggles, quit)
         var has_more_events = true;
         while has_more_events {
             let ev_opt = window.poll_event();
@@ -457,32 +386,44 @@ pub fn main() -> i32 {
 
                     if in_menu {
                         if ev.is_up() {
-                            menu_selected = menu_selected - 1i64;
-                            if menu_selected < 0i64 { menu_selected = 5i64; }
+                            if frame_count >= menu_cooldown {
+                                menu_selected = menu_selected - 1i64;
+                                if menu_selected < 0i64 { menu_selected = 5i64; }
+                                menu_cooldown = frame_count + 6u64;
+                            }
                         } else if ev.is_down() {
-                            menu_selected = menu_selected + 1i64;
-                            if menu_selected > 5i64 { menu_selected = 0i64; }
+                            if frame_count >= menu_cooldown {
+                                menu_selected = menu_selected + 1i64;
+                                if menu_selected > 5i64 { menu_selected = 0i64; }
+                                menu_cooldown = frame_count + 6u64;
+                            }
                         } else if ev.is_left() {
-                            if menu_selected == 0i64 {
-                                if settings.fov_deg > 45i64 { settings.fov_deg = settings.fov_deg - 5i64; }
-                            } else if menu_selected == 1i64 {
-                                if settings.fog_dist > 6.0 { settings.fog_dist = settings.fog_dist - 1.0; }
-                            } else if menu_selected == 2i64 {
-                                settings.speed_level = settings.speed_level - 1i64;
-                                if settings.speed_level < 0i64 { settings.speed_level = 2i64; }
-                            } else if menu_selected == 3i64 {
-                                settings.show_minimap = !settings.show_minimap;
+                            if frame_count >= menu_cooldown {
+                                if menu_selected == 0i64 {
+                                    if settings.fov_deg > 45i64 { settings.fov_deg = settings.fov_deg - 5i64; }
+                                } else if menu_selected == 1i64 {
+                                    if settings.fog_dist > 6.0 { settings.fog_dist = settings.fog_dist - 1.0; }
+                                } else if menu_selected == 2i64 {
+                                    settings.speed_level = settings.speed_level - 1i64;
+                                    if settings.speed_level < 0i64 { settings.speed_level = 2i64; }
+                                } else if menu_selected == 3i64 {
+                                    settings.show_minimap = !settings.show_minimap;
+                                }
+                                menu_cooldown = frame_count + 6u64;
                             }
                         } else if ev.is_right() {
-                            if menu_selected == 0i64 {
-                                if settings.fov_deg < 90i64 { settings.fov_deg = settings.fov_deg + 5i64; }
-                            } else if menu_selected == 1i64 {
-                                if settings.fog_dist < 20.0 { settings.fog_dist = settings.fog_dist + 1.0; }
-                            } else if menu_selected == 2i64 {
-                                settings.speed_level = settings.speed_level + 1i64;
-                                if settings.speed_level > 2i64 { settings.speed_level = 0i64; }
-                            } else if menu_selected == 3i64 {
-                                settings.show_minimap = !settings.show_minimap;
+                            if frame_count >= menu_cooldown {
+                                if menu_selected == 0i64 {
+                                    if settings.fov_deg < 90i64 { settings.fov_deg = settings.fov_deg + 5i64; }
+                                } else if menu_selected == 1i64 {
+                                    if settings.fog_dist < 20.0 { settings.fog_dist = settings.fog_dist + 1.0; }
+                                } else if menu_selected == 2i64 {
+                                    settings.speed_level = settings.speed_level + 1i64;
+                                    if settings.speed_level > 2i64 { settings.speed_level = 0i64; }
+                                } else if menu_selected == 3i64 {
+                                    settings.show_minimap = !settings.show_minimap;
+                                }
+                                menu_cooldown = frame_count + 6u64;
                             }
                         } else if ev.is_key(10u8) || ev.is_key(13u8) { // Enter
                             if menu_selected == 4i64 {
@@ -494,30 +435,17 @@ pub fn main() -> i32 {
                             } else if menu_selected == 3i64 {
                                 settings.show_minimap = !settings.show_minimap;
                             }
-                        } else if ev.is_key(112u8) || ev.is_key(80u8) || ev.is_key(115u8) || ev.is_key(83u8) || ev.is_key(27u8) { // 'p', 's', Esc
+                        } else if ev.is_key(112u8) || ev.is_key(80u8) || ev.is_key(27u8) { // 'p', Esc
                             in_menu = false;
                         }
                     } else {
-                        let spd = settings.get_move_speed();
-                        if ev.is_key(119u8) || ev.is_key(87u8) || ev.is_up() { // 'w', 'W', Up
-                            moved_forward = moved_forward + spd;
-                        } else if ev.is_key(115u8) || ev.is_key(83u8) || ev.is_down() { // 's', 'S', Down
-                            moved_forward = moved_forward - spd;
-                        } else if ev.is_key(97u8) || ev.is_key(65u8) { // 'a', 'A' (strafe left)
-                            moved_strafe = moved_strafe - spd;
-                        } else if ev.is_key(100u8) || ev.is_key(68u8) { // 'd', 'D' (strafe right)
-                            moved_strafe = moved_strafe + spd;
-                        } else if ev.is_left() {
-                            rotated = rotated - rot_speed;
-                        } else if ev.is_right() {
-                            rotated = rotated + rot_speed;
-                        } else if ev.is_key(32u8) { // Space (Sprint boost)
-                            sprint_mult = 1.6;
-                        } else if ev.is_key(109u8) || ev.is_key(77u8) { // 'm', 'M' (Toggle minimap)
+                        if ev.is_key(109u8) || ev.is_key(77u8) { // 'm', 'M' (Toggle minimap)
                             settings.show_minimap = !settings.show_minimap;
                         } else if ev.is_key(112u8) || ev.is_key(80u8) || ev.is_key(111u8) || ev.is_key(79u8) { // 'p', 'P', 'o', 'O'
                             in_menu = true;
                             menu_selected = 0i64;
+                        } else {
+                            fps_ctrl.handle_event(ev, frame_count);
                         }
                     }
                 },
@@ -531,20 +459,28 @@ pub fn main() -> i32 {
             break;
         }
 
-        // Apply Player Physics
+        // Continuous Player Movement Physics (Simultaneous WASD + Arrow Keys via FpsController)
         if !in_menu {
-            if rad_abs(rotated) > 0.0001 {
-                angle = angle + rotated;
+            fps_ctrl.move_speed = settings.get_move_speed();
+            fps_ctrl.turn_speed = rot_speed;
+            fps_ctrl.update(window, frame_count);
+
+            let vel_forward = fps_ctrl.vel_forward;
+            let vel_strafe = fps_ctrl.vel_strafe;
+            let vel_turn = fps_ctrl.vel_turn;
+
+            if rad_abs(vel_turn) > 0.0001 {
+                angle = angle + vel_turn;
                 let two_pi_val = rad_two_pi();
                 while angle >= two_pi_val { angle = angle - two_pi_val; }
                 while angle < 0.0 { angle = angle + two_pi_val; }
             }
 
-            if rad_abs(moved_forward) > 0.0001 || rad_abs(moved_strafe) > 0.0001 {
-                let forward_dx = rad_cos(angle) * (moved_forward * sprint_mult);
-                let forward_dy = rad_sin(angle) * (moved_forward * sprint_mult);
-                let strafe_dx = rad_cos(angle + rad_half_pi()) * (moved_strafe * sprint_mult);
-                let strafe_dy = rad_sin(angle + rad_half_pi()) * (moved_strafe * sprint_mult);
+            if rad_abs(vel_forward) > 0.0001 || rad_abs(vel_strafe) > 0.0001 {
+                let forward_dx = rad_cos(angle) * vel_forward;
+                let forward_dy = rad_sin(angle) * vel_forward;
+                let strafe_dx = rad_cos(angle + rad_half_pi()) * vel_strafe;
+                let strafe_dy = rad_sin(angle + rad_half_pi()) * vel_strafe;
 
                 let dx = forward_dx + strafe_dx;
                 let dy = forward_dy + strafe_dy;
@@ -644,21 +580,32 @@ pub fn main() -> i32 {
                 dist_traveled = dist_traveled + 1;
             }
 
+            var rdx = ray_dir_x;
+            if rad_abs(rdx) < 0.0001 {
+                if rdx < 0.0 { rdx = -0.0001; } else { rdx = 0.0001; }
+            }
+            var rdy = ray_dir_y;
+            if rad_abs(rdy) < 0.0001 {
+                if rdy < 0.0 { rdy = -0.0001; } else { rdy = 0.0001; }
+            }
+
             // Perpendicular Wall Distance (correcting fisheye)
             var perp_dist: f64 = 1.0;
             if side == 0 {
-                perp_dist = ((map_x as f64) - pos_x + ((1.0 - (step_x as f64)) * 0.5)) / ray_dir_x;
+                perp_dist = ((map_x as f64) - pos_x + ((1.0 - (step_x as f64)) * 0.5)) / rdx;
             } else {
-                perp_dist = ((map_y as f64) - pos_y + ((1.0 - (step_y as f64)) * 0.5)) / ray_dir_y;
+                perp_dist = ((map_y as f64) - pos_y + ((1.0 - (step_y as f64)) * 0.5)) / rdy;
             }
             if perp_dist < 0.12 { perp_dist = 0.12; }
 
             // Fisheye correction factor
-            let corrected_dist = perp_dist * rad_cos(ray_angle - angle);
+            var corrected_dist = perp_dist * rad_cos(ray_angle - angle);
+            if corrected_dist < 0.05 { corrected_dist = 0.05; }
 
             // Wall height on canvas
             let line_height_f = ((canvas_h as f64) * 0.95) / corrected_dist;
-            let line_height = line_height_f as i64;
+            var line_height = line_height_f as i64;
+            if line_height < 1i64 { line_height = 1i64; }
 
             let draw_start = ((canvas_h as i64) - line_height) / 2i64;
             let draw_end = draw_start + line_height;
@@ -696,11 +643,13 @@ pub fn main() -> i32 {
                 let yi = y as i64;
                 if yi < draw_start {
                     // Ceiling: Cosmic midnight gradient
-                    let ceil_ratio = (y as f64) / (horizon as f64);
+                    var horiz_f = horizon as f64;
+                    if horiz_f < 1.0 { horiz_f = 1.0; }
+                    let ceil_ratio = (y as f64) / horiz_f;
                     let cr = (14.0 + (ceil_ratio * 14.0)) as u8;
                     let cg = (18.0 + (ceil_ratio * 16.0)) as u8;
                     let cb = (32.0 + (ceil_ratio * 16.0)) as u8;
-                    canvas.set_pixel(col, y, Color.rgb(cr, cg, cb));
+                    canvas.set_pixel_rgb(col, y, cr, cg, cb);
                 } else if yi <= draw_end {
                     // Wall Texture Pixel
                     var tex_y = (((yi - draw_start) * 16i64) / line_height) as usize;
@@ -716,10 +665,12 @@ pub fn main() -> i32 {
                     let final_g = ((base_g * fog_factor) + (16.0 * (1.0 - fog_factor))) as u8;
                     let final_b = ((base_b * fog_factor) + (26.0 * (1.0 - fog_factor))) as u8;
 
-                    canvas.set_pixel(col, y, Color.rgb(final_r, final_g, final_b));
+                    canvas.set_pixel_rgb(col, y, final_r, final_g, final_b);
                 } else {
                     // Floor: Tiled stone pavement gradient
-                    let floor_dist = ((canvas_h as f64) * 0.5) / (((y - horizon) as f64) + 0.001);
+                    var dy = (y as f64) - (horizon as f64);
+                    if dy < 1.0 { dy = 1.0; }
+                    let floor_dist = ((canvas_h as f64) * 0.5) / dy;
                     var floor_fog = 1.0 - (floor_dist / fog_max);
                     if floor_fog < 0.0 { floor_fog = 0.0; }
                     if floor_fog > 1.0 { floor_fog = 1.0; }
@@ -727,7 +678,7 @@ pub fn main() -> i32 {
                     let fr = (18.0 + (floor_fog * 18.0)) as u8;
                     let fg = (22.0 + (floor_fog * 20.0)) as u8;
                     let fb = (32.0 + (floor_fog * 22.0)) as u8;
-                    canvas.set_pixel(col, y, Color.rgb(fr, fg, fb));
+                    canvas.set_pixel_rgb(col, y, fr, fg, fb);
                 }
 
                 y = y + 1usize;
@@ -739,16 +690,19 @@ pub fn main() -> i32 {
         // ---------------------------------------------------------------------
         // Render 2D Minimap Overlay (Top-Right Corner)
         // ---------------------------------------------------------------------
-        if settings.show_minimap && canvas_w >= 80usize && canvas_h >= 40usize {
-            let map_scale = 2usize; // 2x2 pixels per cell
+        if settings.show_minimap && canvas_w >= 50usize && canvas_h >= 24usize {
+            var map_scale = 1usize;
+            if canvas_w >= 120usize && canvas_h >= 64usize {
+                map_scale = 2usize;
+            }
             let mm_w = MAP_W * map_scale;
             let mm_h = MAP_H * map_scale;
             let mm_x = canvas_w - mm_w - 2usize;
-            let mm_y = 2usize;
+            let mm_y = 1usize;
 
             // Minimap border & background
-            canvas.fill_rect(mm_x, mm_y, mm_w, mm_h, Color.rgb(10u8, 14u8, 22u8));
-            canvas.draw_rect(mm_x, mm_y, mm_w, mm_h, Color.rgb(65u8, 90u8, 125u8));
+            canvas.fill_rect_rgb(mm_x, mm_y, mm_w, mm_h, 10u8, 14u8, 22u8);
+            canvas.draw_rect_rgb(mm_x, mm_y, mm_w, mm_h, 65u8, 90u8, 125u8);
 
             // Draw maze walls
             var my = 0usize;
@@ -757,19 +711,21 @@ pub fn main() -> i32 {
                 while mx < MAP_W {
                     let cell = map[(my * MAP_W) + mx];
                     if cell > 0u8 {
-                        var wall_c = Color.rgb(80u8, 90u8, 110u8);
+                        var wr = 80u8;
+                        var wg = 90u8;
+                        var wb = 110u8;
                         if cell == WALL_CYBER {
-                            wall_c = Color.rgb(20u8, 180u8, 230u8); // Cyan
+                            wr = 20u8; wg = 180u8; wb = 230u8; // Cyan
                         } else if cell == WALL_BRICK {
-                            wall_c = Color.rgb(200u8, 65u8, 45u8);  // Red
+                            wr = 200u8; wg = 65u8; wb = 45u8;  // Red
                         } else if cell == WALL_STONE {
-                            wall_c = Color.rgb(55u8, 170u8, 75u8);  // Mossy Green
+                            wr = 55u8; wg = 170u8; wb = 75u8;  // Mossy Green
                         } else if cell == WALL_WOOD {
-                            wall_c = Color.rgb(160u8, 105u8, 55u8); // Cedar
+                            wr = 160u8; wg = 105u8; wb = 55u8; // Cedar
                         } else if cell == WALL_HAZARD {
-                            wall_c = Color.rgb(240u8, 210u8, 30u8); // Yellow
+                            wr = 240u8; wg = 210u8; wb = 30u8; // Yellow
                         }
-                        canvas.fill_rect(mm_x + (mx * map_scale), mm_y + (my * map_scale), map_scale, map_scale, wall_c);
+                        canvas.fill_rect_rgb(mm_x + (mx * map_scale), mm_y + (my * map_scale), map_scale, map_scale, wr, wg, wb);
                     }
                     mx = mx + 1usize;
                 }
@@ -785,109 +741,129 @@ pub fn main() -> i32 {
             while ri < 5i64 {
                 let ray_frac = (ri as f64) / 4.0;
                 let c_ray_angle = (angle - half_fov) + (ray_frac * fov);
-                let ray_len = 5.0 * (map_scale as f64);
+                let ray_len = 3.5 * (map_scale as f64);
                 let end_rx = (p_pixel_x as f64) + (rad_cos(c_ray_angle) * ray_len);
                 let end_ry = (p_pixel_y as f64) + (rad_sin(c_ray_angle) * ray_len);
-                canvas.draw_line(p_pixel_x as i64, p_pixel_y as i64, end_rx as i64, end_ry as i64, Color.rgb(90u8, 190u8, 255u8));
+                canvas.draw_line_rgb(p_pixel_x as i64, p_pixel_y as i64, end_rx as i64, end_ry as i64, 90u8, 190u8, 255u8);
                 ri = ri + 1i64;
             }
 
             // Draw player beacon dot
-            canvas.fill_rect(p_pixel_x - 1usize, p_pixel_y - 1usize, 3usize, 3usize, Color.rgb(120u8, 255u8, 120u8));
+            if map_scale > 1usize {
+                canvas.fill_rect_rgb(p_pixel_x - 1usize, p_pixel_y - 1usize, 3usize, 3usize, 120u8, 255u8, 120u8);
+            } else {
+                canvas.set_pixel_rgb(p_pixel_x, p_pixel_y, 120u8, 255u8, 120u8);
+            }
         }
 
         // ---------------------------------------------------------------------
-        // Render Settings Modal Overlay
+        // Render Settings Modal Overlay (Background Box on Canvas)
         // ---------------------------------------------------------------------
+        var menu_x = 2usize;
+        var menu_y = 1usize;
+        let menu_w = 48usize;
+        let menu_h = 24usize;
         if in_menu {
-            let menu_w = 46usize;
-            let menu_h = 24usize;
-            let menu_x = (canvas_w - menu_w) / 2usize;
-            let menu_y = (canvas_h - menu_h) / 2usize;
+            if canvas_w > menu_w { menu_x = (canvas_w - menu_w) / 2usize; }
+            if canvas_h > menu_h { menu_y = (canvas_h - menu_h) / 2usize; }
 
             // Semi-transparent dark slate dialog with cyan border
-            canvas.fill_rect(menu_x, menu_y, menu_w, menu_h, Color.rgb(14u8, 18u8, 28u8));
-            canvas.draw_rect(menu_x, menu_y, menu_w, menu_h, Color.rgb(0u8, 210u8, 255u8));
-            canvas.draw_rect(menu_x + 1usize, menu_y + 1usize, menu_w - 2usize, menu_h - 2usize, Color.rgb(30u8, 60u8, 90u8));
-
-            // Dialog Header Bar
-            canvas.fill_rect(menu_x + 2usize, menu_y + 2usize, menu_w - 4usize, 3usize, Color.rgb(20u8, 45u8, 75u8));
-            canvas.draw_text(menu_x + 6usize, menu_y + 3usize, "RAD 3D ENGINE SETTINGS", Color.rgb(0u8, 240u8, 255u8));
-
-            // Option 0: Field of View
-            var fov_col = Color.rgb(180u8, 190u8, 205u8);
-            if menu_selected == 0i64 { fov_col = Color.rgb(255u8, 240u8, 60u8); }
-            var fov_str = String.from_str("1. FOV Angle:      < ");
-            fov_str.push_str(int_to_s(settings.fov_deg).as_ptr() as str);
-            fov_str.push_str(" deg >");
-            canvas.draw_text(menu_x + 4usize, menu_y + 7usize, fov_str.as_ptr() as str, fov_col);
-
-            // Option 1: Fog Distance
-            var fog_col = Color.rgb(180u8, 190u8, 205u8);
-            if menu_selected == 1i64 { fog_col = Color.rgb(255u8, 240u8, 60u8); }
-            var fog_str = String.from_str("2. Fog Distance:   < ");
-            fog_str.push_str(float_to_s(settings.fog_dist, 1usize).as_ptr() as str);
-            fog_str.push_str(" m >");
-            canvas.draw_text(menu_x + 4usize, menu_y + 10usize, fog_str.as_ptr() as str, fog_col);
-
-            // Option 2: Movement Speed
-            var spd_col = Color.rgb(180u8, 190u8, 205u8);
-            if menu_selected == 2i64 { spd_col = Color.rgb(255u8, 240u8, 60u8); }
-            var spd_str = String.from_str("3. Walk Speed:     < ");
-            spd_str.push_str(settings.speed_name());
-            spd_str.push_str(" >");
-            canvas.draw_text(menu_x + 4usize, menu_y + 13usize, spd_str.as_ptr() as str, spd_col);
-
-            // Option 3: Minimap Toggle
-            var map_col = Color.rgb(180u8, 190u8, 205u8);
-            if menu_selected == 3i64 { map_col = Color.rgb(255u8, 240u8, 60u8); }
-            var map_str = String.from_str("4. Minimap Overlay: [ ");
-            if settings.show_minimap { map_str.push_str("ENABLED "); } else { map_str.push_str("DISABLED"); }
-            map_str.push_str(" ]");
-            canvas.draw_text(menu_x + 4usize, menu_y + 16usize, map_str.as_ptr() as str, map_col);
-
-            // Option 4: Resume
-            var res_col = Color.rgb(140u8, 150u8, 170u8);
-            if menu_selected == 4i64 { res_col = Color.rgb(80u8, 255u8, 120u8); }
-            canvas.draw_text(menu_x + 6usize, menu_y + 19usize, "[ RESUME SIMULATION ]", res_col);
-
-            // Option 5: Exit
-            var exit_col = Color.rgb(140u8, 150u8, 170u8);
-            if menu_selected == 5i64 { exit_col = Color.rgb(255u8, 80u8, 80u8); }
-            canvas.draw_text(menu_x + 6usize, menu_y + 21usize, "[ EXIT TO TERMINAL ]", exit_col);
+            canvas.fill_rect_rgb(menu_x, menu_y, menu_w, menu_h, 14u8, 18u8, 28u8);
+            canvas.draw_rect_rgb(menu_x, menu_y, menu_w, menu_h, 0u8, 210u8, 255u8);
+            canvas.draw_rect_rgb(menu_x + 1usize, menu_y + 1usize, menu_w - 2usize, menu_h - 2usize, 30u8, 60u8, 90u8);
         }
 
         // ---------------------------------------------------------------------
         // Render Row 1 Dedicated HUD (Zero-Flicker ANSI Status Line)
         // ---------------------------------------------------------------------
         var hud = String.new();
-        hud.push_str("\x1b[1;1H\x1b[2K");
         hud.push_str("\x1b[1;44;97m RAD 3D ENGINE \x1b[0m ");
         hud.push_str("\x1b[1;36mPOS:\x1b[0m (");
-        hud.push_str(float_to_s(pos_x, 1usize).as_ptr() as str);
+        push_f64_str(hud, pos_x, 1usize);
         hud.push_str(", ");
-        hud.push_str(float_to_s(pos_y, 1usize).as_ptr() as str);
+        push_f64_str(hud, pos_y, 1usize);
         hud.push_str(") ");
 
         let deg = ((angle * 180.0) / rad_pi()) as i64;
         hud.push_str("\x1b[1;33mDIR:\x1b[0m ");
-        hud.push_str(int_to_s(deg).as_ptr() as str);
+        push_i64_str(hud, deg);
         hud.push_str("° ");
 
         hud.push_str("\x1b[1;32mFOV:\x1b[0m ");
-        hud.push_str(int_to_s(settings.fov_deg).as_ptr() as str);
+        push_i64_str(hud, settings.fov_deg);
         hud.push_str("° ");
 
         hud.push_str("\x1b[1;35mFOG:\x1b[0m ");
-        hud.push_str(float_to_s(settings.fog_dist, 1usize).as_ptr() as str);
+        push_f64_str(hud, settings.fog_dist, 1usize);
         hud.push_str("m ");
 
         hud.push_str("\x1b[90m| [WASD] Move [←/→] Look [Space] Boost [M] Map [P] Settings [Q] Quit\x1b[0m");
 
-        let _ = syscall3(1i64, 1i64, hud.as_ptr() as *raw u8, hud.len() as i64);
+        // Present Canvas starting at terminal row 2 down with atomic header (zero flicker)
+        window.draw_canvas_with_header(hud.as_ptr() as str, canvas);
+        hud.drop();
 
-        // Present Canvas starting at terminal row 2 down
-        window.draw_canvas_from(canvas, 2usize);
+        // Render Crisp Overlay Text for Settings Modal
+        if in_menu {
+            let r0 = 2usize + (menu_y / 2usize);
+            let c0 = 1usize + menu_x;
+            var ov = window.begin_overlay();
+
+            // Dialog Title (centered)
+            ov = window.add_overlay_text(ov, r0 + 1usize, c0 + 13usize, "RAD 3D ENGINE SETTINGS", 0u8, 240u8, 255u8, 20u8, 45u8, 75u8);
+
+            // Option 0: Field of View
+            var fov_r = 180u8; var fov_g = 190u8; var fov_b = 205u8;
+            if menu_selected == 0i64 { fov_r = 255u8; fov_g = 240u8; fov_b = 60u8; }
+            var fov_s = String.from_str("1. FOV Angle:        < ");
+            push_i64_str(fov_s, settings.fov_deg);
+            fov_s.push_str(" deg >");
+            ov = window.add_overlay_text(ov, r0 + 3usize, c0 + 6usize, fov_s.as_ptr() as str, fov_r, fov_g, fov_b, 14u8, 18u8, 28u8);
+            fov_s.drop();
+
+            // Option 1: Fog Distance
+            var fog_r = 180u8; var fog_g = 190u8; var fog_b = 205u8;
+            if menu_selected == 1i64 { fog_r = 255u8; fog_g = 240u8; fog_b = 60u8; }
+            var fog_s = String.from_str("2. Fog Distance:     < ");
+            push_f64_str(fog_s, settings.fog_dist, 1usize);
+            fog_s.push_str(" m >");
+            ov = window.add_overlay_text(ov, r0 + 4usize, c0 + 6usize, fog_s.as_ptr() as str, fog_r, fog_g, fog_b, 14u8, 18u8, 28u8);
+            fog_s.drop();
+
+            // Option 2: Movement Speed
+            var spd_r = 180u8; var spd_g = 190u8; var spd_b = 205u8;
+            if menu_selected == 2i64 { spd_r = 255u8; spd_g = 240u8; spd_b = 60u8; }
+            var spd_s = String.from_str("3. Walk Speed:       < ");
+            spd_s.push_str(settings.speed_name());
+            spd_s.push_str(" >");
+            ov = window.add_overlay_text(ov, r0 + 5usize, c0 + 6usize, spd_s.as_ptr() as str, spd_r, spd_g, spd_b, 14u8, 18u8, 28u8);
+            spd_s.drop();
+
+            // Option 3: Minimap Toggle
+            var map_r = 180u8; var map_g = 190u8; var map_b = 205u8;
+            if menu_selected == 3i64 { map_r = 255u8; map_g = 240u8; map_b = 60u8; }
+            var map_s = String.from_str("4. Minimap Overlay:  [ ");
+            if settings.show_minimap { map_s.push_str("ENABLED "); } else { map_s.push_str("DISABLED"); }
+            map_s.push_str(" ]");
+            ov = window.add_overlay_text(ov, r0 + 6usize, c0 + 6usize, map_s.as_ptr() as str, map_r, map_g, map_b, 14u8, 18u8, 28u8);
+            map_s.drop();
+
+            // Option 4: Resume
+            var res_r = 140u8; var res_g = 150u8; var res_b = 170u8;
+            if menu_selected == 4i64 { res_r = 80u8; res_g = 255u8; res_b = 120u8; }
+            ov = window.add_overlay_text(ov, r0 + 8usize, c0 + 13usize, "[ RESUME (Esc/Enter) ]", res_r, res_g, res_b, 14u8, 18u8, 28u8);
+
+            // Option 5: Exit
+            var exit_r = 140u8; var exit_g = 150u8; var exit_b = 170u8;
+            if menu_selected == 5i64 { exit_r = 255u8; exit_g = 80u8; exit_b = 80u8; }
+            ov = window.add_overlay_text(ov, r0 + 9usize, c0 + 14usize, "[ EXIT TO TERMINAL ]", exit_r, exit_g, exit_b, 14u8, 18u8, 28u8);
+
+            // Footer hint
+            ov = window.add_overlay_text(ov, r0 + 11usize, c0 + 3usize, "[↑/↓] Select   [←/→] Adjust   [Enter] Confirm", 110u8, 140u8, 180u8, 14u8, 18u8, 28u8);
+
+            window.flush_overlay(ov);
+        }
+        window.tick_input();
         Window.sleep_frame(60u64);
     }
 

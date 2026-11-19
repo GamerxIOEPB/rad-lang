@@ -1,0 +1,211 @@
+// ==============================================================================
+// Rad Standard Library: Cryptography (std/crypto)
+// Pure-Rad implementation of SHA-256, ChaCha20 Stream Cipher, and CSPRNG.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+import std/sha256;
+import std/random;
+
+// ------------------------------------------------------------------------------
+// Cryptographically Secure Pseudo-Random Number Generation (CSPRNG)
+// ------------------------------------------------------------------------------
+
+pub fn secure_random(buf: *raw var u8, len: usize) -> bool {
+    sys_random(buf, len)
+}
+
+pub fn csprng_u64() -> u64 {
+    let buf = malloc(8usize) as *raw var u8
+    var val = 0u64
+    if secure_random(buf, 8usize) {
+        let p = buf as *raw u64
+        val = p[0usize]
+    } else {
+        // Fallback PRNG
+        var r = Rng.new()
+        val = r.next_u64()
+    }
+    free(buf)
+    val
+}
+
+// ------------------------------------------------------------------------------
+// SHA-256 Cryptographic Hash
+// ------------------------------------------------------------------------------
+
+pub fn hash_sha256(data: str) -> String {
+    sha256_str(data)
+}
+
+pub fn hash_sha256_file(path: str) -> Option<String> {
+    sha256_file(path)
+}
+
+// ------------------------------------------------------------------------------
+// ChaCha20 Stream Cipher (RFC 7539)
+// ------------------------------------------------------------------------------
+
+fn rotl32(v: u32, c: u32) -> u32 {
+    let uv = (v as u64) & 4294967295u64
+    let r1 = (uv << (c as u64)) & 4294967295u64
+    let r2 = uv >> ((32u32 - c) as u64)
+    return (((r1 | r2) & 4294967295u64) as u32)
+}
+
+fn chacha_quarter_round(state: *raw var u32, a: usize, b: usize, c: usize, d: usize) {
+    state[a] = ((state[a] as u64 + state[b] as u64) & 4294967295u64) as u32
+    state[d] = rotl32(state[d] ^ state[a], 16u32)
+
+    state[c] = ((state[c] as u64 + state[d] as u64) & 4294967295u64) as u32
+    state[b] = rotl32(state[b] ^ state[c], 12u32)
+
+    state[a] = ((state[a] as u64 + state[b] as u64) & 4294967295u64) as u32
+    state[d] = rotl32(state[d] ^ state[a], 8u32)
+
+    state[c] = ((state[c] as u64 + state[d] as u64) & 4294967295u64) as u32
+    state[b] = rotl32(state[b] ^ state[c], 7u32)
+}
+
+pub struct ChaCha20 {
+    pub key: *raw var u32,   // 8 u32 (256-bit key)
+    pub nonce: *raw var u32, // 3 u32 (96-bit nonce)
+    pub counter: u32,        // 32-bit block counter
+}
+
+impl ChaCha20 {
+    pub fn new(key_bytes: *raw u8, nonce_bytes: *raw u8, initial_counter: u32) -> ChaCha20 {
+        let k = malloc(32usize) as *raw var u32
+        let n = malloc(12usize) as *raw var u32
+
+        // Unpack 32-byte key into 8 u32 words (little-endian)
+        var i = 0usize
+        while i < 8usize {
+            let offset = i * 4usize
+            k[i] = (key_bytes[offset] as u32) |
+                   ((key_bytes[offset + 1usize] as u32) << 8u32) |
+                   ((key_bytes[offset + 2usize] as u32) << 16u32) |
+                   ((key_bytes[offset + 3usize] as u32) << 24u32)
+            i = i + 1usize
+        }
+
+        // Unpack 12-byte nonce into 3 u32 words (little-endian)
+        var j = 0usize
+        while j < 3usize {
+            let offset = j * 4usize
+            n[j] = (nonce_bytes[offset] as u32) |
+                   ((nonce_bytes[offset + 1usize] as u32) << 8u32) |
+                   ((nonce_bytes[offset + 2usize] as u32) << 16u32) |
+                   ((nonce_bytes[offset + 3usize] as u32) << 24u32)
+            j = j + 1usize
+        }
+
+        ChaCha20 {
+            key: k,
+            nonce: n,
+            counter: initial_counter,
+        }
+    }
+
+    pub fn process_block(self, counter: u32, keystream_out: *raw var u8) {
+        let state = malloc(64usize) as *raw var u32
+
+        // Constants: "expand 32-byte k"
+        state[0usize] = 0x61707865u32
+        state[1usize] = 0x3320646eu32
+        state[2usize] = 0x79622d32u32
+        state[3usize] = 0x6b206574u32
+
+        // Key: 8 words
+        var ki = 0usize
+        while ki < 8usize {
+            state[4usize + ki] = self.key[ki]
+            ki = ki + 1usize
+        }
+
+        // Block counter
+        state[12usize] = counter
+
+        // Nonce: 3 words
+        state[13usize] = self.nonce[0usize]
+        state[14usize] = self.nonce[1usize]
+        state[15usize] = self.nonce[2usize]
+
+        // Keep copy for final addition
+        let initial = malloc(64usize) as *raw var u32
+        var ii = 0usize
+        while ii < 16usize {
+            initial[ii] = state[ii]
+            ii = ii + 1usize
+        }
+
+        // 20 rounds (10 iterations of 8 quarter rounds)
+        var round = 0usize
+        while round < 10usize {
+            // Column rounds
+            chacha_quarter_round(state, 0usize, 4usize, 8usize, 12usize)
+            chacha_quarter_round(state, 1usize, 5usize, 9usize, 13usize)
+            chacha_quarter_round(state, 2usize, 6usize, 10usize, 14usize)
+            chacha_quarter_round(state, 3usize, 7usize, 11usize, 15usize)
+
+            // Diagonal rounds
+            chacha_quarter_round(state, 0usize, 5usize, 10usize, 15usize)
+            chacha_quarter_round(state, 1usize, 6usize, 11usize, 12usize)
+            chacha_quarter_round(state, 2usize, 7usize, 8usize, 13usize)
+            chacha_quarter_round(state, 3usize, 4usize, 9usize, 14usize)
+
+            round = round + 1usize
+        }
+
+        // Add initial state and serialize to bytes
+        var wi = 0usize
+        while wi < 16usize {
+            let sum = ((state[wi] as u64 + initial[wi] as u64) & 4294967295u64) as u32
+            let byte_idx = wi * 4usize
+            keystream_out[byte_idx] = (sum & 255u32) as u8
+            keystream_out[byte_idx + 1usize] = ((sum >> 8u32) & 255u32) as u8
+            keystream_out[byte_idx + 2usize] = ((sum >> 16u32) & 255u32) as u8
+            keystream_out[byte_idx + 3usize] = ((sum >> 24u32) & 255u32) as u8
+            wi = wi + 1usize
+        }
+
+        free(initial as *raw var u8)
+        free(state as *raw var u8)
+    }
+
+    pub fn apply_keystream(var self, data: *raw var u8, len: usize) {
+        let block_buf = malloc(64usize) as *raw var u8
+        var offset = 0usize
+
+        while offset < len {
+            self.process_block(self.counter, block_buf)
+            self.counter = self.counter + 1u32
+
+            var block_bytes = 64usize
+            if len - offset < 64usize {
+                block_bytes = len - offset
+            }
+
+            var bi = 0usize
+            while bi < block_bytes {
+                data[offset + bi] = data[offset + bi] ^ block_buf[bi]
+                bi = bi + 1usize
+            }
+
+            offset = offset + block_bytes
+        }
+
+        free(block_buf)
+    }
+
+    pub fn destroy(var self) {
+        if (self.key as usize) != 0usize {
+            free(self.key as *raw var u8)
+            self.key = 0 as *raw var u32
+        }
+        if (self.nonce as usize) != 0usize {
+            free(self.nonce as *raw var u8)
+            self.nonce = 0 as *raw var u32
+        }
+    }
+}

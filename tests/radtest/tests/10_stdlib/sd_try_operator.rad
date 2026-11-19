@@ -1,0 +1,26 @@
+fn parse_positive(n: i64) -> i64 {
+    if n > 0 {
+        return n * 2
+    }
+    return 0
+}
+
+fn calculate(a: i64, b: i64) -> i64 {
+    let x = parse_positive(a)?;
+    let y = parse_positive(b)?;
+    return x + y
+}
+
+fn main() -> i32 {
+    let success = calculate(5, 10);
+    if success != 0 {
+        printf("%lld\n", success);
+    }
+
+    let fail = calculate(5, -1);
+    if fail == 0 {
+        printf("FAILED_AS_EXPECTED\n");
+    }
+
+    return 0;
+}

@@ -221,6 +221,23 @@ fn parse_doc_items_in_file(path: str, var items: *raw var Vec<usize >) {
                 items.push(it as usize);
                 current_doc = String.new();
             }
+        } else if str_starts_with(trimmed, "pub trait ") || str_starts_with(trimmed, "trait ") {
+            let t_name = extract_decl_name(trimmed, "trait ");
+            if t_name.len() > 0usize {
+                var sig = String.from_str(trimmed);
+                if str_ends_with(trimmed, "{") {
+                    sig = string_slice(trimmed, str_len(trimmed) - 1usize);
+                }
+                let it = malloc(200usize) as *raw var DocItem;
+                it.name = t_name;
+                it.kind = String.from_str("Trait");
+                it.signature = sig;
+                it.doc_comment = current_doc;
+                it.file_name = String.from_str(path);
+                it.line_num = line_idx + 1usize;
+                items.push(it as usize);
+                current_doc = String.new();
+            }
         } else if str_starts_with(trimmed, "pub const ") || str_starts_with(trimmed, "const ") {
             let c_name = extract_decl_name(trimmed, "const ");
             if c_name.len() > 0usize {

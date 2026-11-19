@@ -1,0 +1,199 @@
+// ==============================================================================
+// Rad Sound Showcase: Interactive Native PCM Audio Synthesizer & Soundboard
+// ==============================================================================
+// Combines rad-gui and rad-sound:
+// - Interactive GUI Soundboard with retro buttons
+// - Direct 16-bit PCM waveform generation (Square, Noise, Triangle, Sine)
+// - Real-time oscilloscope / waveform visualizer on rad-gfx Canvas
+// - Non-blocking audio playback
+// ==============================================================================
+
+import gfx;
+import gui;
+import sound;
+
+pub fn main() -> i32 {
+    var window = Window.open_autores("Rad Native PCM Sound Engine Showcase");
+    let term_w = window.width;
+    let term_h = window.height;
+
+    var canvas_w = window.width;
+    var canvas_h = (window.rows - 2usize) * 2usize;
+    if canvas_h < 24usize { canvas_h = 24usize; }
+    if canvas_w < 40usize { canvas_w = 40usize; }
+    var canvas = Canvas.new(canvas_w, canvas_h);
+
+    var gui_ctx = GuiContext.new();
+    gui_ctx.set_theme(GuiTheme.cyber());
+
+    var sound_engine = SoundEngine.new();
+
+    var last_sfx = String.from_str("READY - PRESS 1-7");
+    var sfx_play_count = 0i64;
+
+    var cur_x = 30i32;
+    var cur_y = 20i32;
+
+    var running = true;
+    while running && window.is_open() {
+        gui_ctx.begin_frame();
+
+        var trigger_jump = false;
+        var trigger_laser = false;
+        var trigger_explosion = false;
+        var trigger_coin = false;
+        var trigger_powerup = false;
+        var trigger_hit = false;
+        var trigger_beep = false;
+
+        var has_more_events = true;
+        while has_more_events {
+            let ev_opt = window.poll_event();
+            match ev_opt {
+                Option.Some(ev) => {
+                    if ev.is_close() || ev.is_key(113u8) || ev.is_key(81u8) { // 'q', 'Q'
+                        running = false;
+                        window.close();
+                        break;
+                    }
+
+                    // Number keys 1-7 for instant SFX
+                    if ev.is_key(49u8) { trigger_jump = true; }
+                    else if ev.is_key(50u8) { trigger_laser = true; }
+                    else if ev.is_key(51u8) { trigger_explosion = true; }
+                    else if ev.is_key(52u8) { trigger_coin = true; }
+                    else if ev.is_key(53u8) { trigger_powerup = true; }
+                    else if ev.is_key(54u8) { trigger_hit = true; }
+                    else if ev.is_key(55u8) { trigger_beep = true; }
+
+                    // Cursor navigation
+                    if ev.is_up() || ev.is_key(119u8) { cur_y = cur_y - 2i32; if cur_y < 0i32 { cur_y = 0i32; } }
+                    else if ev.is_down() || ev.is_key(115u8) { cur_y = cur_y + 2i32; if (cur_y as usize) >= canvas_h { cur_y = (canvas_h - 1usize) as i32; } }
+                    else if ev.is_left() || ev.is_key(97u8) { cur_x = cur_x - 2i32; if cur_x < 0i32 { cur_x = 0i32; } }
+                    else if ev.is_right() || ev.is_key(100u8) { cur_x = cur_x + 2i32; if (cur_x as usize) >= canvas_w { cur_x = (canvas_w - 1usize) as i32; } }
+                    else if ev.is_key(32u8) || ev.is_key(10u8) { gui_ctx.set_mouse_down(true); }
+
+                    gui_ctx.handle_event(ev);
+                }
+                Option.None => {
+                    has_more_events = false;
+                }
+            }
+        }
+
+        if !running || !window.is_open() {
+            break;
+        }
+
+        gui_ctx.set_mouse_pos(cur_x, cur_y);
+
+        // Render Background
+        canvas.clear(Color.rgb(10u8, 12u8, 18u8));
+
+        // ---------------------------------------------------------------------
+        // Interactive Soundboard Panel
+        // ---------------------------------------------------------------------
+        gui_ctx.panel(canvas, "RETRO PCM SYNTHESIZER", 3usize, 4usize, 40usize, 38usize);
+
+        if gui_ctx.button(canvas, 1usize, "[ 1. JUMP SWEEP ]", 5usize, 11usize, 36usize, 3usize) || trigger_jump {
+            sound_engine.play_jump();
+            last_sfx.drop();
+            last_sfx = String.from_str("JUMP: 160->640 Hz Pulse");
+            sfx_play_count = sfx_play_count + 1i64;
+        }
+
+        if gui_ctx.button(canvas, 2usize, "[ 2. ARCADE LASER ]", 5usize, 15usize, 36usize, 3usize) || trigger_laser {
+            sound_engine.play_laser();
+            last_sfx.drop();
+            last_sfx = String.from_str("LASER: 950->120 Hz Zap");
+            sfx_play_count = sfx_play_count + 1i64;
+        }
+
+        if gui_ctx.button(canvas, 3usize, "[ 3. EXPLOSION BOOM ]", 5usize, 19usize, 36usize, 3usize) || trigger_explosion {
+            sound_engine.play_explosion();
+            last_sfx.drop();
+            last_sfx = String.from_str("EXPLOSION: Low-pass Noise");
+            sfx_play_count = sfx_play_count + 1i64;
+        }
+
+        if gui_ctx.button(canvas, 4usize, "[ 4. COIN CHIME ]", 5usize, 23usize, 36usize, 3usize) || trigger_coin {
+            sound_engine.play_coin();
+            last_sfx.drop();
+            last_sfx = String.from_str("COIN: B5 -> E6 Chime");
+            sfx_play_count = sfx_play_count + 1i64;
+        }
+
+        if gui_ctx.button(canvas, 5usize, "[ 5. POWERUP FANFARE ]", 5usize, 27usize, 36usize, 3usize) || trigger_powerup {
+            sound_engine.play_powerup();
+            last_sfx.drop();
+            last_sfx = String.from_str("POWERUP: C-E-G-C Fanfare");
+            sfx_play_count = sfx_play_count + 1i64;
+        }
+
+        if gui_ctx.button(canvas, 6usize, "[ 6. DAMAGE HIT ]", 5usize, 31usize, 36usize, 3usize) || trigger_hit {
+            sound_engine.play_hit();
+            last_sfx.drop();
+            last_sfx = String.from_str("HIT: Noise Crunch");
+            sfx_play_count = sfx_play_count + 1i64;
+        }
+
+        // ---------------------------------------------------------------------
+        // Right Panel: Waveform Oscilloscope Display
+        // ---------------------------------------------------------------------
+        let osc_x = 45usize;
+        var osc_w = 30usize;
+        if canvas_w > 48usize { osc_w = canvas_w - 47usize; }
+        gui_ctx.panel(canvas, "OSCILLOSCOPE", osc_x, 4usize, osc_w, 38usize);
+
+        // Center line
+        let mid_y = 20i64;
+        canvas.draw_line(osc_x as i64 + 2i64, mid_y, (osc_x + osc_w) as i64 - 2i64, mid_y, Color.rgb(35u8, 50u8, 70u8));
+
+        // Draw animated waveform
+        var ox = 0usize;
+        var prev_y = mid_y;
+        while ox < osc_w - 6usize {
+            let t = ((ox as f64) * 0.15) + ((window.frame_count as f64) * 0.1);
+            let s = sound_sin(t);
+            let py = mid_y + ((s * 7.0) as i64);
+            let px = (osc_x + 3usize + ox) as i64;
+            canvas.draw_line(px - 1i64, prev_y, px, py, Color.rgb(0u8, 255u8, 220u8));
+            prev_y = py;
+            ox = ox + 1usize;
+        }
+
+        gui_ctx.label(canvas, "ACTIVE SOUND EFFECT:", osc_x + 3usize, 28usize, gui_ctx.theme.accent_col);
+        gui_ctx.label(canvas, last_sfx.as_ptr() as str, osc_x + 3usize, 32usize, gui_ctx.theme.title_fg);
+
+        // Render Cursor
+        canvas.draw_line(cur_x as i64, (cur_y - 2i32) as i64, cur_x as i64, (cur_y + 2i32) as i64, gui_ctx.theme.cursor_col);
+        canvas.draw_line((cur_x - 2i32) as i64, cur_y as i64, (cur_x + 2i32) as i64, cur_y as i64, gui_ctx.theme.cursor_col);
+
+        if gui_ctx.mouse_down { gui_ctx.set_mouse_down(false); }
+
+        // Dedicated HUD (Zero-Flicker Single Syscall)
+        var hud = String.new();
+        hud.push_str("\x1b[1;45;97m RAD-SOUND ENGINE \x1b[0m ");
+        hud.push_str("\x1b[1;36mSTATUS:\x1b[0m ");
+        hud.push_str(last_sfx.as_ptr() as str);
+        hud.push_str(" ");
+
+        hud.push_str("\x1b[1;33mSFX PLAYED:\x1b[0m ");
+        push_i64_str(hud, sfx_play_count);
+        hud.push_str(" ");
+
+        hud.push_str("\x1b[90m| [1-6] Play SFX [WASD] Move [Space] Click [Q] Quit\x1b[0m");
+
+        window.draw_canvas_with_header(hud.as_ptr() as str, canvas);
+        hud.drop();
+        window.tick_input();
+        Window.sleep_frame(60u64);
+    }
+
+    last_sfx.drop();
+    canvas.destroy();
+    window.close();
+
+    println("Sound showcase finished cleanly.");
+    return 0;
+}

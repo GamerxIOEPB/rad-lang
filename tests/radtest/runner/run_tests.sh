@@ -16,9 +16,17 @@
 #   UNVERIFIED  deterministic run, but verification disabled (expected/<n>.unver)
 # =============================================================================
 set -u
-cd "$(dirname "$0")/.."   # radtest root
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+RAD_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+cd "$SCRIPT_DIR/.."   # radtest root
 
-RADC="${RADC:-$HOME/.rad/bin/radc}"
+if [ -z "${RADC:-}" ]; then
+    if [ -x "$RAD_ROOT/bin/radc" ]; then
+        RADC="$RAD_ROOT/bin/radc"
+    else
+        RADC="$HOME/.rad/bin/radc"
+    fi
+fi
 TDIR="tests"
 EDIR="tests/expected"
 BLD="build"

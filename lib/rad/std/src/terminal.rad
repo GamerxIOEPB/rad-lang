@@ -152,9 +152,9 @@ impl TerminalSession {
                 guard[2usize] = 1u8
                 guard[4usize] = 0u8
             }
-            // \x1b[?1049h\x1b[>3u : enter alt screen and request Kitty progressive enhancement (flags 1|2)
-            let cmd = "\x1b[?1049h\x1b[>3u"
-            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 14i64)
+            // \x1b[?1049h\x1b[>11u : enter alt screen and request Kitty progressive enhancement (flags 1|2|8: disambiguate, report event types, report all keys as escape codes)
+            let cmd = "\x1b[?1049h\x1b[>11u"
+            let _w = syscall3(1i64, 1i64, cmd as *raw u8, 15i64)
             self.in_alt_screen = true
         }
     }
@@ -396,6 +396,18 @@ pub fn terminal_install_signal_guard() {
     let _ = syscall4(13i64, 6i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGABRT
     let _ = syscall4(13i64, 4i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGILL
     let _ = syscall4(13i64, 7i64, act as *raw u8, 0usize as *raw u8, 8i64)  // SIGBUS
+
+    // Ignore SIGTTIN (21) and SIGTTOU (22) so terminal processes in background do not get stopped/suspended
+    let act_ign = malloc(32usize) as *raw var u8
+    let act_ign_u64 = act_ign as *raw var i64
+    act_ign_u64[0usize] = 1i64 // SIG_IGN = 1
+    act_ign_u64[1usize] = 0i64
+    act_ign_u64[2usize] = 0i64
+    act_ign_u64[3usize] = 0i64
+
+    let _ = syscall4(13i64, 21i64, act_ign as *raw u8, 0usize as *raw u8, 8i64) // SIGTTIN
+    let _ = syscall4(13i64, 22i64, act_ign as *raw u8, 0usize as *raw u8, 8i64) // SIGTTOU
+    free(act_ign)
 
     free(act)
 }

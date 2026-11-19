@@ -1,0 +1,63 @@
+import std/path;
+import std/net;
+import std/crypto;
+
+fn main() -> i32 {
+    // 1. Test PathBuf
+    var pb = PathBuf.from("/usr");
+    pb = pb.join("local").join("bin");
+    let s = pb.to_string();
+    println(s.as_ptr() as str); // /usr/local/bin
+
+    let parent_pb = pb.parent();
+    println(parent_pb.as_str()); // /usr/local
+
+    let file_name = pb.file_name();
+    println(file_name.as_ptr() as str); // bin
+
+    var file_pb = PathBuf.from("main.rad");
+    file_pb = file_pb.with_extension("o");
+    println(file_pb.as_str()); // main.o
+
+    // 2. Test SHA-256
+    let hash = hash_sha256("Hello, Rad!");
+    println(hash.as_ptr() as str);
+
+    // 3. Test ChaCha20 encryption/decryption
+    let key_buf = malloc(32usize) as *raw var u8;
+    let nonce_buf = malloc(12usize) as *raw var u8;
+    var i = 0usize;
+    while i < 32usize { key_buf[i] = (i + 1usize) as u8; i = i + 1usize; }
+    i = 0usize;
+    while i < 12usize { nonce_buf[i] = (i + 10usize) as u8; i = i + 1usize; }
+
+    var cipher = ChaCha20.new(key_buf, nonce_buf, 1u32);
+    let msg = malloc(16usize) as *raw var u8;
+    let original = "RadSecureCrypto\0" as *raw u8;
+    i = 0usize;
+    while i < 16usize { msg[i] = original[i]; i = i + 1usize; }
+
+    // Encrypt in-place
+    cipher.apply_keystream(msg, 15usize);
+
+    // Decrypt in-place by resetting cipher counter
+    var decipher = ChaCha20.new(key_buf, nonce_buf, 1u32);
+    decipher.apply_keystream(msg, 15usize);
+    msg[15usize] = 0u8;
+
+    println(msg as str); // RadSecureCrypto
+
+    cipher.destroy();
+    decipher.destroy();
+    free(key_buf);
+    free(nonce_buf);
+    free(msg);
+
+    // 4. Test CSPRNG
+    let rand_num = csprng_u64();
+    if rand_num != 0u64 {
+        println("CSPRNG_OK");
+    }
+
+    return 0;
+}
