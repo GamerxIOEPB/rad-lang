@@ -1,0 +1,64 @@
+// ==============================================================================
+// Rad Standard Library: WebAssembly & Browser Canvas Bridge (std::wasm)
+// Zero-overhead WebAssembly bindings for HTML5 Canvas, WebAudio, and Web APIs.
+// ==============================================================================
+
+fn wasm_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+// ------------------------------------------------------------------------------
+// Browser Host Import Declarations (provided by rad_wasm_bridge.js)
+// ------------------------------------------------------------------------------
+
+fn rad_js_print(ptr: *raw u8, len: usize);
+fn rad_canvas_clear(r: i32, g: i32, b: i32);
+fn rad_canvas_fill_rect(x: i32, y: i32, w: i32, h: i32, r: i32, g: i32, b: i32);
+fn rad_canvas_draw_circle(x: i32, y: i32, radius: i32, r: i32, g: i32, b: i32);
+fn rad_canvas_draw_text(ptr: *raw u8, len: usize, x: i32, y: i32, size: i32, r: i32, g: i32, b: i32);
+fn rad_time_now_ms() -> f64;
+fn rad_audio_tone(frequency: f32, duration_ms: f32);
+
+// ------------------------------------------------------------------------------
+// Safe Ergonomic Rad APIs
+// ------------------------------------------------------------------------------
+
+pub struct WasmCanvas {}
+
+impl WasmCanvas {
+    pub fn print(msg: str) {
+        let len = wasm_str_len(msg)
+        rad_js_print(msg as *raw u8, len)
+    }
+
+    pub fn clear(r: i32, g: i32, b: i32) {
+        rad_canvas_clear(r, g, b)
+    }
+
+    pub fn fill_rect(x: i32, y: i32, w: i32, h: i32, r: i32, g: i32, b: i32) {
+        rad_canvas_fill_rect(x, y, w, h, r, g, b)
+    }
+
+    pub fn draw_circle(x: i32, y: i32, radius: i32, r: i32, g: i32, b: i32) {
+        rad_canvas_draw_circle(x, y, radius, r, g, b)
+    }
+
+    pub fn draw_text(text: str, x: i32, y: i32, size: i32, r: i32, g: i32, b: i32) {
+        let len = wasm_str_len(text)
+        rad_canvas_draw_text(text as *raw u8, len, x, y, size, r, g, b)
+    }
+
+    pub fn now_ms() -> f64 {
+        return rad_time_now_ms()
+    }
+
+    pub fn beep(frequency: f32, duration_ms: f32) {
+        rad_audio_tone(frequency, duration_ms)
+    }
+}

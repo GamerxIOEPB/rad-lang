@@ -1,0 +1,154 @@
+// ==============================================================================
+// Rad WebAssembly Browser Demo: Interactive Particle Physics & Canvas Engine
+// Pure-Rad compiled directly to wasm32-unknown-unknown.
+// ==============================================================================
+
+import std/wasm;
+
+const STATE_ADDR: usize = 65536usize
+const MAX_PARTICLES: usize = 64usize
+
+pub struct ParticleEngine {
+    pub p_x: *raw var f64,
+    pub p_y: *raw var f64,
+    pub p_vx: *raw var f64,
+    pub p_vy: *raw var f64,
+    pub p_cr: *raw var i32,
+    pub p_cg: *raw var i32,
+    pub p_cb: *raw var i32,
+    pub p_rad: *raw var i32,
+    pub count: usize,
+    pub initialized: bool,
+}
+
+impl ParticleEngine {
+    pub fn init(var self, width: i32, height: i32) {
+        let base = STATE_ADDR + 256usize
+        self.p_x = (base + 0usize) as *raw var f64
+        self.p_y = (base + 1024usize) as *raw var f64
+        self.p_vx = (base + 2048usize) as *raw var f64
+        self.p_vy = (base + 3072usize) as *raw var f64
+        self.p_cr = (base + 4096usize) as *raw var i32
+        self.p_cg = (base + 5120usize) as *raw var i32
+        self.p_cb = (base + 6144usize) as *raw var i32
+        self.p_rad = (base + 7168usize) as *raw var i32
+        self.count = 48usize
+
+        var i = 0usize
+        while i < self.count {
+            self.p_x[i] = ((i * 23usize + 50usize) % (width as usize)) as f64
+            self.p_y[i] = ((i * 37usize + 40usize) % (height as usize)) as f64
+
+            var vx = (((i % 7usize) as f64) - 3.0) * 0.9
+            if vx == 0.0 { vx = 1.4 }
+            var vy = ((((i + 2usize) % 7usize) as f64) - 3.0) * 0.9
+            if vy == 0.0 { vy = -1.1 }
+            self.p_vx[i] = vx
+            self.p_vy[i] = vy
+
+            if i % 3usize == 0usize {
+                self.p_cr[i] = 56i32
+                self.p_cg[i] = 189i32
+                self.p_cb[i] = 248i32 // Sky Blue
+                self.p_rad[i] = 6i32
+            } else if i % 3usize == 1usize {
+                self.p_cr[i] = 52i32
+                self.p_cg[i] = 211i32
+                self.p_cb[i] = 153i32 // Emerald Green
+                self.p_rad[i] = 5i32
+            } else {
+                self.p_cr[i] = 244i32
+                self.p_cg[i] = 114i32
+                self.p_cb[i] = 182i32 // Pink
+                self.p_rad[i] = 7i32
+            }
+            i = i + 1usize
+        }
+        self.initialized = true
+        WasmCanvas.print("⚡ Rad WebAssembly: Particle physics initialized!")
+    }
+}
+
+fn get_engine() -> *raw var ParticleEngine {
+    return STATE_ADDR as *raw var ParticleEngine
+}
+
+// Exported tick function called from requestAnimationFrame in JavaScript
+pub fn update_and_render(width: i32, height: i32, frame: i32) {
+    let engine = get_engine()
+    if !engine.initialized {
+        engine.init(width, height)
+    }
+
+    // 1. Clear Canvas Background
+    WasmCanvas.clear(11i32, 15i32, 25i32)
+
+    // 2. Subtle Starfield Grid
+    var gx = 0i32
+    while gx < width {
+        WasmCanvas.fill_rect(gx, 0i32, 1i32, height, 18i32, 25i32, 38i32)
+        gx = gx + 40i32
+    }
+    var gy = 0i32
+    while gy < height {
+        WasmCanvas.fill_rect(0i32, gy, width, 1i32, 18i32, 25i32, 38i32)
+        gy = gy + 40i32
+    }
+
+    // 3. Update & Draw Particles
+    let wf = width as f64
+    let hf = height as f64
+    var i = 0usize
+    while i < engine.count {
+        engine.p_x[i] = engine.p_x[i] + engine.p_vx[i]
+        engine.p_y[i] = engine.p_y[i] + engine.p_vy[i]
+
+        let rad = engine.p_rad[i] as f64
+        if engine.p_x[i] <= rad {
+            engine.p_x[i] = rad
+            engine.p_vx[i] = -engine.p_vx[i]
+        } else if engine.p_x[i] >= wf - rad {
+            engine.p_x[i] = wf - rad
+            engine.p_vx[i] = -engine.p_vx[i]
+        }
+
+        if engine.p_y[i] <= rad {
+            engine.p_y[i] = rad
+            engine.p_vy[i] = -engine.p_vy[i]
+        } else if engine.p_y[i] >= hf - rad {
+            engine.p_y[i] = hf - rad
+            engine.p_vy[i] = -engine.p_vy[i]
+        }
+
+        let xi = engine.p_x[i] as i32
+        let yi = engine.p_y[i] as i32
+        let cr = engine.p_cr[i]
+        let cg = engine.p_cg[i]
+        let cb = engine.p_cb[i]
+        let r = engine.p_rad[i]
+
+        WasmCanvas.draw_circle(xi, yi, r, cr, cg, cb)
+
+        // Web connecting lines between nearby particles
+        var j = i + 1usize
+        while j < engine.count {
+            let dx = (engine.p_x[i] - engine.p_x[j]) as i32
+            let dy = (engine.p_y[i] - engine.p_y[j]) as i32
+            let dist_sq = dx * dx + dy * dy
+            if dist_sq < 4900i32 { // within 70px
+                let mx = (xi + (engine.p_x[j] as i32)) / 2i32
+                let my = (yi + (engine.p_y[j] as i32)) / 2i32
+                WasmCanvas.fill_rect(mx, my, 2i32, 2i32, 50i32, 70i32, 100i32)
+            }
+            j = j + 1usize
+        }
+
+        i = i + 1usize
+    }
+
+    // 4. Glassmorphism HUD Card
+    WasmCanvas.fill_rect(16i32, 16i32, 330i32, 76i32, 15i32, 23i32, 42i32)
+    WasmCanvas.draw_text("⚡ Rad WebAssembly Engine", 28i32, 38i32, 15i32, 56i32, 189i32, 248i32)
+    WasmCanvas.draw_text("Target: wasm32-unknown-unknown", 28i32, 58i32, 12i32, 148i32, 163i32, 184i32)
+    WasmCanvas.draw_text("60 FPS | Zero External Dependencies", 28i32, 74i32, 11i32, 52i32, 211i32, 153i32)
+}

@@ -1,0 +1,296 @@
+// ==============================================================================
+// Rad Full-Stack Web Application Demo (std/http + std/kv)
+// Pure-Rad Native REST API Microservice with Embedded Key-Value Database.
+// Zero external C dynamic library dependencies.
+// ==============================================================================
+
+import std/http
+import std/kv
+import std/fs
+
+fn usleep(usec: u32) -> i32;
+
+fn escape_json(s: str) -> String {
+    let p = s as *raw u8
+    let len = http_str_len(s)
+    var out = String.new()
+    var i = 0usize
+    while i < len {
+        let b = p[i]
+        if b == 34u8 { // '"'
+            out.push_byte(92u8) // '\'
+            out.push_byte(34u8)
+        } else if b == 92u8 { // '\'
+            out.push_byte(92u8)
+            out.push_byte(92u8)
+        } else if b == 10u8 { // '\n'
+            out.push_byte(92u8)
+            out.push_byte(110u8)
+        } else if b == 13u8 { // '\r'
+            out.push_byte(92u8)
+            out.push_byte(114u8)
+        } else {
+            out.push_byte(b)
+        }
+        i = i + 1usize
+    }
+    out.push_byte(0u8)
+    return out
+}
+
+fn handle_request(req: HttpRequest, var db: KvStore) -> HttpResponse {
+    let method = req.method.as_ptr() as str
+    let path = req.path.as_ptr() as str
+
+    // 1. Dashboard UI (Single-Page App)
+    if http_str_eq(method, "GET") && (http_str_eq(path, "/") || http_str_eq(path, "/index.html")) {
+        let html = "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><title>Rad Full-Stack Microservice</title><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:system-ui,-apple-system,sans-serif;background:#0b0f19;color:#f1f5f9;padding:32px;}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1e293b;padding-bottom:20px;margin-bottom:28px;}h1{font-size:24px;color:#38bdf8;display:flex;align-items:center;gap:10px;}span.badge{background:#0369a1;color:#bae6fd;font-size:12px;padding:3px 8px;border-radius:12px;font-weight:600;}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px;}.card{background:#111827;border:1px solid #1f2937;border-radius:8px;padding:16px;}.card h3{font-size:12px;color:#9ca3af;text-transform:uppercase;margin-bottom:6px;}.card .val{font-size:24px;font-weight:700;color:#f9fafb;}.panel{background:#111827;border:1px solid #1f2937;border-radius:8px;padding:24px;margin-bottom:24px;}h2{font-size:18px;margin-bottom:16px;color:#e2e8f0;}table{width:100%;border-collapse:collapse;margin-top:12px;}th,td{padding:12px;text-align:left;border-bottom:1px solid #1f2937;font-size:14px;}th{color:#9ca3af;background:#0d131f;}code{background:#1f2937;padding:2px 6px;border-radius:4px;color:#38bdf8;font-family:monospace;}.form-row{display:flex;gap:12px;margin-bottom:12px;}input,textarea{flex:1;background:#0b0f19;border:1px solid #374151;color:#f9fafb;padding:10px 14px;border-radius:6px;font-size:14px;}button{background:#0284c7;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:600;cursor:pointer;transition:background 0.2s;}button:hover{background:#0369a1;}button.del{background:#dc2626;padding:6px 12px;font-size:12px;}button.del:hover{background:#b91c1c;}</style></head><body><header><h1>⚡ Rad Full-Stack Web Engine <span class=\"badge\">std/http + std/kv</span></h1><div><code>v0.2.4 (Native PIE)</code></div></header><div class=\"grid\"><div class=\"card\"><h3>Key-Value Engine</h3><div class=\"val\" style=\"color:#38bdf8;\">std/kv Bitcask</div></div><div class=\"card\"><h3>HTTP Server</h3><div class=\"val\" style=\"color:#34d399;\">HTTP/1.1 Pure Rad</div></div><div class=\"card\"><h3>Persistent File</h3><div class=\"val\" style=\"font-size:14px;color:#cbd5e1;padding-top:6px;\">data/app.db</div></div></div><div class=\"panel\"><h2>Add or Update Record</h2><form id=\"kv-form\" onsubmit=\"saveItem(event)\"><div class=\"form-row\"><input type=\"text\" id=\"item-key\" placeholder=\"Key (e.g. user:42, config:theme)\" required><input type=\"text\" id=\"item-val\" placeholder=\"Value (raw text or JSON)\" required><button type=\"submit\">Save to Store</button></div></form></div><div class=\"panel\"><h2>Stored Records (Live)</h2><div id=\"items-table\">Loading records...</div></div><script>async function loadItems(){const res=await fetch('/api/items');const data=await res.json();let h='<table><thead><tr><th>Key</th><th>Value</th><th>Action</th></tr></thead><tbody>';if(!data.items||data.items.length===0){h+='<tr><td colspan=\"3\" style=\"text-align:center;color:#6b7280;\">Store is empty. Add a record above!</td></tr>';}else{data.items.forEach(it=>{h+=`<tr><td><code>${it.key}</code></td><td>${it.value}</td><td><button class=\"del\" onclick=\"deleteItem('${it.key}')\">Delete</button></td></tr>`;});}h+='</tbody></table>';document.getElementById('items-table').innerHTML=h;}async function saveItem(e){e.preventDefault();const key=document.getElementById('item-key').value;const val=document.getElementById('item-val').value;await fetch('/api/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,val})});document.getElementById('item-key').value='';document.getElementById('item-val').value='';loadItems();}async function deleteItem(key){await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key})});loadItems();}loadItems();</script></body></html>"
+        return HttpResponse.html(html)
+    }
+
+    // 2. GET /api/items (List all items or single item)
+    if http_str_eq(method, "GET") && http_str_eq(path, "/api/items") {
+        let opt_key = req.get_query_param("key")
+        match opt_key {
+            Option.Some(k) => {
+                let k_str = k.as_ptr() as str
+                let opt_val = db.get(k_str)
+                match opt_val {
+                    Option.Some(v) => {
+                        var json = String.new()
+                        json.push_str("{\"found\":true,\"key\":\"")
+                        json.push_str(escape_json(k_str).as_ptr() as str)
+                        json.push_str("\",\"value\":\"")
+                        json.push_str(escape_json(v.as_ptr() as str).as_ptr() as str)
+                        json.push_str("\"}")
+                        json.push_byte(0u8)
+                        return HttpResponse.json(json.as_ptr() as str)
+                    },
+                    Option.None => {
+                        return HttpResponse.json("{\"found\":false}")
+                    },
+                }
+            },
+            Option.None => {
+                var json = String.new()
+                json.push_str("{\"count\":")
+                json.push_str(http_int_to_str(db.count() as i64).as_ptr() as str)
+                json.push_str(",\"items\":[")
+                var i = 0usize
+                while i < db.keys.len {
+                    let k = db.keys.ptr[i].as_ptr() as str
+                    let opt_val = db.get(k)
+                    var v_str = ""
+                    match opt_val {
+                        Option.Some(v) => { v_str = v.as_ptr() as str },
+                        Option.None => {},
+                    }
+                    if i > 0usize { json.push_str(",") }
+                    json.push_str("{\"key\":\"")
+                    json.push_str(escape_json(k).as_ptr() as str)
+                    json.push_str("\",\"value\":\"")
+                    json.push_str(escape_json(v_str).as_ptr() as str)
+                    json.push_str("\"}")
+                    i = i + 1usize
+                }
+                json.push_str("]}")
+                json.push_byte(0u8)
+                return HttpResponse.json(json.as_ptr() as str)
+            },
+        }
+    }
+
+    // 3. POST /api/items (Insert or Update item)
+    if http_str_eq(method, "POST") && http_str_eq(path, "/api/items") {
+        let body_str = req.body.as_ptr() as str
+        // Extract "key":"..." and "val":"..." from JSON body
+        var key_s = String.new()
+        var val_s = String.new()
+        let blen = http_str_len(body_str)
+        let bp = body_str as *raw u8
+        var pos = 0usize
+        while pos + 5usize < blen {
+            if bp[pos] == 34u8 && bp[pos + 1usize] == 107u8 && bp[pos + 2usize] == 101u8 && bp[pos + 3usize] == 121u8 && bp[pos + 4usize] == 34u8 { // "key"
+                var kp = pos + 5usize
+                while kp < blen && bp[kp] != 34u8 { kp = kp + 1usize }
+                if kp < blen && bp[kp] == 34u8 {
+                    kp = kp + 1usize
+                    while kp < blen && bp[kp] != 34u8 {
+                        key_s.push_byte(bp[kp])
+                        kp = kp + 1usize
+                    }
+                }
+                pos = kp
+            } else if bp[pos] == 34u8 && bp[pos + 1usize] == 118u8 && bp[pos + 2usize] == 97u8 && bp[pos + 3usize] == 108u8 && bp[pos + 4usize] == 34u8 { // "val"
+                var vp = pos + 5usize
+                while vp < blen && bp[vp] != 34u8 { vp = vp + 1usize }
+                if vp < blen && bp[vp] == 34u8 {
+                    vp = vp + 1usize
+                    while vp < blen && bp[vp] != 34u8 {
+                        val_s.push_byte(bp[vp])
+                        vp = vp + 1usize
+                    }
+                }
+                pos = vp
+            }
+            pos = pos + 1usize
+        }
+        key_s.push_byte(0u8)
+        val_s.push_byte(0u8)
+
+        if key_s.len() > 0usize {
+            let ok = db.put(key_s.as_ptr() as str, val_s.as_ptr() as str)
+            if ok {
+                return HttpResponse.json("{\"status\":\"ok\",\"action\":\"saved\"}")
+            } else {
+                return HttpResponse.internal_error("Failed to write to std/kv")
+            }
+        }
+        return HttpResponse.bad_request("Missing 'key' or 'val' parameter in JSON payload")
+    }
+
+    // 4. POST /api/delete
+    if http_str_eq(method, "POST") && http_str_eq(path, "/api/delete") {
+        let body_str = req.body.as_ptr() as str
+        var key_s = String.new()
+        let blen = http_str_len(body_str)
+        let bp = body_str as *raw u8
+        var pos = 0usize
+        while pos + 5usize < blen {
+            if bp[pos] == 34u8 && bp[pos + 1usize] == 107u8 && bp[pos + 2usize] == 101u8 && bp[pos + 3usize] == 121u8 && bp[pos + 4usize] == 34u8 {
+                var kp = pos + 5usize
+                while kp < blen && bp[kp] != 34u8 { kp = kp + 1usize }
+                if kp < blen && bp[kp] == 34u8 {
+                    kp = kp + 1usize
+                    while kp < blen && bp[kp] != 34u8 {
+                        key_s.push_byte(bp[kp])
+                        kp = kp + 1usize
+                    }
+                }
+                break
+            }
+            pos = pos + 1usize
+        }
+        key_s.push_byte(0u8)
+        if key_s.len() > 0usize {
+            let _ = db.delete(key_s.as_ptr() as str)
+            return HttpResponse.json("{\"status\":\"ok\",\"action\":\"deleted\"}")
+        }
+        return HttpResponse.bad_request("Missing 'key' parameter")
+    }
+
+    // 5. GET /api/stats
+    if http_str_eq(method, "GET") && http_str_eq(path, "/api/stats") {
+        let fsize = Fs.file_size(db.file_path.as_ptr() as str)
+        var json = String.new()
+        json.push_str("{\"engine\":\"pure-rad-kv\",\"items\":")
+        json.push_str(http_int_to_str(db.count() as i64).as_ptr() as str)
+        json.push_str(",\"db_size_bytes\":")
+        json.push_str(http_int_to_str(fsize).as_ptr() as str)
+        json.push_str(",\"version\":\"0.2.4\",\"status\":\"healthy\"}")
+        json.push_byte(0u8)
+        return HttpResponse.json(json.as_ptr() as str)
+    }
+
+    return HttpResponse.not_found()
+}
+
+fn main(argc: i32, argv: *raw *raw u8) -> i32 {
+    let port = 8085u16
+    let db_path = "data/fullstack.db"
+    let _ = Fs.make_dir_p("data")
+
+    println("==================================================")
+    println("  Rad Full-Stack Microservice (std/http + std/kv)")
+    println(f"  Listening on http://127.0.0.1:{port}/")
+    println(f"  Storage Engine: Bitcask append-only in {db_path}")
+    println("==================================================")
+
+    var opt_db = KvStore.open(db_path)
+    var db: KvStore = KvStore {
+        file_path: String.new(),
+        fd: -1,
+        is_open: false,
+        keys: Vec.new(),
+        offsets: Vec.new(),
+        val_lens: Vec.new(),
+        timestamps: Vec.new(),
+    }
+    match opt_db {
+        Option.Some(s) => {
+            db = s
+        },
+        Option.None => {
+            println(f"error: failed to open persistent database at {db_path}")
+            return 1
+        },
+    }
+
+    // Pre-seed if empty
+    if db.count() == 0usize {
+        let _ = db.put("system:welcome", "Welcome to Rad Full-Stack Web Development!")
+        let _ = db.put("service:name", "Rad Data Microservice")
+        let _ = db.put("service:version", "0.2.4")
+    }
+
+    var listener: TcpListener = TcpListener { fd: -1, is_bound: false }
+    let bind_opt = TcpListener.bind("127.0.0.1", port)
+    match bind_opt {
+        Option.Some(l) => {
+            listener = l
+        },
+        Option.None => {
+            println(f"error: failed to bind socket on port {port}")
+            db.close()
+            return 1
+        },
+    }
+
+    var one_shot = false
+    if argc > 1 {
+        let arg1 = argv[1usize] as str
+        if http_str_eq(arg1, "--test-one") {
+            one_shot = true
+        }
+    }
+
+    var running = true
+    while running {
+        let conn_opt = listener.accept()
+        match conn_opt {
+            Option.Some(stream) => {
+                var conn = stream
+                let req_buf = malloc(16384usize) as *raw var u8
+                let bytes_read = conn.read(req_buf, 16383usize)
+                if bytes_read > 0i64 {
+                    req_buf[bytes_read as usize] = 0u8
+                    let parsed_opt = parse_http_request(req_buf as str)
+                    var resp: HttpResponse = HttpResponse.bad_request("Malformed Request")
+                    match parsed_opt {
+                        Option.Some(r) => {
+                            resp = handle_request(r, db)
+                        },
+                        Option.None => {},
+                    }
+                    resp.set_header("Server", "RadFullStack/0.2.4")
+                    resp.set_header("Connection", "close")
+                    let wire = resp.to_wire()
+                    let _ = conn.write_str(wire.as_ptr() as str)
+                }
+                free(req_buf)
+                conn.close()
+
+                if one_shot {
+                    running = false
+                }
+            },
+            Option.None => {
+                let _ = usleep(10000u32)
+            },
+        }
+    }
+
+    db.close()
+    listener.close()
+    return 0
+}

@@ -92,7 +92,7 @@ $(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp
 		$(RADC) --emit-llvm $(RADC_SRCS) -o $(BIN_DIR)/radc_rad.ll $(RADC_FLAGS) && \
 		rad-llc -filetype=obj -relocation-model=pic $(BIN_DIR)/radc_rad.ll -o $(BIN_DIR)/radc_rad.o; \
 	fi
-	clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o $(LLVM_LDFLAGS) -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldCommon -o $(BIN_RADC)
+	clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o $(LLVM_LDFLAGS) -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldWasm -llldCommon -o $(BIN_RADC)
 	@chmod 755 $(BIN_RADC)
 
 rad: $(BIN_RAD)

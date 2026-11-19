@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ Rad WebAssembly Canvas Engine</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #0b0f19;
+            color: #f1f5f9;
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        header {
+            position: absolute;
+            top: 20px;
+            left: 24px;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        h1 {
+            font-size: 20px;
+            color: #38bdf8;
+            font-weight: 700;
+        }
+        span.pill {
+            background: #0369a1;
+            color: #bae6fd;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+        #canvas-container {
+            position: relative;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            border: 1px solid #1e293b;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            background: #0b0f19;
+        }
+        footer {
+            position: absolute;
+            bottom: 20px;
+            display: flex;
+            gap: 16px;
+            z-index: 10;
+        }
+        button {
+            background: #1e293b;
+            color: #f8fafc;
+            border: 1px solid #334155;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: #0284c7;
+            border-color: #38bdf8;
+        }
+        #status {
+            position: absolute;
+            top: 20px;
+            right: 24px;
+            font-size: 13px;
+            color: #94a3b8;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>⚡ Rad WebAssembly</h1>
+        <span class="pill">wasm32-unknown-unknown</span>
+    </header>
+
+    <div id="status">Loading .wasm module...</div>
+
+    <div id="canvas-container">
+        <canvas id="screen" width="960" height="600"></canvas>
+    </div>
+
+    <footer>
+        <button onclick="toggleAudio()">🔊 Toggle WebAudio</button>
+        <button onclick="resetEngine()">🔄 Restart Simulation</button>
+        <a href="https://github.com/GamerxIOEPB/rad-lang" target="_blank" style="text-decoration:none;"><button>⭐ Rad Language GitHub</button></a>
+    </footer>
+
+    <script>
+        const canvas = document.getElementById("screen");
+        const ctx = canvas.getContext("2d");
+        const statusEl = document.getElementById("status");
+
+        let audioCtx = null;
+        let audioEnabled = false;
+
+        function toggleAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            audioEnabled = !audioEnabled;
+            statusEl.textContent = audioEnabled ? "WebAudio Enabled" : "WebAudio Muted";
+        }
+
+        let wasmInstance = null;
+        let wasmMemory = null;
+        let frame = 0;
+        let isRunning = true;
+
+        // Bridge functions imported by the pure Rad WebAssembly binary
+        const importObject = {
+            env: {
+                rad_js_print: (ptr, len) => {
+                    if (!wasmMemory) return;
+                    const bytes = new Uint8Array(wasmMemory.buffer, ptr, len);
+                    const msg = new TextDecoder("utf-8").decode(bytes);
+                    console.log("[Rad WASM]:", msg);
+                    statusEl.textContent = msg;
+                },
+                rad_canvas_clear: (r, g, b) => {
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                },
+                rad_canvas_fill_rect: (x, y, w, h, r, g, b) => {
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.fillRect(x, y, w, h);
+                },
+                rad_canvas_draw_circle: (x, y, radius, r, g, b) => {
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.fill();
+                },
+                rad_canvas_draw_text: (ptr, len, x, y, size, r, g, b) => {
+                    if (!wasmMemory) return;
+                    const bytes = new Uint8Array(wasmMemory.buffer, ptr, len);
+                    const txt = new TextDecoder("utf-8").decode(bytes);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.font = `600 ${size}px system-ui, sans-serif`;
+                    ctx.fillText(txt, x, y);
+                },
+                rad_time_now_ms: () => performance.now(),
+                rad_audio_tone: (freq, durationMs) => {
+                    if (!audioEnabled || !audioCtx) return;
+                    try {
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.type = "sine";
+                        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + (durationMs / 1000));
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.start();
+                        osc.stop(audioCtx.currentTime + (durationMs / 1000));
+                    } catch (e) {}
+                },
+                // Fallbacks for libc declarations
+                exit: (code) => console.log("Rad process exited:", code),
+                dprintf: () => 0,
+                __rad_sigreturn_trampoline: () => {},
+            }
+        };
+
+        async function init() {
+            try {
+                const response = await fetch("particle_engine.wasm");
+                const bytes = await response.arrayBuffer();
+                const result = await WebAssembly.instantiate(bytes, importObject);
+                wasmInstance = result.instance;
+                wasmMemory = wasmInstance.exports.memory;
+
+                statusEl.textContent = "⚡ Running at 60 FPS (WASM 6.2 KB)";
+                requestAnimationFrame(renderLoop);
+            } catch (err) {
+                console.error("Failed to load Rad WASM:", err);
+                statusEl.textContent = "Error: " + err.message;
+            }
+        }
+
+        function renderLoop() {
+            if (isRunning && wasmInstance && wasmInstance.exports.update_and_render) {
+                wasmInstance.exports.update_and_render(canvas.width, canvas.height, frame++);
+            }
+            requestAnimationFrame(renderLoop);
+        }
+
+        function resetEngine() {
+            frame = 0;
+            if (wasmMemory) {
+                // Clear state memory
+                new Uint8Array(wasmMemory.buffer, 65536, 16384).fill(0);
+            }
+            statusEl.textContent = "Simulation reset.";
+        }
+
+        init();
+    </script>
+</body>
+</html>

@@ -25,3 +25,5 @@ pub import regex
 pub import log
 pub import crypto
 pub import http
+pub import kv
+pub import wasm

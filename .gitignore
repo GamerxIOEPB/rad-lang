@@ -20,3 +20,4 @@ extensions/vscode-rad/dist/*.map
 /lib/llvm
 target/
 benches/bin/
+data/

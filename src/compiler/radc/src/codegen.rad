@@ -3037,6 +3037,15 @@ impl Codegen {
 
             if str_eq(target_ty, "double") || str_eq(target_ty, "float") {
                 if src_is_float {
+                    if str_eq(target_ty, "float") {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = fptrunc double %")
+                        self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                        self.ir.push_str(" to float\n")
+                        return cvt
+                    }
                     return left_reg
                 }
                 let cvt = self.alloc_ssa()
@@ -3044,7 +3053,9 @@ impl Codegen {
                 self.ir.push_str(int_to_str(cvt).as_ptr() as str)
                 self.ir.push_str(" = sitofp i64 %")
                 self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
-                self.ir.push_str(" to double\n")
+                self.ir.push_str(" to ")
+                self.ir.push_str(target_ty)
+                self.ir.push_str("\n")
                 return cvt
             }
             if src_is_float {
@@ -3270,15 +3281,17 @@ impl Codegen {
                     init_is_ptr = true
                 }
                 let init_is_float = self.is_expr_float(init_expr)
-                if str_eq(llvm_ty, "double") && !init_is_float {
+                if (str_eq(llvm_ty, "double") || str_eq(llvm_ty, "float")) && !init_is_float {
                     let cvt = self.alloc_ssa()
                     self.ir.push_str("  %")
                     self.ir.push_str(int_to_str(cvt).as_ptr() as str)
                     self.ir.push_str(" = sitofp i64 %")
                     self.ir.push_str(int_to_str(r).as_ptr() as str)
-                    self.ir.push_str(" to double\n")
+                    self.ir.push_str(" to ")
+                    self.ir.push_str(llvm_ty)
+                    self.ir.push_str("\n")
                     r = cvt
-                } else if !str_eq(llvm_ty, "double") && init_is_float {
+                } else if (!str_eq(llvm_ty, "double") && !str_eq(llvm_ty, "float")) && init_is_float {
                     let cvt = self.alloc_ssa()
                     self.ir.push_str("  %")
                     self.ir.push_str(int_to_str(cvt).as_ptr() as str)
@@ -3370,15 +3383,17 @@ impl Codegen {
             let llvm_ty = self.get_var_type(vname)
             let init_is_ptr = self.is_expr_ptr(init_expr)
             let init_is_float = self.is_expr_float(init_expr)
-            if str_eq(llvm_ty, "double") && !init_is_float {
+            if (str_eq(llvm_ty, "double") || str_eq(llvm_ty, "float")) && !init_is_float {
                 let cvt = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(cvt).as_ptr() as str)
                 self.ir.push_str(" = sitofp i64 %")
                 self.ir.push_str(int_to_str(r).as_ptr() as str)
-                self.ir.push_str(" to double\n")
+                self.ir.push_str(" to ")
+                self.ir.push_str(llvm_ty)
+                self.ir.push_str("\n")
                 r = cvt
-            } else if !str_eq(llvm_ty, "double") && init_is_float {
+            } else if (!str_eq(llvm_ty, "double") && !str_eq(llvm_ty, "float")) && init_is_float {
                 let cvt = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(cvt).as_ptr() as str)
@@ -4638,10 +4653,15 @@ impl Codegen {
         var header = String.new()
         header.push_str("; ModuleID = 'radc_compiled'\n")
         header.push_str("source_filename = \"rad\"\n")
-        header.push_str("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"\n")
-        header.push_str("target triple = \"")
-        header.push_str(self.target.as_ptr() as str)
-        header.push_str("\"\n\n")
+        if str_starts_with(self.target.as_ptr() as str, "wasm32") {
+            header.push_str("target datalayout = \"e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128\"\n")
+            header.push_str("target triple = \"wasm32-unknown-unknown\"\n\n")
+        } else {
+            header.push_str("target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128\"\n")
+            header.push_str("target triple = \"")
+            header.push_str(self.target.as_ptr() as str)
+            header.push_str("\"\n\n")
+        }
 
         header.push_str("declare ptr @malloc(i64)\n")
         header.push_str("declare void @free(ptr)\n")
@@ -4788,7 +4808,11 @@ impl Codegen {
         header.push_str("@__rad_terminal_guard_buf = global [128 x i8] zeroinitializer, align 8\n")
         header.push_str("define ptr @__rad_get_terminal_guard() {\nentry:\n  ret ptr @__rad_terminal_guard_buf\n}\n\n")
 
-        header.push_str("define void @__rad_sigreturn_trampoline() {\nentry:\n  call void asm sideeffect \"mov $$15, %rax\\0Asyscall\", \"\"()\n  ret void\n}\n\n")
+        if !str_starts_with(self.target.as_ptr() as str, "wasm32") {
+            header.push_str("define void @__rad_sigreturn_trampoline() {\nentry:\n  call void asm sideeffect \"mov $$15, %rax\\0Asyscall\", \"\"()\n  ret void\n}\n\n")
+        } else {
+            header.push_str("define void @__rad_sigreturn_trampoline() {\nentry:\n  ret void\n}\n\n")
+        }
 
         header.push_str("@.panic_bounds_fmt = private unnamed_addr constant [64 x i8] c\"rad runtime panic: index out of bounds: index %lld >= len %lld\\0A\\00\", align 1\n")
         header.push_str("define void @__rad_panic_bounds(i64 %idx, i64 %len) {\nentry:\n  call void @__rad_run_panic_hook()\n  %fmt = getelementptr inbounds [64 x i8], ptr @.panic_bounds_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt, i64 %idx, i64 %len)\n  call void @exit(i32 1)\n  ret void\n}\n\n")

@@ -1,0 +1,68 @@
+import std/kv
+
+fn main() -> i32 {
+    let db_path = "/tmp/test_sd_kv.db"
+    let _ = unlink(db_path)
+
+    let opt_store = KvStore.open(db_path)
+    match opt_store {
+        Option.Some(s) => {
+            var db = s
+            let _ = db.put("color", "blue")
+            let _ = db.put("speed", "fast")
+            let c1 = db.count()
+            println(f"Count: {c1}")
+
+            let v_col = db.get("color")
+            match v_col {
+                Option.Some(val) => {
+                    let s_val = val.as_ptr() as str
+                    println(f"color: {s_val}")
+                },
+                Option.None => println("color: none"),
+            }
+
+            let _ = db.delete("color")
+            let has_col = db.has("color")
+            println(f"has color: {has_col}")
+
+            let c2 = db.count()
+            println(f"Count after delete: {c2}")
+
+            let comp_ok = db.compact()
+            println(f"compact: {comp_ok}")
+
+            db.close()
+        },
+        Option.None => {
+            println("open failed")
+            return 1
+        },
+    }
+
+    // Reopen
+    let opt_store2 = KvStore.open(db_path)
+    match opt_store2 {
+        Option.Some(s2) => {
+            var db2 = s2
+            let c3 = db2.count()
+            println(f"reopen count: {c3}")
+            let v_spd = db2.get("speed")
+            match v_spd {
+                Option.Some(val) => {
+                    let s_val = val.as_ptr() as str
+                    println(f"speed: {s_val}")
+                },
+                Option.None => println("speed: none"),
+            }
+            db2.close()
+        },
+        Option.None => {
+            println("reopen failed")
+            return 1
+        },
+    }
+
+    let _ = unlink(db_path)
+    return 0
+}

@@ -33,7 +33,7 @@ fn run_cmd(cmd: str) -> i32 {
     return parsed
 }
 
-fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cmd: String, extra_objects: Vec<String>, strip_symbols: bool, enable_lto: bool) -> i32 {
+fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cmd: String, extra_objects: Vec<String>, strip_symbols: bool, enable_lto: bool, target_triple: String) -> i32 {
     let ir = ir_path.as_ptr() as str
     let out = out_path.as_ptr() as str
     let opt = opt_level.as_ptr() as str
@@ -83,12 +83,20 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
         opt_num = 3i32
     }
 
+    let is_wasm = str_starts_with(target_triple.as_ptr() as str, "wasm32")
+    var effective_target = "x86_64-unknown-linux-musl"
+    if is_wasm {
+        effective_target = "wasm32-unknown-unknown"
+    } else if target_triple.len() > 0usize && !str_eq(target_triple.as_ptr() as str, "x86_64-unknown-linux-gnu") {
+        effective_target = target_triple.as_ptr() as str
+    }
+
     let err_buf = malloc(2048usize) as *raw var u8
     var llc_status = 1i32
 
     // Primary: In-process LLVM code generation
     if ir_content.len() > 0usize {
-        llc_status = rad_llvm_emit_obj(ir_content.as_ptr() as str, ir_content.len(), obj_path.as_ptr() as str, opt_num, "x86_64-unknown-linux-musl", err_buf as *raw u8, 2048usize)
+        llc_status = rad_llvm_emit_obj(ir_content.as_ptr() as str, ir_content.len(), obj_path.as_ptr() as str, opt_num, effective_target, err_buf as *raw u8, 2048usize)
         if llc_status != 0 && str_len(err_buf as str) > 0usize {
             println(err_buf as str)
         }
@@ -117,6 +125,35 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
             llc_cmd_fb.push_str(" 2>/dev/null")
             llc_status = run_cmd(llc_cmd_fb.as_ptr() as str)
         }
+    }
+
+    // WebAssembly Linker Pipeline (wasm-ld / in-process LLD Wasm)
+    if is_wasm && llc_status == 0 {
+        var wasm_out = String.new()
+        wasm_out.push_str(out)
+        if !str_ends_with(out, ".wasm") {
+            wasm_out.push_str(".wasm")
+        }
+        var wasm_ld_cmd = String.new()
+        wasm_ld_cmd.push_str("wasm-ld --no-entry --export-all --allow-undefined --import-memory ")
+        if opt_num > 0 || str_eq(opt, "z") {
+            wasm_ld_cmd.push_str("--gc-sections ")
+        }
+        if strip_symbols || str_eq(opt, "z") {
+            wasm_ld_cmd.push_str("-s --strip-all ")
+        }
+        wasm_ld_cmd.push_str(obj_path.as_ptr() as str)
+        wasm_ld_cmd.push_str(extra_str.as_ptr() as str)
+        wasm_ld_cmd.push_str(" -o ")
+        wasm_ld_cmd.push_str(wasm_out.as_ptr() as str)
+
+        var status = rad_lld_link_str(wasm_ld_cmd.as_ptr() as str, err_buf as *raw u8, 2048usize)
+        if status != 0 {
+            status = run_cmd(wasm_ld_cmd.as_ptr() as str)
+        }
+        let _ = remove(obj_path.as_ptr() as str)
+        free(err_buf as *raw var u8)
+        return status
     }
 
     if llc_status == 0 {

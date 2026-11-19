@@ -11,6 +11,7 @@
 #include "lld/Common/Driver.h"
 
 LLD_HAS_DRIVER(elf)
+LLD_HAS_DRIVER(wasm)
 
 static bool g_llvm_initialized = false;
 
@@ -28,6 +29,12 @@ void rad_llvm_init() {
     LLVMInitializeX86AsmPrinter();
     LLVMInitializeX86AsmParser();
     LLVMInitializeX86Disassembler();
+    LLVMInitializeWebAssemblyTargetInfo();
+    LLVMInitializeWebAssemblyTarget();
+    LLVMInitializeWebAssemblyTargetMC();
+    LLVMInitializeWebAssemblyAsmPrinter();
+    LLVMInitializeWebAssemblyAsmParser();
+    LLVMInitializeWebAssemblyDisassembler();
     const char* lsr_args[] = {"radc", "-disable-lsr"};
     LLVMParseCommandLineOptions(2, lsr_args, "");
     g_llvm_initialized = true;
@@ -188,6 +195,8 @@ int rad_lld_link_str(const char* cmd_str, char* err_buf, size_t err_buf_len) {
     if (!current.empty()) storage.push_back(current);
     if (storage.empty()) return 1;
 
+    bool is_wasm = (storage[0] == "wasm-ld");
+
     // Ensure first argument is program name (e.g. "ld.lld")
     if (storage[0] == "rad-lld" || storage[0] == "ld.lld") {
         storage[0] = "ld.lld";
@@ -197,13 +206,39 @@ int rad_lld_link_str(const char* cmd_str, char* err_buf, size_t err_buf_len) {
         // Strip out shell redirects if present
         if (storage[i] == "2>/dev/null" || storage[i] == ">/dev/null") continue;
         // Strip out -flavor gnu if present, as lld::elf::link is already the GNU ELF driver
-        if (storage[i] == "-flavor") {
+        if (!is_wasm && storage[i] == "-flavor") {
             if (i + 1 < storage.size() && storage[i + 1] == "gnu") {
                 ++i;
                 continue;
             }
         }
         args.push_back(storage[i].c_str());
+    }
+
+    if (is_wasm) {
+        try {
+            std::string out_str, err_str;
+            llvm::raw_string_ostream os(out_str);
+            llvm::raw_string_ostream es(err_str);
+            bool ok = lld::wasm::link(args, os, es, false, false);
+            if (!ok) {
+                if (err_buf && err_buf_len > 0) {
+                    snprintf(err_buf, err_buf_len, "%s", err_str.c_str());
+                }
+                return 1;
+            }
+            return 0;
+        } catch (const std::exception& e) {
+            if (err_buf && err_buf_len > 0) {
+                snprintf(err_buf, err_buf_len, "LLD Wasm Exception: %s", e.what());
+            }
+            return 2;
+        } catch (...) {
+            if (err_buf && err_buf_len > 0) {
+                snprintf(err_buf, err_buf_len, "Unknown LLD Wasm Exception");
+            }
+            return 3;
+        }
     }
 
     return rad_lld_link((int)args.size(), args.data(), err_buf, err_buf_len);
