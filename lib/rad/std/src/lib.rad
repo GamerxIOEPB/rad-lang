@@ -24,3 +24,4 @@ pub import collections
 pub import regex
 pub import log
 pub import crypto
+pub import http

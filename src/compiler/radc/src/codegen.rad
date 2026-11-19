@@ -3214,13 +3214,26 @@ impl Codegen {
                     self.ir.push_str(int_to_str(sz as i32).as_ptr() as str)
                     self.ir.push_str(")\n")
 
+                    var src_ptr = r
+                    let src_vname = self.parser.exprs.ptr[init_expr].str_val.as_ptr() as str
+                    let src_is_ptr = str_eq(self.get_var_type(src_vname), "ptr")
+                    if !src_is_ptr {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = inttoptr i64 %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to ptr\n")
+                        src_ptr = cvt
+                    }
+
                     var f = 0usize
                     while f < num_f {
                         let gep_src = self.alloc_ssa()
                         self.ir.push_str("  %")
                         self.ir.push_str(int_to_str(gep_src).as_ptr() as str)
                         self.ir.push_str(" = getelementptr inbounds i64, ptr %")
-                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(int_to_str(src_ptr).as_ptr() as str)
                         self.ir.push_str(", i64 ")
                         self.ir.push_str(int_to_str(f as i32).as_ptr() as str)
                         self.ir.push_str("\n")
@@ -3252,7 +3265,10 @@ impl Codegen {
                     r = clone_reg
                 }
                 let llvm_ty = self.get_var_type(vname)
-                let init_is_ptr = self.is_expr_ptr(init_expr)
+                var init_is_ptr = self.is_expr_ptr(init_expr)
+                if self.is_struct_name(raw_ty) && ik == EXPR_IDENT {
+                    init_is_ptr = true
+                }
                 let init_is_float = self.is_expr_float(init_expr)
                 if str_eq(llvm_ty, "double") && !init_is_float {
                     let cvt = self.alloc_ssa()

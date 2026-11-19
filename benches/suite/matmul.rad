@@ -1,0 +1,59 @@
+// ==============================================================================
+// Benchmark: Matrix Multiplication (512x512)
+// ==============================================================================
+
+import std/time
+
+fn main() -> i32 {
+    let n = 512usize
+    let total_elements = n * n
+    let bytes = total_elements * 8usize
+
+    let a = malloc(bytes) as *raw var f64
+    let b = malloc(bytes) as *raw var f64
+    let c = malloc(bytes) as *raw var f64
+
+    // Initialize matrices
+    var i = 0usize
+    while i < total_elements {
+        a[i] = ((i % 100usize) as f64) * 0.01
+        b[i] = (((i + 50usize) % 100usize) as f64) * 0.01
+        c[i] = 0.0
+        i = i + 1usize
+    }
+
+    let t0 = Instant.now()
+
+    var row = 0usize
+    while row < n {
+        var col = 0usize
+        while col < n {
+            var sum = 0.0
+            var k = 0usize
+            while k < n {
+                sum = sum + a[row * n + k] * b[k * n + col]
+                k = k + 1usize
+            }
+            c[row * n + col] = sum
+            col = col + 1usize
+        }
+        row = row + 1usize
+    }
+
+    let elapsed_ms = t0.elapsed().as_millis()
+
+    // Compute checksum to verify correctness and prevent DCE
+    var checksum = 0.0
+    var ci = 0usize
+    while ci < total_elements {
+        checksum = checksum + c[ci]
+        ci = ci + 1024usize // Sample checksum
+    }
+
+    free(a as *raw var u8)
+    free(b as *raw var u8)
+    free(c as *raw var u8)
+
+    printf("RAD_MATMUL_RESULT: %llu ms (checksum: %lld)\n", elapsed_ms, checksum as i64)
+    return 0
+}

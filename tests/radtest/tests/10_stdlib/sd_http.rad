@@ -1,0 +1,87 @@
+import std/http
+
+fn main() -> i32 {
+    // 1. Test HttpRequest Parser
+    let raw_req = "GET /api/v1/users?id=42&sort=desc HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n{\"test\":true}"
+    var req: HttpRequest = HttpRequest.new()
+    match parse_http_request(raw_req) {
+        Option.Some(parsed) => {
+            req = parsed
+        },
+        Option.None => {
+            println("FAIL: parse_http_request returned None")
+            return 1
+        },
+    }
+
+    println(req.method.as_ptr() as str)
+    println(req.path.as_ptr() as str)
+    println(req.query.as_ptr() as str)
+
+    match req.get_query_param("id") {
+        Option.Some(v) => println(v.as_ptr() as str),
+        Option.None => {},
+    }
+
+    match req.get_query_param("sort") {
+        Option.Some(v) => println(v.as_ptr() as str),
+        Option.None => {},
+    }
+
+    match req.get_header("Host") {
+        Option.Some(v) => println(v.as_ptr() as str),
+        Option.None => {},
+    }
+
+    println(req.body.as_ptr() as str)
+
+    // 2. Test HttpResponse Constructors & Wire Format
+    var res_ok: HttpResponse = HttpResponse.ok("Hello from Rad HTTP")
+    println(res_ok.status_code)
+    println(res_ok.status_text.as_ptr() as str)
+    match res_ok.get_header("Content-Type") {
+        Option.Some(v) => println(v.as_ptr() as str),
+        Option.None => {},
+    }
+
+    var res_json: HttpResponse = HttpResponse.json("{\"server\":\"rad\",\"version\":\"0.2.4\"}")
+    println(res_json.status_code)
+    match res_json.get_header("Content-Length") {
+        Option.Some(v) => println(v.as_ptr() as str),
+        Option.None => {},
+    }
+
+    // 3. Test HttpResponse Parser
+    let raw_resp = "HTTP/1.1 200 OK\r\nServer: RadWeb/1.0\r\nContent-Length: 13\r\n\r\nHello, World!"
+    var parsed_resp: HttpResponse = HttpResponse.new(0, "")
+    match parse_http_response(raw_resp) {
+        Option.Some(res) => {
+            parsed_resp = res
+        },
+        Option.None => {
+            println("FAIL: parse_http_response returned None")
+            return 1
+        },
+    }
+
+    println(parsed_resp.status_code)
+    println(parsed_resp.status_text.as_ptr() as str)
+    match parsed_resp.get_header("Server") {
+        Option.Some(v) => println(v.as_ptr() as str),
+        Option.None => {},
+    }
+    println(parsed_resp.body.as_ptr() as str)
+
+    // 4. Test HttpRouter
+    var router: HttpRouter = HttpRouter.new()
+    router.get("/health", 1)
+    router.get("/api/v1/status", 2)
+    router.post("/api/v1/submit", 3)
+
+    println(router.match_route("GET", "/health"))
+    println(router.match_route("GET", "/api/v1/status"))
+    println(router.match_route("POST", "/api/v1/submit"))
+    println(router.match_route("GET", "/non_existent"))
+
+    return 0
+}

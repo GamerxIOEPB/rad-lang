@@ -643,14 +643,15 @@ fn handle_completion(id: i64, doc_text: String) {
     while li < lines.len {
         let l = lines.ptr[li].as_ptr() as str
         let t = trim_line_start(l)
+        let t_len = str_len(t)
         if str_starts_with(t, "fn ") {
             let p: *raw u8 = t as *raw u8
             var start = 3usize
-            while start < str_len(t) && is_whitespace_char(p[start]) {
+            while start < t_len && is_whitespace_char(p[start]) {
                 start = start + 1usize
             }
             var end = start
-            while end < str_len(t) && is_alnum_or_underscore(p[end]) {
+            while end < t_len && is_alnum_or_underscore(p[end]) {
                 end = end + 1usize
             }
             if end > start {
@@ -667,11 +668,11 @@ fn handle_completion(id: i64, doc_text: String) {
         } else if str_starts_with(t, "struct ") {
             let p: *raw u8 = t as *raw u8
             var start = 7usize
-            while start < str_len(t) && is_whitespace_char(p[start]) {
+            while start < t_len && is_whitespace_char(p[start]) {
                 start = start + 1usize
             }
             var end = start
-            while end < str_len(t) && is_alnum_or_underscore(p[end]) {
+            while end < t_len && is_alnum_or_underscore(p[end]) {
                 end = end + 1usize
             }
             if end > start {
@@ -713,12 +714,13 @@ fn handle_definition(id: i64, uri: str, doc_text: String, line: i64, col: i64) {
         if str_starts_with(t, "fn ") || str_starts_with(t, "pub fn ") || str_starts_with(t, "struct ") || str_starts_with(t, "pub struct ") || str_starts_with(t, "trait ") || str_starts_with(t, "pub trait ") || str_starts_with(t, "enum ") || str_starts_with(t, "pub enum ") || str_starts_with(t, "let ") || str_starts_with(t, "var ") || str_starts_with(t, "const ") {
             let p: *raw u8 = l as *raw u8
             let llen = str_len(l)
+            let slen = str_len(s)
             // Search s in line
             var match_idx = 0usize
-            while match_idx + str_len(s) <= llen {
+            while match_idx + slen <= llen {
                 var is_matched = true
                 var k = 0usize
-                while k < str_len(s) {
+                while k < slen {
                     if p[match_idx + k] != (s as *raw u8)[k] {
                         is_matched = false
                         break
@@ -788,11 +790,12 @@ fn handle_definition(id: i64, uri: str, doc_text: String, line: i64, col: i64) {
                         if str_starts_with(ot, "fn ") || str_starts_with(ot, "pub fn ") || str_starts_with(ot, "struct ") || str_starts_with(ot, "pub struct ") || str_starts_with(ot, "trait ") || str_starts_with(ot, "pub trait ") || str_starts_with(ot, "enum ") || str_starts_with(ot, "pub enum ") {
                             let op: *raw u8 = ol as *raw u8
                             let ollen = str_len(ol)
+                            let slen = str_len(s)
                             var omatch = 0usize
-                            while omatch + str_len(s) <= ollen {
+                            while omatch + slen <= ollen {
                                 var o_ok = true
                                 var ok = 0usize
-                                while ok < str_len(s) {
+                                while ok < slen {
                                     if op[omatch + ok] != (s as *raw u8)[ok] {
                                         o_ok = false
                                         break
@@ -952,12 +955,13 @@ fn handle_document_symbol(id: i64, doc_text: String) {
             }
 
             let p: *raw u8 = t as *raw u8
+            let t_len = str_len(t)
             var start = prefix_len
-            while start < str_len(t) && is_whitespace_char(p[start]) {
+            while start < t_len && is_whitespace_char(p[start]) {
                 start = start + 1usize
             }
             var end = start
-            while end < str_len(t) && is_alnum_or_underscore(p[end]) {
+            while end < t_len && is_alnum_or_underscore(p[end]) {
                 end = end + 1usize
             }
 

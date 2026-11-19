@@ -6,6 +6,8 @@
 #include "llvm-c/Target.h"
 #include "llvm-c/TargetMachine.h"
 #include "llvm-c/IRReader.h"
+#include "llvm-c/Support.h"
+#include "llvm-c/Transforms/PassBuilder.h"
 #include "lld/Common/Driver.h"
 
 LLD_HAS_DRIVER(elf)
@@ -26,6 +28,8 @@ void rad_llvm_init() {
     LLVMInitializeX86AsmPrinter();
     LLVMInitializeX86AsmParser();
     LLVMInitializeX86Disassembler();
+    const char* lsr_args[] = {"radc", "-disable-lsr"};
+    LLVMParseCommandLineOptions(2, lsr_args, "");
     g_llvm_initialized = true;
 }
 
@@ -70,10 +74,19 @@ int rad_llvm_emit_obj(const char* ir_str, size_t ir_len, const char* out_obj_pat
     }
 
     LLVMCodeGenOptLevel opt = LLVMCodeGenLevelDefault;
-    if (opt_level == 0) opt = LLVMCodeGenLevelNone;
-    else if (opt_level == 1) opt = LLVMCodeGenLevelLess;
-    else if (opt_level == 2) opt = LLVMCodeGenLevelDefault;
-    else if (opt_level >= 3) opt = LLVMCodeGenLevelAggressive;
+    const char* passes = nullptr;
+    if (opt_level == 0) {
+        opt = LLVMCodeGenLevelNone;
+    } else if (opt_level == 1) {
+        opt = LLVMCodeGenLevelLess;
+        passes = "default<O1>";
+    } else if (opt_level == 2) {
+        opt = LLVMCodeGenLevelDefault;
+        passes = "default<O2>";
+    } else if (opt_level >= 3) {
+        opt = LLVMCodeGenLevelAggressive;
+        passes = "default<O3>";
+    }
 
     LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
         target,
@@ -84,6 +97,25 @@ int rad_llvm_emit_obj(const char* ir_str, size_t ir_len, const char* out_obj_pat
         LLVMRelocPIC,
         LLVMCodeModelDefault
     );
+
+    if (passes) {
+        LLVMPassBuilderOptionsRef pb_opts = LLVMCreatePassBuilderOptions();
+        LLVMErrorRef pb_err = LLVMRunPasses(mod, passes, tm, pb_opts);
+        if (pb_err) {
+            char* pb_msg = LLVMGetErrorMessage(pb_err);
+            if (err_buf && err_buf_len > 0) {
+                snprintf(err_buf, err_buf_len, "%s", pb_msg ? pb_msg : "LLVM Pass Error");
+            }
+            LLVMDisposeErrorMessage(pb_msg);
+            LLVMDisposePassBuilderOptions(pb_opts);
+            LLVMDisposeTargetMachine(tm);
+            if (default_triple) LLVMDisposeMessage(default_triple);
+            LLVMDisposeModule(mod);
+            LLVMContextDispose(ctx);
+            return 1;
+        }
+        LLVMDisposePassBuilderOptions(pb_opts);
+    }
 
     if (LLVMTargetMachineEmitToFile(tm, mod, out_obj_path, LLVMObjectFile, &err_msg)) {
         if (err_buf && err_buf_len > 0) {

@@ -1,0 +1,20 @@
+GET
+/api/v1/users
+id=42&sort=desc
+42
+desc
+example.com
+{"test":true}
+200
+OK
+text/plain; charset=utf-8
+200
+34
+200
+OK
+RadWeb/1.0
+Hello, World!
+1
+2
+3
+-1

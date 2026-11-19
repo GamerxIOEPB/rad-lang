@@ -1,5 +1,10 @@
 // Rad Standard Library: I/O (Console and Streams)
 
+extern "C" {
+    fn read(fd: i32, buf: *raw var u8, count: usize) -> i64;
+    fn write(fd: i32, buf: *raw u8, count: usize) -> i64;
+}
+
 pub struct Stdin {}
 pub struct Stdout {}
 pub struct Stderr {}

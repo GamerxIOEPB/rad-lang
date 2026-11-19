@@ -19,3 +19,4 @@ extensions/vscode-rad/dist/*.map
 .DS_Store
 /lib/llvm
 target/
+benches/bin/

@@ -24,6 +24,8 @@ struct CompilerOptions {
     cli_json_format: bool,
     test_mode: bool,
     debug_info: bool,
+    strip_symbols: bool,
+    enable_lto: bool,
 }
 
 fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
@@ -41,6 +43,8 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
     var json_format = false
     var test_mode = false
     var debug_info = false
+    var strip_symbols = false
+    var enable_lto = false
 
     var i = 1usize
     let total = argc as usize
@@ -51,6 +55,13 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
             show_version = true
         } else if str_eq(arg, "-g") || str_eq(arg, "--debug") {
             debug_info = true
+        } else if str_eq(arg, "-s") || str_eq(arg, "--strip") {
+            strip_symbols = true
+        } else if str_eq(arg, "-flto") || str_eq(arg, "--lto") {
+            enable_lto = true
+        } else if str_eq(arg, "-Oz") || str_eq(arg, "-Os") {
+            opt_level = String.from_str("z")
+            strip_symbols = true
         } else if str_eq(arg, "-c") {
             compile_only = true
         } else if str_eq(arg, "-o") && i + 1usize < total {
@@ -160,6 +171,8 @@ fn parse_cli_args(argc: i32, argv: *raw *raw u8) -> CompilerOptions {
         cli_json_format: json_format,
         test_mode: test_mode,
         debug_info: debug_info,
+        strip_symbols: strip_symbols,
+        enable_lto: enable_lto,
     }
 }
 
@@ -507,7 +520,10 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  --test                       Enable test mode (compiles #[test] and #[cfg(test)])")
         println("  --color <auto|always|never>  Set ANSI terminal color mode (default: auto)")
         println("  --error-format=json          Emit structured JSON diagnostics")
-        println("  -O0, -O2, -O3                Set optimization level (default: -O2)")
+        println("  -O0, -O1, -O2, -O3, -Oz      Set optimization level (default: -O2)")
+        println("  -flto, --lto                 Enable link-time optimization (LTO)")
+        println("  -s, --strip                  Strip symbol and debug tables")
+        println("  -g, --debug                  Emit DWARF debug metadata")
         println("  --target <t>                 Target triple (default: x86_64-unknown-linux-gnu)")
         println("  --linker <cmd>               Custom linker command override")
         println("  -V, --version                Print compiler version")
@@ -880,7 +896,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         return 1
     }
 
-    let link_status = invoke_linker(tmp_ir_path, opts.output_path, opts.opt_level, opts.linker_cmd, opts.extra_objects)
+    let link_status = invoke_linker(tmp_ir_path, opts.output_path, opts.opt_level, opts.linker_cmd, opts.extra_objects, opts.strip_symbols, opts.enable_lto)
 
     // Clean up temporary LLVM IR
     let _ = remove(tmp_ir_path.as_ptr() as str)

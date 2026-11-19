@@ -1,0 +1,30 @@
+// ==============================================================================
+// Benchmark: SHA-256 Throughput
+// ==============================================================================
+
+import std/crypto
+import std/time
+
+fn main() -> i32 {
+    let iterations = 20000usize
+    let payload = "RadSystemsLanguage_HighPerformancePureCryptographicEngine2026"
+    
+    let t0 = Instant.now()
+    var i = 0usize
+    var last_hash = String.new()
+    while i < iterations {
+        last_hash = hash_sha256(payload)
+        i = i + 1usize
+    }
+    let elapsed_ms = t0.elapsed().as_millis()
+
+    // Calculate throughput: iterations * bytes
+    let total_bytes = iterations * 62usize
+    var mb_per_sec = 0.0
+    if elapsed_ms > 0u64 {
+        mb_per_sec = ((total_bytes as f64) / 1048576.0) / ((elapsed_ms as f64) / 1000.0)
+    }
+
+    printf("RAD_SHA256_RESULT: %llu ms (throughput: %.2f MB/s, last_hash: %.8s)\n", elapsed_ms, mb_per_sec, last_hash.as_ptr() as str)
+    return 0
+}

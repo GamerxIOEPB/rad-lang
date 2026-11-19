@@ -33,7 +33,7 @@ fn run_cmd(cmd: str) -> i32 {
     return parsed
 }
 
-fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cmd: String, extra_objects: Vec<String>) -> i32 {
+fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cmd: String, extra_objects: Vec<String>, strip_symbols: bool, enable_lto: bool) -> i32 {
     let ir = ir_path.as_ptr() as str
     let out = out_path.as_ptr() as str
     let opt = opt_level.as_ptr() as str
@@ -217,7 +217,17 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
             }
             ld_cmd.push_str("--end-group ")
             ld_cmd.push_str(sysroot.as_ptr() as str)
-            ld_cmd.push_str("/crt/crtn.o 2>/dev/null")
+            ld_cmd.push_str("/crt/crtn.o ")
+            if opt_num > 0 || str_eq(opt, "z") {
+                ld_cmd.push_str("--gc-sections ")
+            }
+            if strip_symbols || str_eq(opt, "z") {
+                ld_cmd.push_str("-s --strip-all ")
+            }
+            if enable_lto {
+                ld_cmd.push_str("--lto-O3 ")
+            }
+            ld_cmd.push_str("2>/dev/null")
 
             // Primary: In-process LLD linking
             var ld_status = rad_lld_link_str(ld_cmd.as_ptr() as str, err_buf as *raw u8, 2048usize)
@@ -253,7 +263,16 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
                     }
                     ld_cmd_fb.push_str("--end-group ")
                     ld_cmd_fb.push_str(sysroot.as_ptr() as str)
-                    ld_cmd_fb.push_str("/crt/crtn.o")
+                    ld_cmd_fb.push_str("/crt/crtn.o ")
+                    if opt_num > 0 || str_eq(opt, "z") {
+                        ld_cmd_fb.push_str("--gc-sections ")
+                    }
+                    if strip_symbols || str_eq(opt, "z") {
+                        ld_cmd_fb.push_str("-s --strip-all ")
+                    }
+                    if enable_lto {
+                        ld_cmd_fb.push_str("--lto-O3 ")
+                    }
                     ld_status = run_cmd(ld_cmd_fb.as_ptr() as str)
                 }
             }

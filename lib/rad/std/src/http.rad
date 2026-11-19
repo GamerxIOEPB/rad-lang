@@ -1,0 +1,709 @@
+// ==============================================================================
+// Rad Standard Library: HTTP/1.1 Engine (std::http)
+// Pure-Rad HTTP Request/Response parser, Router, Server, and Client.
+// Zero external C dynamic library dependencies.
+// ==============================================================================
+
+import std/net;
+
+pub struct HttpHeader {
+    pub name: String,
+    pub value: String,
+}
+
+pub struct HttpRequest {
+    pub method: String,
+    pub path: String,
+    pub query: String,
+    pub version: String,
+    pub header_names: Vec<String>,
+    pub header_values: Vec<String>,
+    pub body: String,
+}
+
+impl HttpRequest {
+    pub fn new() -> HttpRequest {
+        return HttpRequest {
+            method: String.from_str("GET"),
+            path: String.from_str("/"),
+            query: String.new(),
+            version: String.from_str("HTTP/1.1"),
+            header_names: Vec.new(),
+            header_values: Vec.new(),
+            body: String.new(),
+        }
+    }
+
+    pub fn get_header(self, name: str) -> Option<String> {
+        var i = 0usize
+        while i < self.header_names.len {
+            let hn = self.header_names.ptr[i].as_ptr() as str
+            if http_case_insensitive_eq(hn, name) {
+                return Option.Some(self.header_values.ptr[i])
+            }
+            i = i + 1usize
+        }
+        return Option.None
+    }
+
+    pub fn get_query_param(self, key: str) -> Option<String> {
+        let q = self.query.as_ptr() as str
+        let qlen = http_str_len(q)
+        let klen = http_str_len(key)
+        if qlen == 0usize || klen == 0usize {
+            return Option.None
+        }
+        let p = q as *raw u8
+        var i = 0usize
+        while i < qlen {
+            // Find key match at start or after '&'
+            var is_matched = false
+            if i == 0usize || p[i - 1usize] == 38u8 { // '&'
+                if i + klen <= qlen {
+                    var m = true
+                    var ki = 0usize
+                    while ki < klen {
+                        if p[i + ki] != (key as *raw u8)[ki] {
+                            m = false
+                            break
+                        }
+                        ki = ki + 1usize
+                    }
+                    if m && (i + klen == qlen || p[i + klen] == 61u8 || p[i + klen] == 38u8) { // '=' or '&'
+                        is_matched = true
+                    }
+                }
+            }
+            if is_matched {
+                let vstart = i + klen + 1usize
+                if vstart > qlen || p[i + klen] != 61u8 {
+                    return Option.Some(String.new())
+                }
+                var vend = vstart
+                while vend < qlen && p[vend] != 38u8 {
+                    vend = vend + 1usize
+                }
+                var val = String.new()
+                var vi = vstart
+                while vi < vend {
+                    val.push_byte(p[vi])
+                    vi = vi + 1usize
+                }
+                val.push_byte(0u8)
+                return Option.Some(val)
+            }
+            i = i + 1usize
+        }
+        return Option.None
+    }
+}
+
+pub struct HttpResponse {
+    pub status_code: i32,
+    pub status_text: String,
+    pub header_names: Vec<String>,
+    pub header_values: Vec<String>,
+    pub body: String,
+}
+
+impl HttpResponse {
+    pub fn new(code: i32, text: str) -> HttpResponse {
+        return HttpResponse {
+            status_code: code,
+            status_text: String.from_str(text),
+            header_names: Vec.new(),
+            header_values: Vec.new(),
+            body: String.new(),
+        }
+    }
+
+    pub fn ok(body_str: str) -> HttpResponse {
+        var res = HttpResponse.new(200, "OK")
+        res.body = String.from_str(body_str)
+        res.set_header("Content-Type", "text/plain; charset=utf-8")
+        res.set_header("Content-Length", http_int_to_str(http_str_len(body_str) as i64).as_ptr() as str)
+        return res
+    }
+
+    pub fn json(json_str: str) -> HttpResponse {
+        var res = HttpResponse.new(200, "OK")
+        res.body = String.from_str(json_str)
+        res.set_header("Content-Type", "application/json")
+        res.set_header("Content-Length", http_int_to_str(http_str_len(json_str) as i64).as_ptr() as str)
+        return res
+    }
+
+    pub fn html(html_str: str) -> HttpResponse {
+        var res = HttpResponse.new(200, "OK")
+        res.body = String.from_str(html_str)
+        res.set_header("Content-Type", "text/html; charset=utf-8")
+        res.set_header("Content-Length", http_int_to_str(http_str_len(html_str) as i64).as_ptr() as str)
+        return res
+    }
+
+    pub fn not_found() -> HttpResponse {
+        var res = HttpResponse.new(404, "Not Found")
+        let b = "404 Not Found"
+        res.body = String.from_str(b)
+        res.set_header("Content-Type", "text/plain")
+        res.set_header("Content-Length", http_int_to_str(http_str_len(b) as i64).as_ptr() as str)
+        return res
+    }
+
+    pub fn bad_request(msg: str) -> HttpResponse {
+        var res = HttpResponse.new(400, "Bad Request")
+        res.body = String.from_str(msg)
+        res.set_header("Content-Type", "text/plain")
+        res.set_header("Content-Length", http_int_to_str(http_str_len(msg) as i64).as_ptr() as str)
+        return res
+    }
+
+    pub fn internal_error(msg: str) -> HttpResponse {
+        var res = HttpResponse.new(500, "Internal Server Error")
+        res.body = String.from_str(msg)
+        res.set_header("Content-Type", "text/plain")
+        res.set_header("Content-Length", http_int_to_str(http_str_len(msg) as i64).as_ptr() as str)
+        return res
+    }
+
+    pub fn set_header(var self, name: str, value: str) {
+        var found = false
+        var i = 0usize
+        while i < self.header_names.len {
+            if http_case_insensitive_eq(self.header_names.ptr[i].as_ptr() as str, name) {
+                self.header_values.ptr[i] = String.from_str(value)
+                found = true
+                break
+            }
+            i = i + 1usize
+        }
+        if !found {
+            self.header_names.push(String.from_str(name))
+            self.header_values.push(String.from_str(value))
+        }
+    }
+
+    pub fn get_header(self, name: str) -> Option<String> {
+        var i = 0usize
+        while i < self.header_names.len {
+            if http_case_insensitive_eq(self.header_names.ptr[i].as_ptr() as str, name) {
+                return Option.Some(self.header_values.ptr[i])
+            }
+            i = i + 1usize
+        }
+        return Option.None
+    }
+
+    pub fn to_wire(self) -> String {
+        var wire = String.new()
+        wire.push_str("HTTP/1.1 ")
+        wire.push_str(http_int_to_str(self.status_code as i64).as_ptr() as str)
+        wire.push_str(" ")
+        wire.push_str(self.status_text.as_ptr() as str)
+        wire.push_str("\r\n")
+
+        var i = 0usize
+        while i < self.header_names.len {
+            wire.push_str(self.header_names.ptr[i].as_ptr() as str)
+            wire.push_str(": ")
+            wire.push_str(self.header_values.ptr[i].as_ptr() as str)
+            wire.push_str("\r\n")
+            i = i + 1usize
+        }
+        wire.push_str("\r\n")
+        if self.body.len() > 0usize {
+            wire.push_str(self.body.as_ptr() as str)
+        }
+        wire.push_byte(0u8)
+        return wire
+    }
+}
+
+// ------------------------------------------------------------------------------
+// HTTP Parsing Utilities
+// ------------------------------------------------------------------------------
+
+fn http_str_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn http_str_eq(a: str, b: str) -> bool {
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return pa[i] == 0u8 && pb[i] == 0u8
+}
+
+fn http_to_lower(c: u8) -> u8 {
+    if c >= 65u8 && c <= 90u8 {
+        return c + 32u8
+    }
+    return c
+}
+
+fn http_case_insensitive_eq(a: str, b: str) -> bool {
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if http_to_lower(pa[i]) != http_to_lower(pb[i]) {
+            return false
+        }
+        i = i + 1usize
+    }
+    return pa[i] == 0u8 && pb[i] == 0u8
+}
+
+fn http_int_to_str(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0")
+    }
+    var v = val
+    var is_neg = false
+    if v < 0i64 {
+        is_neg = true
+        v = -v
+    }
+    var rev = String.new()
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8
+        rev.push_byte(48u8 + digit)
+        v = v / 10i64
+    }
+    if is_neg {
+        rev.push_byte(45u8)
+    }
+    var res = String.new()
+    var len = rev.len()
+    let p = rev.as_ptr()
+    while len > 0usize {
+        len = len - 1usize
+        res.push_byte(p[len])
+    }
+    res.push_byte(0u8)
+    return res
+}
+
+fn http_str_to_int(s: str) -> i64 {
+    let p = s as *raw u8
+    let len = http_str_len(s)
+    var res = 0i64
+    var i = 0usize
+    while i < len && p[i] >= 48u8 && p[i] <= 57u8 {
+        res = res * 10i64 + ((p[i] - 48u8) as i64)
+        i = i + 1usize
+    }
+    return res
+}
+
+pub fn parse_http_request(raw: str) -> Option<HttpRequest> {
+    let total_len = http_str_len(raw)
+    if total_len < 10usize {
+        return Option.None
+    }
+    let p = raw as *raw u8
+    var pos = 0usize
+
+    // 1. Method
+    var method = String.new()
+    while pos < total_len && p[pos] != 32u8 && p[pos] != 13u8 && p[pos] != 10u8 {
+        method.push_byte(p[pos])
+        pos = pos + 1usize
+    }
+    method.push_byte(0u8)
+    if pos >= total_len || p[pos] != 32u8 {
+        return Option.None
+    }
+    pos = pos + 1usize // Skip ' '
+
+    // 2. Full Path (Path + optional '?' + Query)
+    var raw_target = String.new()
+    while pos < total_len && p[pos] != 32u8 && p[pos] != 13u8 && p[pos] != 10u8 {
+        raw_target.push_byte(p[pos])
+        pos = pos + 1usize
+    }
+    raw_target.push_byte(0u8)
+    if pos >= total_len || p[pos] != 32u8 {
+        return Option.None
+    }
+    pos = pos + 1usize // Skip ' '
+
+    // Split raw_target into path and query
+    var path = String.new()
+    var query = String.new()
+    let rt_p = raw_target.as_ptr()
+    let rt_len = raw_target.len()
+    var in_query = false
+    var rti = 0usize
+    while rti < rt_len {
+        let b = rt_p[rti]
+        if b == 0u8 {
+            break
+        }
+        if b == 63u8 && !in_query { // '?'
+            in_query = true
+        } else if in_query {
+            query.push_byte(b)
+        } else {
+            path.push_byte(b)
+        }
+        rti = rti + 1usize
+    }
+    path.push_byte(0u8)
+    query.push_byte(0u8)
+
+    // 3. HTTP Version
+    var version = String.new()
+    while pos < total_len && p[pos] != 13u8 && p[pos] != 10u8 {
+        version.push_byte(p[pos])
+        pos = pos + 1usize
+    }
+    version.push_byte(0u8)
+
+    // Skip \r\n after request line
+    if pos < total_len && p[pos] == 13u8 { pos = pos + 1usize }
+    if pos < total_len && p[pos] == 10u8 { pos = pos + 1usize }
+
+    // 4. Headers
+    var header_names = Vec.new()
+    var header_values = Vec.new()
+    while pos < total_len {
+        // Check for end of headers (\r\n or \n)
+        if p[pos] == 13u8 && pos + 1usize < total_len && p[pos + 1usize] == 10u8 {
+            pos = pos + 2usize
+            break
+        }
+        if p[pos] == 10u8 {
+            pos = pos + 1usize
+            break
+        }
+
+        // Header name
+        var h_name = String.new()
+        while pos < total_len && p[pos] != 58u8 && p[pos] != 13u8 && p[pos] != 10u8 {
+            h_name.push_byte(p[pos])
+            pos = pos + 1usize
+        }
+        h_name.push_byte(0u8)
+        if pos < total_len && p[pos] == 58u8 { // ':'
+            pos = pos + 1usize
+        }
+        // Skip leading whitespace in value
+        while pos < total_len && (p[pos] == 32u8 || p[pos] == 9u8) {
+            pos = pos + 1usize
+        }
+        // Header value
+        var h_val = String.new()
+        while pos < total_len && p[pos] != 13u8 && p[pos] != 10u8 {
+            h_val.push_byte(p[pos])
+            pos = pos + 1usize
+        }
+        h_val.push_byte(0u8)
+
+        if pos < total_len && p[pos] == 13u8 { pos = pos + 1usize }
+        if pos < total_len && p[pos] == 10u8 { pos = pos + 1usize }
+
+        if h_name.len() > 0usize {
+            header_names.push(h_name)
+            header_values.push(h_val)
+        }
+    }
+
+    // 5. Body
+    var body = String.new()
+    while pos < total_len {
+        body.push_byte(p[pos])
+        pos = pos + 1usize
+    }
+    body.push_byte(0u8)
+
+    return Option.Some(HttpRequest {
+        method: method,
+        path: path,
+        query: query,
+        version: version,
+        header_names: header_names,
+        header_values: header_values,
+        body: body,
+    })
+}
+
+pub fn parse_http_response(raw: str) -> Option<HttpResponse> {
+    let total_len = http_str_len(raw)
+    if total_len < 12usize {
+        return Option.None
+    }
+    let p = raw as *raw u8
+    var pos = 0usize
+
+    // Version
+    while pos < total_len && p[pos] != 32u8 {
+        pos = pos + 1usize
+    }
+    if pos >= total_len { return Option.None }
+    pos = pos + 1usize // Skip ' '
+
+    // Status code
+    var code_str = String.new()
+    while pos < total_len && p[pos] >= 48u8 && p[pos] <= 57u8 {
+        code_str.push_byte(p[pos])
+        pos = pos + 1usize
+    }
+    code_str.push_byte(0u8)
+    let status_code = http_str_to_int(code_str.as_ptr() as str) as i32
+    if pos < total_len && p[pos] == 32u8 { pos = pos + 1usize }
+
+    // Status text
+    var status_text = String.new()
+    while pos < total_len && p[pos] != 13u8 && p[pos] != 10u8 {
+        status_text.push_byte(p[pos])
+        pos = pos + 1usize
+    }
+    status_text.push_byte(0u8)
+
+    if pos < total_len && p[pos] == 13u8 { pos = pos + 1usize }
+    if pos < total_len && p[pos] == 10u8 { pos = pos + 1usize }
+
+    // Headers
+    var header_names = Vec.new()
+    var header_values = Vec.new()
+    while pos < total_len {
+        if p[pos] == 13u8 && pos + 1usize < total_len && p[pos + 1usize] == 10u8 {
+            pos = pos + 2usize
+            break
+        }
+        if p[pos] == 10u8 {
+            pos = pos + 1usize
+            break
+        }
+
+        var h_name = String.new()
+        while pos < total_len && p[pos] != 58u8 && p[pos] != 13u8 && p[pos] != 10u8 {
+            h_name.push_byte(p[pos])
+            pos = pos + 1usize
+        }
+        h_name.push_byte(0u8)
+        if pos < total_len && p[pos] == 58u8 { pos = pos + 1usize }
+        while pos < total_len && (p[pos] == 32u8 || p[pos] == 9u8) {
+            pos = pos + 1usize
+        }
+        var h_val = String.new()
+        while pos < total_len && p[pos] != 13u8 && p[pos] != 10u8 {
+            h_val.push_byte(p[pos])
+            pos = pos + 1usize
+        }
+        h_val.push_byte(0u8)
+
+        if pos < total_len && p[pos] == 13u8 { pos = pos + 1usize }
+        if pos < total_len && p[pos] == 10u8 { pos = pos + 1usize }
+
+        if h_name.len() > 0usize {
+            header_names.push(h_name)
+            header_values.push(h_val)
+        }
+    }
+
+    // Body
+    var body = String.new()
+    while pos < total_len {
+        body.push_byte(p[pos])
+        pos = pos + 1usize
+    }
+    body.push_byte(0u8)
+
+    return Option.Some(HttpResponse {
+        status_code: status_code,
+        status_text: status_text,
+        header_names: header_names,
+        header_values: header_values,
+        body: body,
+    })
+}
+
+// ------------------------------------------------------------------------------
+// HTTP Router
+// ------------------------------------------------------------------------------
+
+pub struct HttpRoute {
+    pub method: String,
+    pub path: String,
+    pub handler_id: i32,
+}
+
+pub struct HttpRouter {
+    pub routes: Vec<HttpRoute>,
+}
+
+impl HttpRouter {
+    pub fn new() -> HttpRouter {
+        return HttpRouter {
+            routes: Vec.new(),
+        }
+    }
+
+    pub fn get(var self, path: str, handler_id: i32) {
+        self.routes.push(HttpRoute {
+            method: String.from_str("GET"),
+            path: String.from_str(path),
+            handler_id: handler_id,
+        })
+    }
+
+    pub fn post(var self, path: str, handler_id: i32) {
+        self.routes.push(HttpRoute {
+            method: String.from_str("POST"),
+            path: String.from_str(path),
+            handler_id: handler_id,
+        })
+    }
+
+    pub fn match_route(self, method: str, path: str) -> i32 {
+        var i = 0usize
+        while i < self.routes.len {
+            let r = self.routes.ptr[i]
+            let m_eq = http_str_eq(r.method.as_ptr() as str, method)
+            let p_eq = http_str_eq(r.path.as_ptr() as str, path)
+            if m_eq && p_eq {
+                return r.handler_id
+            }
+            i = i + 1usize
+        }
+        return -1
+    }
+}
+
+// ------------------------------------------------------------------------------
+// HTTP Client
+// ------------------------------------------------------------------------------
+
+pub struct HttpClient {}
+
+impl HttpClient {
+    pub fn request(method: str, url: str, body: str, content_type: str) -> Option<HttpResponse> {
+        // Parse URL: http://host:port/path
+        let ulen = http_str_len(url)
+        if ulen < 7usize {
+            return Option.None
+        }
+        let p = url as *raw u8
+        var pos = 0usize
+        if p[0usize] == 104u8 && p[1usize] == 116u8 && p[2usize] == 116u8 && p[3usize] == 112u8 && p[4usize] == 58u8 && p[5usize] == 47u8 && p[6usize] == 47u8 {
+            pos = 7usize
+        }
+
+        var host = String.new()
+        while pos < ulen && p[pos] != 58u8 && p[pos] != 47u8 {
+            host.push_byte(p[pos])
+            pos = pos + 1usize
+        }
+        host.push_byte(0u8)
+
+        var port = 80u16
+        if pos < ulen && p[pos] == 58u8 { // ':'
+            pos = pos + 1usize
+            var port_str = String.new()
+            while pos < ulen && p[pos] >= 48u8 && p[pos] <= 57u8 {
+                port_str.push_byte(p[pos])
+                pos = pos + 1usize
+            }
+            port_str.push_byte(0u8)
+            let parsed_port = http_str_to_int(port_str.as_ptr() as str)
+            if parsed_port > 0i64 && parsed_port <= 65535i64 {
+                port = parsed_port as u16
+            }
+        }
+
+        var path = String.new()
+        if pos < ulen && p[pos] == 47u8 { // '/'
+            while pos < ulen {
+                path.push_byte(p[pos])
+                pos = pos + 1usize
+            }
+        } else {
+            path.push_str("/")
+        }
+        path.push_byte(0u8)
+
+        // Resolve host
+        var host_ip = String.from_str(host.as_ptr() as str)
+        if http_str_eq(host.as_ptr() as str, "localhost") {
+            host_ip = String.from_str("127.0.0.1")
+        }
+
+        var stream: TcpStream = TcpStream { fd: -1, is_connected: false }
+        match TcpStream.connect(host_ip.as_ptr() as str, port) {
+            Option.Some(s) => {
+                stream = s
+            },
+            Option.None => {
+                return Option.None
+            },
+        }
+
+        // Build wire request
+        var req = String.new()
+        req.push_str(method)
+        req.push_str(" ")
+        req.push_str(path.as_ptr() as str)
+        req.push_str(" HTTP/1.1\r\n")
+        req.push_str("Host: ")
+        req.push_str(host.as_ptr() as str)
+        req.push_str("\r\n")
+        req.push_str("Connection: close\r\n")
+
+        let blen = http_str_len(body)
+        if blen > 0usize {
+            if http_str_len(content_type) > 0usize {
+                req.push_str("Content-Type: ")
+                req.push_str(content_type)
+                req.push_str("\r\n")
+            }
+            req.push_str("Content-Length: ")
+            req.push_str(http_int_to_str(blen as i64).as_ptr() as str)
+            req.push_str("\r\n")
+        }
+        req.push_str("\r\n")
+        if blen > 0usize {
+            req.push_str(body)
+        }
+        req.push_byte(0u8)
+
+        let _ = stream.write_str(req.as_ptr() as str)
+
+        // Read response
+        let resp_buf = malloc(65536usize) as *raw var u8
+        let bytes_read = stream.read(resp_buf, 65535usize)
+        stream.close()
+
+        if bytes_read <= 0i64 {
+            free(resp_buf as *raw var u8)
+            return Option.None
+        }
+        resp_buf[bytes_read as usize] = 0u8
+        let parsed = parse_http_response(resp_buf as str)
+        free(resp_buf as *raw var u8)
+        return parsed
+    }
+
+    pub fn get(url: str) -> Option<HttpResponse> {
+        return HttpClient.request("GET", url, "", "")
+    }
+
+    pub fn post(url: str, content_type: str, body: str) -> Option<HttpResponse> {
+        return HttpClient.request("POST", url, body, content_type)
+    }
+}

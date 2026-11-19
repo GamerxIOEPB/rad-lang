@@ -1,0 +1,108 @@
+// ==============================================================================
+// Rad Micro Web Server Demo (Pure Native HTTP/1.1)
+// Built on std/http, std/net, and zero external C dependencies.
+// ==============================================================================
+
+import std/http
+
+fn handle_connection(var stream: TcpStream) {
+    let req_buf = malloc(16384usize) as *raw var u8
+    let bytes_read = stream.read(req_buf, 16383usize)
+    if bytes_read <= 0i64 {
+        free(req_buf as *raw var u8)
+        stream.close()
+        return
+    }
+    req_buf[bytes_read as usize] = 0u8
+
+    var resp: HttpResponse = HttpResponse.not_found()
+
+    let parsed_opt = parse_http_request(req_buf as str)
+    match parsed_opt {
+        Option.Some(req) => {
+            let method = req.method.as_ptr() as str
+            let path = req.path.as_ptr() as str
+
+            if http_str_eq(method, "GET") && (http_str_eq(path, "/") || http_str_eq(path, "/index.html")) {
+                let html_body = "<!DOCTYPE html><html><head><title>Rad HTTP Server</title><style>body{font-family:sans-serif;background:#0f172a;color:#f8fafc;padding:40px;}h1{color:#38bdf8;}code{background:#1e293b;padding:2px 6px;border-radius:4px;color:#a7f3d0;}</style></head><body><h1>⚡ Rad Native HTTP/1.1 Server</h1><p>Running in pure Rad with zero external dynamic libraries!</p><ul><li><a href=\"/health\" style=\"color:#38bdf8;\">/health</a> - Health check JSON</li><li><a href=\"/api/system\" style=\"color:#38bdf8;\">/api/system</a> - System info JSON</li></ul></body></html>"
+                resp = HttpResponse.html(html_body)
+            } else if http_str_eq(method, "GET") && http_str_eq(path, "/health") {
+                resp = HttpResponse.json("{\"status\":\"healthy\",\"engine\":\"pure-rad-http\",\"version\":\"0.2.4\"}")
+            } else if http_str_eq(method, "GET") && http_str_eq(path, "/api/system") {
+                resp = HttpResponse.json("{\"arch\":\"x86_64\",\"os\":\"linux\",\"toolchain\":\"radc-0.2.4\",\"lto\":true,\"pie\":true}")
+            } else if http_str_eq(method, "POST") && http_str_eq(path, "/api/echo") {
+                var json_echo = String.new()
+                json_echo.push_str("{\"echo\":")
+                if req.body.len() > 0usize {
+                    json_echo.push_str(req.body.as_ptr() as str)
+                } else {
+                    json_echo.push_str("\"(empty)\"")
+                }
+                json_echo.push_str("}")
+                json_echo.push_byte(0u8)
+                resp = HttpResponse.json(json_echo.as_ptr() as str)
+            } else {
+                resp = HttpResponse.not_found()
+            }
+        },
+        Option.None => {
+            resp = HttpResponse.bad_request("Malformed HTTP Request")
+        },
+    }
+
+    free(req_buf as *raw var u8)
+
+    resp.set_header("Server", "RadNative/0.2.4")
+    resp.set_header("Connection", "close")
+    let wire = resp.to_wire()
+    let _ = stream.write_str(wire.as_ptr() as str)
+    stream.close()
+}
+
+fn main(argc: i32, argv: *raw *raw u8) -> i32 {
+    let port = 8080u16
+    println("==================================================")
+    println("  Rad HTTP/1.1 Micro Server (Pure Native)")
+    println("  Listening on http://127.0.0.1:8080/")
+    println("==================================================")
+
+    var listener: TcpListener = TcpListener { fd: -1, is_bound: false }
+    let bind_opt = TcpListener.bind("127.0.0.1", port)
+    match bind_opt {
+        Option.Some(l) => {
+            listener = l
+        },
+        Option.None => {
+            println("error: failed to bind socket on port 8080")
+            return 1
+        },
+    }
+
+    // Check if one-shot test flag is passed
+    var one_shot = false
+    if argc > 1 {
+        let arg1 = argv[1usize] as str
+        if http_str_eq(arg1, "--test-one") {
+            one_shot = true
+        }
+    }
+
+    var running = true
+    while running {
+        let conn_opt = listener.accept()
+        match conn_opt {
+            Option.Some(stream) => {
+                handle_connection(stream)
+                if one_shot {
+                    running = false
+                }
+            },
+            Option.None => {
+                running = false
+            },
+        }
+    }
+
+    listener.close()
+    return 0
+}
