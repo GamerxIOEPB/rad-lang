@@ -1,0 +1,569 @@
+// ==============================================================================
+// Rad Standard Library: Native Object File & Linker Backend (std::elf)
+// Relocatable ELF64 generation, symbol resolution, relocation engine & AST caching.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+fn str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+pub const ELFCLASS64: u8    = 2u8
+pub const ELFDATA2LSB: u8   = 1u8
+pub const EV_CURRENT: u8    = 1u8
+pub const ET_REL: u16       = 1u16
+pub const ET_EXEC: u16      = 2u16
+pub const EM_X86_64: u16    = 62u16
+
+pub const SHT_NULL: u32     = 0u32
+pub const SHT_PROGBITS: u32 = 1u32
+pub const SHT_SYMTAB: u32   = 2u32
+pub const SHT_STRTAB: u32   = 3u32
+pub const SHT_RELA: u32     = 4u32
+pub const SHT_NOBITS: u32   = 8u32
+
+pub const SHF_WRITE: u64     = 1u64
+pub const SHF_ALLOC: u64     = 2u64
+pub const SHF_EXECINSTR: u64 = 4u64
+
+pub const R_X86_64_NONE: u32  = 0u32
+pub const R_X86_64_64: u32    = 1u32
+pub const R_X86_64_PC32: u32  = 2u32
+pub const R_X86_64_PLT32: u32 = 4u32
+pub const R_X86_64_32S: u32   = 11u32
+
+pub const STB_LOCAL: u8  = 0u8
+pub const STB_GLOBAL: u8 = 1u8
+pub const STB_WEAK: u8   = 2u8
+
+pub const STT_NOTYPE: u8  = 0u8
+pub const STT_OBJECT: u8  = 1u8
+pub const STT_FUNC: u8    = 2u8
+pub const STT_SECTION: u8 = 3u8
+
+extern "C" {
+    fn fopen(filename: *raw u8, mode: *raw u8) -> *raw var u8;
+    fn fwrite(ptr: *raw u8, size: usize, count: usize, stream: *raw var u8) -> usize;
+    fn fclose(stream: *raw var u8) -> i32;
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+pub struct ElfSymbol {
+    pub name: String,
+    pub value: u64,
+    pub size: u64,
+    pub bind: u8,
+    pub sym_type: u8,
+    pub shndx: u16,
+}
+
+pub struct ElfRelocation {
+    pub offset: u64,
+    pub sym_idx: u32,
+    pub rel_type: u32,
+    pub addend: i64,
+}
+
+pub struct ElfSection {
+    pub name: String,
+    pub sec_type: u32,
+    pub flags: u64,
+    pub addr: u64,
+    pub offset: u64,
+    pub size: u64,
+    pub link: u32,
+    pub info: u32,
+    pub addralign: u64,
+    pub entsize: u64,
+    pub data: Vec<u8>,
+}
+
+impl ElfSection {
+    pub fn new(name: str, sec_type: u32, flags: u64, align: u64) -> ElfSection {
+        return ElfSection {
+            name: String.from_str(name),
+            sec_type: sec_type,
+            flags: flags,
+            addr: 0u64,
+            offset: 0u64,
+            size: 0u64,
+            link: 0u32,
+            info: 0u32,
+            addralign: align,
+            entsize: 0u64,
+            data: Vec.new(),
+        }
+    }
+}
+
+pub struct ElfBuilder {
+    pub sections: Vec<ElfSection>,
+    pub symbols: Vec<ElfSymbol>,
+    pub relocations: Vec<ElfRelocation>,
+}
+
+fn push_u16_le(var buf: Vec<u8>, val: u16) {
+    buf.push((val & 0xFFu16) as u8)
+    buf.push(((val >> 8u16) & 0xFFu16) as u8)
+}
+
+fn push_u32_le(var buf: Vec<u8>, val: u32) {
+    buf.push((val & 0xFFu32) as u8)
+    buf.push(((val >> 8u32) & 0xFFu32) as u8)
+    buf.push(((val >> 16u32) & 0xFFu32) as u8)
+    buf.push(((val >> 24u32) & 0xFFu32) as u8)
+}
+
+fn push_u64_le(var buf: Vec<u8>, val: u64) {
+    buf.push((val & 0xFFu64) as u8)
+    buf.push(((val >> 8u64) & 0xFFu64) as u8)
+    buf.push(((val >> 16u64) & 0xFFu64) as u8)
+    buf.push(((val >> 24u64) & 0xFFu64) as u8)
+    buf.push(((val >> 32u64) & 0xFFu64) as u8)
+    buf.push(((val >> 40u64) & 0xFFu64) as u8)
+    buf.push(((val >> 48u64) & 0xFFu64) as u8)
+    buf.push(((val >> 56u64) & 0xFFu64) as u8)
+}
+
+impl ElfBuilder {
+    pub fn new() -> ElfBuilder {
+        var b = ElfBuilder {
+            sections: Vec.new(),
+            symbols: Vec.new(),
+            relocations: Vec.new(),
+        }
+        // Section 0 is always SHT_NULL
+        b.sections.push(ElfSection::new("", SHT_NULL, 0u64, 0u64))
+        // Symbol 0 is always undefined
+        b.symbols.push(ElfSymbol {
+            name: String.new(),
+            value: 0u64,
+            size: 0u64,
+            bind: STB_LOCAL,
+            sym_type: STT_NOTYPE,
+            shndx: 0u16,
+        })
+        return b
+    }
+
+    pub fn add_section(var self, name: str, sec_type: u32, flags: u64, align: u64) -> usize {
+        let idx = self.sections.len
+        self.sections.push(ElfSection::new(name, sec_type, flags, align))
+        return idx
+    }
+
+    pub fn append_byte(var self, sec_idx: usize, b: u8) {
+        if sec_idx < self.sections.len {
+            self.sections.ptr[sec_idx].data.push(b)
+        }
+    }
+
+    pub fn append_bytes(var self, sec_idx: usize, bytes: Vec<u8>) {
+        if sec_idx < self.sections.len {
+            var i = 0usize
+            while i < bytes.len {
+                self.sections.ptr[sec_idx].data.push(bytes.ptr[i])
+                i = i + 1usize
+            }
+        }
+    }
+
+    pub fn add_symbol(var self, name: str, value: u64, size: u64, bind: u8, sym_type: u8, shndx: u16) -> usize {
+        let idx = self.symbols.len
+        self.symbols.push(ElfSymbol {
+            name: String.from_str(name),
+            value: value,
+            size: size,
+            bind: bind,
+            sym_type: sym_type,
+            shndx: shndx,
+        })
+        return idx
+    }
+
+    pub fn add_relocation(var self, offset: u64, sym_idx: u32, rel_type: u32, addend: i64) {
+        self.relocations.push(ElfRelocation {
+            offset: offset,
+            sym_idx: sym_idx,
+            rel_type: rel_type,
+            addend: addend,
+        })
+    }
+
+    pub fn emit_object(var self) -> Vec<u8> {
+        // Build .shstrtab (section name string table)
+        var shstrtab = Vec.new()
+        shstrtab.push(0u8)
+        var sh_name_offsets = Vec.new()
+        sh_name_offsets.push(0u32) // section 0 has name ""
+
+        var si = 1usize
+        while si < self.sections.len {
+            let offset = shstrtab.len as u32
+            sh_name_offsets.push(offset)
+            let sname = self.sections.ptr[si].name.as_ptr() as *raw u8
+            let slen = self.sections.ptr[si].name.len()
+            var j = 0usize
+            while j < slen {
+                shstrtab.push(sname[j])
+                j = j + 1usize
+            }
+            shstrtab.push(0u8)
+            si = si + 1usize
+        }
+
+        // Add .shstrtab section index name offset
+        let shstrtab_name_offset = shstrtab.len as u32
+        let sh_str = ".shstrtab"
+        let sh_p = sh_str as *raw u8
+        var sj = 0usize
+        while sj < 9usize {
+            shstrtab.push(sh_p[sj])
+            sj = sj + 1usize
+        }
+        shstrtab.push(0u8)
+
+        // Add .strtab section index name offset
+        let strtab_name_offset = shstrtab.len as u32
+        let st_str = ".strtab"
+        let st_p = st_str as *raw u8
+        sj = 0usize
+        while sj < 7usize {
+            shstrtab.push(st_p[sj])
+            sj = sj + 1usize
+        }
+        shstrtab.push(0u8)
+
+        // Add .symtab section index name offset
+        let symtab_name_offset = shstrtab.len as u32
+        let sy_str = ".symtab"
+        let sy_p = sy_str as *raw u8
+        sj = 0usize
+        while sj < 7usize {
+            shstrtab.push(sy_p[sj])
+            sj = sj + 1usize
+        }
+        shstrtab.push(0u8)
+
+        // Build .strtab (symbol string table)
+        var strtab = Vec.new()
+        strtab.push(0u8)
+        var sym_name_offsets = Vec.new()
+        sym_name_offsets.push(0u32) // symbol 0
+
+        var sym_i = 1usize
+        while sym_i < self.symbols.len {
+            let offset = strtab.len as u32
+            sym_name_offsets.push(offset)
+            let sname = self.symbols.ptr[sym_i].name.as_ptr() as *raw u8
+            let slen = self.symbols.ptr[sym_i].name.len()
+            var k = 0usize
+            while k < slen {
+                strtab.push(sname[k])
+                k = k + 1usize
+            }
+            strtab.push(0u8)
+            sym_i = sym_i + 1usize
+        }
+
+        // Build .symtab binary data (24 bytes per Elf64_Sym)
+        var symtab_data = Vec.new()
+        var s_idx = 0usize
+        while s_idx < self.symbols.len {
+            push_u32_le(symtab_data, sym_name_offsets.ptr[s_idx]) // st_name
+            let info = (self.symbols.ptr[s_idx].bind << 4u8) | (self.symbols.ptr[s_idx].sym_type & 0x0Fu8)
+            symtab_data.push(info)                                // st_info
+            symtab_data.push(0u8)                                 // st_other
+            push_u16_le(symtab_data, self.symbols.ptr[s_idx].shndx) // st_shndx
+            push_u64_le(symtab_data, self.symbols.ptr[s_idx].value) // st_value
+            push_u64_le(symtab_data, self.symbols.ptr[s_idx].size)  // st_size
+            s_idx = s_idx + 1usize
+        }
+
+        // Calculate layout
+        // Ehdr: 64 bytes
+        var file_offset = 64u64
+
+        // Section data offsets
+        var sec_offsets = Vec.new()
+        sec_offsets.push(0u64) // NULL section
+
+        si = 1usize
+        while si < self.sections.len {
+            let align = self.sections.ptr[si].addralign
+            if align > 1u64 {
+                let rem = file_offset % align
+                if rem != 0u64 {
+                    file_offset = file_offset + (align - rem)
+                }
+            }
+            sec_offsets.push(file_offset)
+            file_offset = file_offset + (self.sections.ptr[si].data.len as u64)
+            si = si + 1usize
+        }
+
+        // .symtab offset
+        let symtab_offset = file_offset
+        file_offset = file_offset + (symtab_data.len as u64)
+
+        // .strtab offset
+        let strtab_offset = file_offset
+        file_offset = file_offset + (strtab.len as u64)
+
+        // .shstrtab offset
+        let shstrtab_offset = file_offset
+        file_offset = file_offset + (shstrtab.len as u64)
+
+        // Align for Shdr table (8-byte aligned)
+        let shdr_rem = file_offset % 8u64
+        if shdr_rem != 0u64 {
+            file_offset = file_offset + (8u64 - shdr_rem)
+        }
+        let shoff = file_offset
+
+        // Total sections = user sections + .symtab + .strtab + .shstrtab
+        let symtab_sec_idx = self.sections.len as u16
+        let strtab_sec_idx = (self.sections.len + 1usize) as u16
+        let shstrtab_sec_idx = (self.sections.len + 2usize) as u16
+        let total_shnum = (self.sections.len + 3usize) as u16
+
+        // Emit ELF64 binary image
+        var img = Vec.new()
+
+        // 1. Elf64_Ehdr (64 bytes)
+        img.push(0x7Fu8)
+        img.push(69u8) // 'E'
+        img.push(76u8) // 'L'
+        img.push(70u8) // 'F'
+        img.push(ELFCLASS64)
+        img.push(ELFDATA2LSB)
+        img.push(EV_CURRENT)
+        img.push(0u8) // ABI
+        var pad = 0usize
+        while pad < 8usize {
+            img.push(0u8)
+            pad = pad + 1usize
+        }
+        push_u16_le(img, ET_REL)      // e_type = ET_REL (1)
+        push_u16_le(img, EM_X86_64)   // e_machine = EM_X86_64 (62)
+        push_u32_le(img, 1u32)        // e_version = 1
+        push_u64_le(img, 0u64)        // e_entry = 0
+        push_u64_le(img, 0u64)        // e_phoff = 0
+        push_u64_le(img, shoff)       // e_shoff
+        push_u32_le(img, 0u32)        // e_flags = 0
+        push_u16_le(img, 64u16)       // e_ehsize = 64
+        push_u16_le(img, 0u16)        // e_phentsize = 0
+        push_u16_le(img, 0u16)        // e_phnum = 0
+        push_u16_le(img, 64u16)       // e_shentsize = 64
+        push_u16_le(img, total_shnum) // e_shnum
+        push_u16_le(img, shstrtab_sec_idx) // e_shstrndx
+
+        // 2. Append Section Data
+        si = 1usize
+        while si < self.sections.len {
+            while (img.len as u64) < sec_offsets.ptr[si] {
+                img.push(0u8)
+            }
+            var di = 0usize
+            while di < self.sections.ptr[si].data.len {
+                img.push(self.sections.ptr[si].data.ptr[di])
+                di = di + 1usize
+            }
+            si = si + 1usize
+        }
+
+        // 3. Append .symtab
+        while (img.len as u64) < symtab_offset {
+            img.push(0u8)
+        }
+        var sdi = 0usize
+        while sdi < symtab_data.len {
+            img.push(symtab_data.ptr[sdi])
+            sdi = sdi + 1usize
+        }
+
+        // 4. Append .strtab
+        while (img.len as u64) < strtab_offset {
+            img.push(0u8)
+        }
+        var sti = 0usize
+        while sti < strtab.len {
+            img.push(strtab.ptr[sti])
+            sti = sti + 1usize
+        }
+
+        // 5. Append .shstrtab
+        while (img.len as u64) < shstrtab_offset {
+            img.push(0u8)
+        }
+        var sht_i = 0usize
+        while sht_i < shstrtab.len {
+            img.push(shstrtab.ptr[sht_i])
+            sht_i = sht_i + 1usize
+        }
+
+        // Align for Shdr table
+        while (img.len as u64) < shoff {
+            img.push(0u8)
+        }
+
+        // 6. Section Header Table (Elf64_Shdr entries, 64 bytes each)
+        // Null section (index 0)
+        var z = 0usize
+        while z < 64usize {
+            img.push(0u8)
+            z = z + 1usize
+        }
+
+        // User sections
+        si = 1usize
+        while si < self.sections.len {
+            push_u32_le(img, sh_name_offsets.ptr[si])         // sh_name
+            push_u32_le(img, self.sections.ptr[si].sec_type)  // sh_type
+            push_u64_le(img, self.sections.ptr[si].flags)     // sh_flags
+            push_u64_le(img, 0u64)                            // sh_addr
+            push_u64_le(img, sec_offsets.ptr[si])             // sh_offset
+            push_u64_le(img, self.sections.ptr[si].data.len as u64) // sh_size
+            push_u32_le(img, self.sections.ptr[si].link)      // sh_link
+            push_u32_le(img, self.sections.ptr[si].info)      // sh_info
+            push_u64_le(img, self.sections.ptr[si].addralign) // sh_addralign
+            push_u64_le(img, self.sections.ptr[si].entsize)   // sh_entsize
+            si = si + 1usize
+        }
+
+        // .symtab header
+        push_u32_le(img, symtab_name_offset)                  // sh_name
+        push_u32_le(img, SHT_SYMTAB)                          // sh_type
+        push_u64_le(img, 0u64)                                // sh_flags
+        push_u64_le(img, 0u64)                                // sh_addr
+        push_u64_le(img, symtab_offset)                       // sh_offset
+        push_u64_le(img, symtab_data.len as u64)              // sh_size
+        push_u32_le(img, strtab_sec_idx as u32)               // sh_link -> .strtab index
+        push_u32_le(img, 1u32)                                // sh_info -> first non-local sym
+        push_u64_le(img, 8u64)                                // sh_addralign
+        push_u64_le(img, 24u64)                               // sh_entsize = 24 bytes (sizeof(Elf64_Sym))
+
+        // .strtab header
+        push_u32_le(img, strtab_name_offset)                  // sh_name
+        push_u32_le(img, SHT_STRTAB)                          // sh_type
+        push_u64_le(img, 0u64)                                // sh_flags
+        push_u64_le(img, 0u64)                                // sh_addr
+        push_u64_le(img, strtab_offset)                       // sh_offset
+        push_u64_le(img, strtab.len as u64)                   // sh_size
+        push_u32_le(img, 0u32)                                // sh_link
+        push_u32_le(img, 0u32)                                // sh_info
+        push_u64_le(img, 1u64)                                // sh_addralign
+        push_u64_le(img, 0u64)                                // sh_entsize
+
+        // .shstrtab header
+        push_u32_le(img, shstrtab_name_offset)                // sh_name
+        push_u32_le(img, SHT_STRTAB)                          // sh_type
+        push_u64_le(img, 0u64)                                // sh_flags
+        push_u64_le(img, 0u64)                                // sh_addr
+        push_u64_le(img, shstrtab_offset)                     // sh_offset
+        push_u64_le(img, shstrtab.len as u64)                 // sh_size
+        push_u32_le(img, 0u32)                                // sh_link
+        push_u32_le(img, 0u32)                                // sh_info
+        push_u64_le(img, 1u64)                                // sh_addralign
+        push_u64_le(img, 0u64)                                // sh_entsize
+
+        return img
+    }
+
+    pub fn write_file(var self, path: str) -> bool {
+        let bytes = self.emit_object()
+        let f = fopen(path as *raw u8, "wb" as *raw u8)
+        if (f as usize) == 0usize {
+            return false
+        }
+        let raw_buf = malloc(bytes.len)
+        var i = 0usize
+        while i < bytes.len {
+            raw_buf[i] = bytes.ptr[i] as u8
+            i = i + 1usize
+        }
+        let written = fwrite(raw_buf as *raw u8, 1usize, bytes.len, f)
+        fclose(f)
+        free(raw_buf)
+        return written == bytes.len
+    }
+}
+
+// In-Memory Symbol Resolution & Relocation Engine
+pub struct ElfLinker {}
+
+impl ElfLinker {
+    pub fn resolve_and_relocate(target: var ElfBuilder, sec_idx: usize, base_vaddr: u64) -> bool {
+        if sec_idx >= target.sections.len {
+            return false
+        }
+        var i = 0usize
+        while i < target.relocations.len {
+            let rel = target.relocations.ptr[i]
+            let offset = rel.offset as usize
+            if offset + 4usize > target.sections.ptr[sec_idx].data.len {
+                return false
+            }
+
+            let sym_idx = rel.sym_idx as usize
+            if sym_idx >= target.symbols.len {
+                return false
+            }
+            let s_val = target.symbols.ptr[sym_idx].value
+            let a_val = rel.addend
+
+            if rel.rel_type == R_X86_64_64 {
+                // S + A (64-bit absolute)
+                if offset + 8usize > target.sections.ptr[sec_idx].data.len {
+                    return false
+                }
+                let res = (s_val as i64 + a_val) as u64
+                let dp = target.sections.ptr[sec_idx].data.ptr
+                dp[offset] = (res & 0xFFu64) as u8
+                dp[offset + 1usize] = ((res >> 8u64) & 0xFFu64) as u8
+                dp[offset + 2usize] = ((res >> 16u64) & 0xFFu64) as u8
+                dp[offset + 3usize] = ((res >> 24u64) & 0xFFu64) as u8
+                dp[offset + 4usize] = ((res >> 32u64) & 0xFFu64) as u8
+                dp[offset + 5usize] = ((res >> 40u64) & 0xFFu64) as u8
+                dp[offset + 6usize] = ((res >> 48u64) & 0xFFu64) as u8
+                dp[offset + 7usize] = ((res >> 56u64) & 0xFFu64) as u8
+            } else if rel.rel_type == R_X86_64_PC32 || rel.rel_type == R_X86_64_PLT32 {
+                // S + A - P (32-bit PC-relative)
+                let p_val = base_vaddr + (offset as u64)
+                let res = ((s_val as i64 + a_val) - (p_val as i64)) as u32
+                let dp = target.sections.ptr[sec_idx].data.ptr
+                dp[offset] = (res & 0xFFu32) as u8
+                dp[offset + 1usize] = ((res >> 8u32) & 0xFFu32) as u8
+                dp[offset + 2usize] = ((res >> 16u32) & 0xFFu32) as u8
+                dp[offset + 3usize] = ((res >> 24u32) & 0xFFu32) as u8
+            }
+            i = i + 1usize
+        }
+        return true
+    }
+}
+
+// Instantaneous Incremental AST Hash Caching
+pub struct AstHashCache {}
+
+impl AstHashCache {
+    pub fn hash_source(source: str) -> u64 {
+        // 64-bit FNV-1a hash
+        var hash = 14695981039346656037u64
+        let p = source as *raw u8
+        let len = str_len(source)
+        var i = 0usize
+        while i < len {
+            hash = hash ^ (p[i] as u64)
+            hash = hash * 1099511628211u64
+            i = i + 1usize
+        }
+        return hash
+    }
+}

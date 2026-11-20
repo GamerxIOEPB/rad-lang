@@ -802,6 +802,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         loop_end_labels: Vec.new(),
         current_func_idx: 0usize,
         active_defers: Vec.new(),
+        active_drops_var: Vec.new(),
+        active_drops_type: Vec.new(),
         debug_info: opts.debug_info,
         source_file: main_src,
     }

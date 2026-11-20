@@ -51,6 +51,7 @@ const TOK_TRAIT: i32 = 71      // trait
 const TOK_DYN: i32 = 72        // dyn
 const TOK_ASYNC: i32 = 73      // async
 const TOK_AWAIT: i32 = 74      // await
+const TOK_ACTOR: i32 = 75      // actor
 
 // Operators
 const TOK_PLUS: i32 = 50      // +
@@ -302,6 +303,8 @@ fn lex_source(src: String) -> Vec<Token> {
                     k = TOK_ASYNC
                 } else if str_eq(s, "await") {
                     k = TOK_AWAIT
+                } else if str_eq(s, "actor") {
+                    k = TOK_ACTOR
                 }
 
                 let tok_len = (cur_col - tok_col) as i64

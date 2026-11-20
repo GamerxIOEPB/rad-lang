@@ -1,0 +1,187 @@
+// ==============================================================================
+// Rad Standard Library: Automatic Reference Counting & Destructors (std::arc)
+// Atomic reference counting (Arc<T>, Weak<T>), deterministic RAII cleanup.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+    fn close(fd: i32) -> i32;
+    fn atomic_load_i64(ptr: *raw i64) -> i64;
+    fn atomic_store_i64(ptr: *raw var i64, val: i64);
+    fn atomic_fetch_add_i64(ptr: *raw var i64, val: i64) -> i64;
+    fn atomic_fetch_sub_i64(ptr: *raw var i64, val: i64) -> i64;
+    fn atomic_compare_exchange_i64(ptr: *raw var i64, expected: i64, desired: i64) -> i64;
+}
+
+// Memory layout of ArcInner:
+// [0..7]:   strong_count (i64, atomic)
+// [8..15]:  weak_count   (i64, atomic)
+// [16..23]: val_i64      (i64)
+// [24..31]: val_str_ptr  (ptr to String / bytes)
+
+pub struct Arc {
+    pub ptr: *raw var u8,
+}
+
+impl Arc {
+    pub fn new(val: i64) -> Arc {
+        let p = malloc(32usize)
+        let strong_p = p as *raw var i64
+        let weak_p = (p as usize + 8usize) as *raw var i64
+        let val_p = (p as usize + 16usize) as *raw var i64
+        let str_p = (p as usize + 24usize) as *raw var usize
+
+        atomic_store_i64(strong_p, 1i64)
+        atomic_store_i64(weak_p, 0i64)
+        atomic_store_i64(val_p, val)
+        atomic_store_i64(str_p as *raw var i64, 0i64)
+
+        return Arc { ptr: p }
+    }
+
+    pub fn clone(self) -> Arc {
+        if (self.ptr as usize) == 0usize {
+            return Arc { ptr: self.ptr }
+        }
+        let strong_p = self.ptr as *raw var i64
+        atomic_fetch_add_i64(strong_p, 1i64)
+        return Arc { ptr: self.ptr }
+    }
+
+    pub fn strong_count(self) -> i64 {
+        if (self.ptr as usize) == 0usize {
+            return 0i64
+        }
+        let strong_p = self.ptr as *raw i64
+        return atomic_load_i64(strong_p)
+    }
+
+    pub fn weak_count(self) -> i64 {
+        if (self.ptr as usize) == 0usize {
+            return 0i64
+        }
+        let weak_p = (self.ptr as usize + 8usize) as *raw i64
+        return atomic_load_i64(weak_p)
+    }
+
+    pub fn get(self) -> i64 {
+        if (self.ptr as usize) == 0usize {
+            return 0i64
+        }
+        let val_p = (self.ptr as usize + 16usize) as *raw i64
+        return atomic_load_i64(val_p)
+    }
+
+    pub fn downgrade(self) -> Weak {
+        if (self.ptr as usize) == 0usize {
+            return Weak { ptr: self.ptr }
+        }
+        let weak_p = (self.ptr as usize + 8usize) as *raw var i64
+        atomic_fetch_add_i64(weak_p, 1i64)
+        return Weak { ptr: self.ptr }
+    }
+
+    pub fn drop(var self) {
+        if (self.ptr as usize) == 0usize {
+            return
+        }
+        let strong_p = self.ptr as *raw var i64
+        let prev_strong = atomic_fetch_sub_i64(strong_p, 1i64)
+        if prev_strong == 1i64 {
+            // Strong count reached zero!
+            let weak_p = (self.ptr as usize + 8usize) as *raw i64
+            let w_cnt = atomic_load_i64(weak_p)
+            if w_cnt == 0i64 {
+                free(self.ptr)
+            }
+        }
+        self.ptr = 0usize as *raw var u8
+    }
+}
+
+pub struct Weak {
+    pub ptr: *raw var u8,
+}
+
+impl Weak {
+    pub fn upgrade(self) -> Arc {
+        if (self.ptr as usize) == 0usize {
+            return Arc { ptr: 0usize as *raw var u8 }
+        }
+        let strong_p = self.ptr as *raw var i64
+        while true {
+            let cur = atomic_load_i64(strong_p as *raw i64)
+            if cur <= 0i64 {
+                return Arc { ptr: 0usize as *raw var u8 }
+            }
+            let prev = atomic_compare_exchange_i64(strong_p, cur, cur + 1i64)
+            if prev == cur {
+                return Arc { ptr: self.ptr }
+            }
+        }
+        return Arc { ptr: 0usize as *raw var u8 }
+    }
+
+    pub fn drop(var self) {
+        if (self.ptr as usize) == 0usize {
+            return
+        }
+        let weak_p = (self.ptr as usize + 8usize) as *raw var i64
+        let prev_weak = atomic_fetch_sub_i64(weak_p, 1i64)
+        if prev_weak == 1i64 {
+            let strong_p = self.ptr as *raw i64
+            let s_cnt = atomic_load_i64(strong_p)
+            if s_cnt == 0i64 {
+                free(self.ptr)
+            }
+        }
+        self.ptr = 0usize as *raw var u8
+    }
+}
+
+// RAII FileGuard with deterministic drop
+pub struct FileGuard {
+    pub fd: i32,
+    pub path: String,
+    pub is_closed: bool,
+}
+
+impl FileGuard {
+    pub fn new(fd: i32, path: str) -> FileGuard {
+        return FileGuard {
+            fd: fd,
+            path: String.from_str(path),
+            is_closed: false,
+        }
+    }
+
+    pub fn drop(var self) {
+        if !self.is_closed && self.fd >= 0i32 {
+            close(self.fd)
+            self.is_closed = true
+        }
+    }
+}
+
+// RAII LockGuard with deterministic drop
+pub struct LockGuard {
+    pub lock_id: i64,
+    pub is_released: bool,
+}
+
+impl LockGuard {
+    pub fn new(lock_id: i64) -> LockGuard {
+        return LockGuard {
+            lock_id: lock_id,
+            is_released: false,
+        }
+    }
+
+    pub fn drop(var self) {
+        if !self.is_released {
+            self.is_released = true
+        }
+    }
+}

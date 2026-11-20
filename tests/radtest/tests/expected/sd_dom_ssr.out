@@ -1,0 +1,10 @@
+Initial signal value: 0
+Updated signal value: 10, version: 2
+RENDERED_HTML:
+<div id="main-app" class="container mx-auto"><h1>Rad Web App</h1><p>High performance systems programming for the web.</p><input type="text" placeholder="Enter your name" /><button>Submit</button><a href="https://rad-lang.org">Documentation</a></div>
+PAGE_HTML:
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Rad Reactive Web</title></head><body><h1>Welcome to Rad SSR</h1></body></html>
+ACTION_JSON:
+{"type":"action","name":"increment","key":"counter","val":"10"}
+PATCH_JSON:
+{"type":"patch","selector":"#counter-val","html":"<span>10</span>"}

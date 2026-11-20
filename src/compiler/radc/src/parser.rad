@@ -177,11 +177,11 @@ impl Parser {
     fn synchronize_item(var self) {
         while self.peek_kind() != TOK_EOF {
             let k = self.peek_kind()
-            if k == TOK_FN || k == TOK_STRUCT || k == TOK_ENUM || k == TOK_ASYNC {
+            if k == TOK_FN || k == TOK_STRUCT || k == TOK_ACTOR || k == TOK_ENUM || k == TOK_ASYNC {
                 return
             }
             let txt = self.peek_text()
-            if str_eq(txt, "impl") || str_eq(txt, "trait") || str_eq(txt, "const") || str_eq(txt, "import") || str_eq(txt, "mod") || str_eq(txt, "extern") || str_eq(txt, "async") {
+            if str_eq(txt, "impl") || str_eq(txt, "trait") || str_eq(txt, "const") || str_eq(txt, "import") || str_eq(txt, "mod") || str_eq(txt, "extern") || str_eq(txt, "async") || str_eq(txt, "actor") {
                 return
             }
             if k == TOK_SEMI || k == TOK_RBRACE {
@@ -2100,6 +2100,7 @@ impl Parser {
             fn_name.push_str("__")
         }
         fn_name.push_str(raw_fn_name.as_ptr() as str)
+        fn_name.push_byte(0u8)
         while self.peek_kind() != TOK_RPAREN && self.peek_kind() != TOK_LBRACE && self.peek_kind() != TOK_EOF {
             self.advance()
         }
@@ -2186,7 +2187,7 @@ impl Parser {
     }
 
     fn parse_struct(var self) {
-        self.advance() // skip 'struct'
+        self.advance() // skip 'struct' or 'actor'
         let s_name = String.from_str(self.peek_text())
         self.match_tok(TOK_IDENT)
         if self.peek_kind() == TOK_LT {
@@ -2207,6 +2208,20 @@ impl Parser {
                 break
             }
             if self.peek_kind() == TOK_PUB {
+                self.advance()
+            }
+            if self.peek_kind() == TOK_RBRACE || self.peek_kind() == TOK_EOF {
+                break
+            }
+            if self.peek_kind() == TOK_ASYNC || str_eq(self.peek_text(), "async") {
+                self.cur_is_async = true
+                self.advance()
+            }
+            if self.peek_kind() == TOK_FN {
+                self.parse_function(s_name.as_ptr() as str)
+                continue
+            }
+            if self.peek_kind() == TOK_VAR || self.peek_kind() == TOK_LET {
                 self.advance()
             }
             if self.peek_kind() == TOK_RBRACE || self.peek_kind() == TOK_EOF {
@@ -2346,7 +2361,7 @@ impl Parser {
             }
             if self.peek_kind() == TOK_FN {
                 self.parse_function("")
-            } else if self.peek_kind() == TOK_STRUCT {
+            } else if self.peek_kind() == TOK_STRUCT || self.peek_kind() == TOK_ACTOR || str_eq(self.peek_text(), "actor") {
                 self.parse_struct()
             } else if self.peek_kind() == TOK_TRAIT || str_eq(self.peek_text(), "trait") {
                 self.advance() // skip 'trait'
@@ -2593,7 +2608,7 @@ impl Parser {
                     self.cur_is_test = inner_is_test
                     if self.peek_kind() == TOK_FN {
                         self.parse_function(mod_name.as_ptr() as str)
-                    } else if self.peek_kind() == TOK_STRUCT {
+                    } else if self.peek_kind() == TOK_STRUCT || self.peek_kind() == TOK_ACTOR || str_eq(self.peek_text(), "actor") {
                         self.parse_struct()
                     } else if str_eq(self.peek_text(), "import") {
                         self.advance()
@@ -2610,7 +2625,7 @@ impl Parser {
                 let err_line = self.cur_tok_line()
                 let err_col = self.cur_tok_col()
                 var err = String.new()
-                err.push_str("expected top-level item ('fn', 'struct', 'trait', 'impl', 'enum', 'const', 'import', 'mod'), found '")
+                err.push_str("expected top-level item ('fn', 'struct', 'actor', 'trait', 'impl', 'enum', 'const', 'import', 'mod'), found '")
                 err.push_str(self.peek_text())
                 err.push_str("'")
                 self.report_error("E0012", err.as_ptr() as str, err_line, err_col)

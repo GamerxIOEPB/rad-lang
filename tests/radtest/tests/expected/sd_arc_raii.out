@@ -1,0 +1,12 @@
+Arc initial strong: 1, weak: 0
+Arc val: 42
+After clone strong: 2
+After downgrade weak: 1
+After upgrade strong: 3
+After dropping a2 strong: 2
+After dropping a3 strong: 1
+INSIDE_SCOPE
+SCOPETEST_DROPPED
+AFTER_SCOPE_RAII
+LOCK_GUARD_RELEASED
+ARC_CLEANUP_SUCCESS

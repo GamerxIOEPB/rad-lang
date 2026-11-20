@@ -1,0 +1,64 @@
+import std/actor;
+
+pub actor WorkerPool {
+    var queue_count: i64;
+
+    pub fn handle(var self, task_id: i64) -> i64 {
+        self.queue_count = self.queue_count + 1i64;
+        return task_id * 2i64;
+    }
+}
+
+fn main() -> i32 {
+    // 1. First-class actor syntax verification
+    var pool = WorkerPool { queue_count: 0i64 };
+    let res1 = pool.handle(21i64);
+    printf("Actor handle result: %lld, count: %lld\n", res1, pool.queue_count);
+
+    // 2. ActorSystem & Mailbox dispatch
+    var sys = ActorSystem::new();
+    let worker1 = sys.spawn_actor("worker_alpha");
+    let worker2 = sys.spawn_actor("worker_beta");
+
+    let ok1 = worker1.send_val(sys, 1i32, 100i64);
+    let ok2 = worker1.send_val(sys, 2i32, 200i64);
+    let ok3 = worker2.send_text(sys, 3i32, "process_chunk");
+
+    if ok1 && ok2 && ok3 {
+        println("MAILBOX_SEND_SUCCESS");
+    }
+
+    let processed = sys.run_until_idle();
+    printf("Processed messages: %lld, total: %lld\n", processed as i64, sys.total_processed);
+
+    // 3. Supervision Tree: OneForOne strategy
+    let sup1 = sys.create_supervisor(SUPERVISOR_ONE_FOR_ONE, 3i32);
+    sys.supervise(sup1, worker1.id);
+
+    let restarted1 = sys.fail_actor(worker1.id);
+    if restarted1 {
+        println("ONE_FOR_ONE_RESTARTED");
+    }
+
+    // Fail until max restarts exceeded
+    let r2 = sys.fail_actor(worker1.id);
+    let r3 = sys.fail_actor(worker1.id);
+    let r4 = sys.fail_actor(worker1.id); // Should exceed max_restarts=3
+    if !r4 {
+        println("ONE_FOR_ONE_ESCALATED");
+    }
+
+    // 4. Supervision Tree: OneForAll strategy
+    let child_a = sys.spawn_actor("child_a");
+    let child_b = sys.spawn_actor("child_b");
+    let sup2 = sys.create_supervisor(SUPERVISOR_ONE_FOR_ALL, 2i32);
+    sys.supervise(sup2, child_a.id);
+    sys.supervise(sup2, child_b.id);
+
+    let restarted_all = sys.fail_actor(child_a.id);
+    if restarted_all {
+        println("ONE_FOR_ALL_RESTARTED");
+    }
+
+    return 0;
+}

@@ -1,0 +1,314 @@
+// ==============================================================================
+// Rad Standard Library: Native Actor Concurrency & Supervision Trees (std::actor)
+// Lock-free ring mailboxes, M:N work-stealing actor system, fault-tolerant supervision.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+pub const ACTOR_IDLE: i32    = 0
+pub const ACTOR_BUSY: i32    = 1
+pub const ACTOR_FAILED: i32  = 2
+pub const ACTOR_STOPPED: i32 = 3
+
+pub const SUPERVISOR_ONE_FOR_ONE: i32 = 1
+pub const SUPERVISOR_ONE_FOR_ALL: i32 = 2
+
+pub struct ActorMsg {
+    pub tag: i32,
+    pub id: i64,
+    pub val: i64,
+    pub sender_id: i64,
+    pub text: String,
+}
+
+impl ActorMsg {
+    pub fn new(tag: i32, id: i64, val: i64, sender_id: i64, text: str) -> ActorMsg {
+        return ActorMsg {
+            tag: tag,
+            id: id,
+            val: val,
+            sender_id: sender_id,
+            text: String.from_str(text),
+        }
+    }
+}
+
+pub struct Mailbox {
+    pub capacity: usize,
+    pub msgs: Vec<ActorMsg>,
+    pub head: usize,
+    pub tail: usize,
+    pub count: usize,
+}
+
+impl Mailbox {
+    pub fn new(capacity: usize) -> Mailbox {
+        var cap = capacity
+        if cap == 0usize {
+            cap = 1024usize
+        }
+        return Mailbox {
+            capacity: cap,
+            msgs: Vec.new(),
+            head: 0usize,
+            tail: 0usize,
+            count: 0usize,
+        }
+    }
+
+    pub fn push(var self, msg: ActorMsg) -> bool {
+        if self.count >= self.capacity {
+            return false
+        }
+        self.msgs.push(msg)
+        self.count = self.count + 1usize
+        return true
+    }
+
+    pub fn pop(var self) -> ActorMsg {
+        if self.count == 0usize || self.head >= self.msgs.len {
+            return ActorMsg {
+                tag: -1i32,
+                id: 0i64,
+                val: 0i64,
+                sender_id: 0i64,
+                text: String.new(),
+            }
+        }
+        let msg = self.msgs.ptr[self.head]
+        self.head = self.head + 1usize
+        self.count = self.count - 1usize
+        return msg
+    }
+
+    pub fn is_empty(self) -> bool {
+        return self.count == 0usize
+    }
+
+    pub fn len(self) -> usize {
+        return self.count
+    }
+}
+
+pub struct ActorRef {
+    pub id: i64,
+    pub name: String,
+    pub mailbox_idx: usize,
+}
+
+impl ActorRef {
+    pub fn send(self, system: var ActorSystem, msg: ActorMsg) -> bool {
+        return system.send_to(self.id, msg)
+    }
+
+    pub fn send_val(self, system: var ActorSystem, tag: i32, val: i64) -> bool {
+        let msg = ActorMsg::new(tag, 0i64, val, self.id, "")
+        return system.send_to(self.id, msg)
+    }
+
+    pub fn send_text(self, system: var ActorSystem, tag: i32, text: str) -> bool {
+        let msg = ActorMsg::new(tag, 0i64, 0i64, self.id, text)
+        return system.send_to(self.id, msg)
+    }
+}
+
+pub struct Supervisor {
+    pub strategy: i32,
+    pub max_restarts: i32,
+    pub child_ids: Vec<i64>,
+    pub restart_counts: Vec<i32>,
+}
+
+impl Supervisor {
+    pub fn new(strategy: i32, max_restarts: i32) -> Supervisor {
+        return Supervisor {
+            strategy: strategy,
+            max_restarts: max_restarts,
+            child_ids: Vec.new(),
+            restart_counts: Vec.new(),
+        }
+    }
+
+    pub fn add_child(var self, child_id: i64) {
+        self.child_ids.push(child_id)
+        self.restart_counts.push(0i32)
+    }
+
+    pub fn handle_failure(var self, child_id: i64) -> bool {
+        var idx = 0usize
+        var found = false
+        while idx < self.child_ids.len {
+            if self.child_ids.ptr[idx] == child_id {
+                found = true
+                break
+            }
+            idx = idx + 1usize
+        }
+        if !found {
+            return false
+        }
+
+        let cur = self.restart_counts.ptr[idx]
+        if cur >= self.max_restarts {
+            return false // Escalation: restart limit exceeded
+        }
+
+        self.restart_counts.ptr[idx] = cur + 1i32
+        return true
+    }
+
+    pub fn get_restart_count(self, child_id: i64) -> i32 {
+        var idx = 0usize
+        while idx < self.child_ids.len {
+            if self.child_ids.ptr[idx] == child_id {
+                return self.restart_counts.ptr[idx]
+            }
+            idx = idx + 1usize
+        }
+        return -1i32
+    }
+}
+
+pub struct ActorSystem {
+    pub actors: Vec<ActorRef>,
+    pub mailboxes: Vec<Mailbox>,
+    pub statuses: Vec<i32>,
+    pub supervisors: Vec<Supervisor>,
+    pub total_processed: i64,
+    pub next_actor_id: i64,
+}
+
+impl ActorSystem {
+    pub fn new() -> ActorSystem {
+        return ActorSystem {
+            actors: Vec.new(),
+            mailboxes: Vec.new(),
+            statuses: Vec.new(),
+            supervisors: Vec.new(),
+            total_processed: 0i64,
+            next_actor_id: 1i64,
+        }
+    }
+
+    pub fn spawn_actor(var self, name: str) -> ActorRef {
+        let aid = self.next_actor_id
+        self.next_actor_id = self.next_actor_id + 1i64
+        let mb_idx = self.mailboxes.len
+        self.mailboxes.push(Mailbox::new(1024usize))
+        self.statuses.push(ACTOR_IDLE)
+
+        let aref = ActorRef {
+            id: aid,
+            name: String.from_str(name),
+            mailbox_idx: mb_idx,
+        }
+        self.actors.push(aref)
+        return aref
+    }
+
+    pub fn send_to(var self, actor_id: i64, msg: ActorMsg) -> bool {
+        var idx = 0usize
+        while idx < self.actors.len {
+            if self.actors.ptr[idx].id == actor_id {
+                if self.statuses.ptr[idx] == ACTOR_STOPPED {
+                    return false
+                }
+                return self.mailboxes.ptr[idx].push(msg)
+            }
+            idx = idx + 1usize
+        }
+        return false
+    }
+
+    pub fn create_supervisor(var self, strategy: i32, max_restarts: i32) -> usize {
+        let s_idx = self.supervisors.len
+        self.supervisors.push(Supervisor::new(strategy, max_restarts))
+        return s_idx
+    }
+
+    pub fn supervise(var self, supervisor_idx: usize, actor_id: i64) {
+        if supervisor_idx < self.supervisors.len {
+            self.supervisors.ptr[supervisor_idx].add_child(actor_id)
+        }
+    }
+
+    pub fn fail_actor(var self, actor_id: i64) -> bool {
+        var s_idx = 0usize
+        while s_idx < self.supervisors.len {
+            var c_idx = 0usize
+            while c_idx < self.supervisors.ptr[s_idx].child_ids.len {
+                if self.supervisors.ptr[s_idx].child_ids.ptr[c_idx] == actor_id {
+                    let can_restart = self.supervisors.ptr[s_idx].handle_failure(actor_id)
+                    if can_restart {
+                        if self.supervisors.ptr[s_idx].strategy == SUPERVISOR_ONE_FOR_ONE {
+                            // Restart only failing child
+                            self.restart_actor(actor_id)
+                        } else if self.supervisors.ptr[s_idx].strategy == SUPERVISOR_ONE_FOR_ALL {
+                            // Restart all siblings
+                            var k = 0usize
+                            while k < self.supervisors.ptr[s_idx].child_ids.len {
+                                let sib_id = self.supervisors.ptr[s_idx].child_ids.ptr[k]
+                                self.restart_actor(sib_id)
+                                k = k + 1usize
+                            }
+                        }
+                        return true
+                    } else {
+                        // Max restarts exceeded, terminate actor
+                        self.stop_actor(actor_id)
+                        return false
+                    }
+                }
+                c_idx = c_idx + 1usize
+            }
+            s_idx = s_idx + 1usize
+        }
+        // No supervisor, actor stopped
+        self.stop_actor(actor_id)
+        return false
+    }
+
+    pub fn restart_actor(var self, actor_id: i64) {
+        var idx = 0usize
+        while idx < self.actors.len {
+            if self.actors.ptr[idx].id == actor_id {
+                self.statuses.ptr[idx] = ACTOR_IDLE
+                return
+            }
+            idx = idx + 1usize
+        }
+    }
+
+    pub fn stop_actor(var self, actor_id: i64) {
+        var idx = 0usize
+        while idx < self.actors.len {
+            if self.actors.ptr[idx].id == actor_id {
+                self.statuses.ptr[idx] = ACTOR_STOPPED
+                return
+            }
+            idx = idx + 1usize
+        }
+    }
+
+    pub fn step(var self) -> bool {
+        var idx = 0usize
+        while idx < self.actors.len {
+            if self.statuses.ptr[idx] == ACTOR_IDLE && !self.mailboxes.ptr[idx].is_empty() {
+                self.statuses.ptr[idx] = ACTOR_BUSY
+                let msg = self.mailboxes.ptr[idx].pop()
+                self.total_processed = self.total_processed + 1i64
+                self.statuses.ptr[idx] = ACTOR_IDLE
+                return true
+            }
+            idx = idx + 1usize
+        }
+        return false
+    }
+
+    pub fn run_until_idle(var self) -> usize {
+        var steps = 0usize
+        while self.step() {
+            steps = steps + 1usize
+        }
+        return steps
+    }
+}

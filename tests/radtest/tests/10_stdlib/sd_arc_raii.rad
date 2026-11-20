@@ -1,0 +1,56 @@
+import std/arc;
+
+struct ScopeTest {
+    pub dropped: i64,
+}
+
+impl ScopeTest {
+    pub fn drop(var self) {
+        println("SCOPETEST_DROPPED");
+    }
+}
+
+fn test_scope_raii() {
+    let s: ScopeTest = ScopeTest { dropped: 1i64 };
+    println("INSIDE_SCOPE");
+}
+
+fn main() -> i32 {
+    // 1. Arc creation, cloning, counts
+    let a1 = Arc::new(42i64);
+    printf("Arc initial strong: %lld, weak: %lld\n", a1.strong_count(), a1.weak_count());
+    printf("Arc val: %lld\n", a1.get());
+
+    let a2 = a1.clone();
+    printf("After clone strong: %lld\n", a1.strong_count());
+
+    // 2. Weak pointer and upgrade
+    let w1 = a1.downgrade();
+    printf("After downgrade weak: %lld\n", a1.weak_count());
+
+    let a3 = w1.upgrade();
+    printf("After upgrade strong: %lld\n", a3.strong_count());
+
+    // 3. Drop calls and counts
+    a2.drop();
+    printf("After dropping a2 strong: %lld\n", a1.strong_count());
+    a3.drop();
+    printf("After dropping a3 strong: %lld\n", a1.strong_count());
+
+    // 4. Scope RAII deterministic drop
+    test_scope_raii();
+    println("AFTER_SCOPE_RAII");
+
+    // 5. Guard cleanup
+    let guard = LockGuard::new(999i64);
+    guard.drop();
+    if guard.is_released {
+        println("LOCK_GUARD_RELEASED");
+    }
+
+    a1.drop();
+    w1.drop();
+    println("ARC_CLEANUP_SUCCESS");
+
+    return 0;
+}

@@ -1,0 +1,6 @@
+Actor handle result: 42, count: 1
+MAILBOX_SEND_SUCCESS
+Processed messages: 3, total: 3
+ONE_FOR_ONE_RESTARTED
+ONE_FOR_ONE_ESCALATED
+ONE_FOR_ALL_RESTARTED

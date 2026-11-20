@@ -1,0 +1,80 @@
+import std/elf;
+
+extern "C" {
+    fn system(cmd: *raw u8) -> i32;
+    fn remove(path: *raw u8) -> i32;
+}
+
+fn main() -> i32 {
+    // 1. Relocatable ELF64 Builder
+    var builder = ElfBuilder::new();
+    let text_idx = builder.add_section(".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 16u64);
+    let data_idx = builder.add_section(".data", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE, 8u64);
+
+    // Append some dummy x86_64 instructions to .text (e.g. mov eax, 42; ret)
+    // b8 2a 00 00 00 (mov eax, 42)
+    // c3             (ret)
+    builder.append_byte(text_idx, 0xB8u8);
+    builder.append_byte(text_idx, 0x2Au8);
+    builder.append_byte(text_idx, 0x00u8);
+    builder.append_byte(text_idx, 0x00u8);
+    builder.append_byte(text_idx, 0x00u8);
+    builder.append_byte(text_idx, 0xC3u8);
+
+    // Append 8 bytes of data to .data
+    builder.append_byte(data_idx, 0x48u8);
+    builder.append_byte(data_idx, 0x69u8);
+    builder.append_byte(data_idx, 0x21u8);
+    builder.append_byte(data_idx, 0x00u8);
+    builder.append_byte(data_idx, 0x00u8);
+    builder.append_byte(data_idx, 0x00u8);
+    builder.append_byte(data_idx, 0x00u8);
+    builder.append_byte(data_idx, 0x00u8);
+
+    // Add symbols
+    let sym_main = builder.add_symbol("main", 0u64, 6u64, STB_GLOBAL, STT_FUNC, text_idx as u16);
+    let sym_msg  = builder.add_symbol("msg",  0u64, 8u64, STB_GLOBAL, STT_OBJECT, data_idx as u16);
+
+    // Add relocation in .text referencing sym_msg
+    builder.add_relocation(1u64, sym_msg as u32, R_X86_64_PC32, -4i64);
+
+    // 2. Write relocatable ELF64 .o to disk
+    let obj_path = "/tmp/sd_test_obj.o";
+    let ok = builder.write_file(obj_path);
+    if ok {
+        println("ELF_OBJ_WRITTEN");
+    }
+
+    // 3. Inspect using readelf
+    let ret = system("readelf -h /tmp/sd_test_obj.o | grep -E 'Class:|Machine:|Type:'" as *raw u8);
+    if ret == 0i32 {
+        println("READELF_VERIFIED");
+    }
+
+    // 4. In-Memory Linker Relocation Patching
+    // Set symbol msg value to 0x1000 and patch
+    builder.symbols.ptr[sym_msg].value = 0x1000u64;
+    let rel_ok = ElfLinker::resolve_and_relocate(builder, text_idx, 0x400000u64);
+    if rel_ok {
+        println("RELOCATION_PATCHED");
+    }
+
+    // 5. Incremental Compilation AST Hash Cache
+    let src1 = "fn calculate(x: i64) -> i64 { return x * 2; }";
+    let src2 = "fn calculate(x: i64) -> i64 { return x * 2; }";
+    let src3 = "fn calculate(x: i64) -> i64 { return x * 3; }";
+
+    let h1 = AstHashCache::hash_source(src1);
+    let h2 = AstHashCache::hash_source(src2);
+    let h3 = AstHashCache::hash_source(src3);
+
+    if h1 == h2 {
+        println("HASH_IDENTICAL_MATCH");
+    }
+    if h1 != h3 {
+        println("HASH_DIFF_DETECTED");
+    }
+
+    remove(obj_path as *raw u8);
+    return 0;
+}

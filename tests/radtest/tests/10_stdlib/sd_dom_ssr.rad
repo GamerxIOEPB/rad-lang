@@ -1,0 +1,42 @@
+import std/dom;
+
+fn main() -> i32 {
+    // 1. Reactive Signal
+    var count = Signal::new(0i64);
+    printf("Initial signal value: %lld\n", count.get());
+    count.set(10i64);
+    printf("Updated signal value: %lld, version: %lld\n", count.get(), count.version);
+
+    // 2. Virtual DOM Component Construction
+    var children = Vec.new();
+    children.push(h1("Rad Web App"));
+    children.push(p("High performance systems programming for the web."));
+    children.push(input_tag("text", "Enter your name"));
+    children.push(button("Submit"));
+    children.push(a("https://rad-lang.org", "Documentation"));
+
+    var container = div(children);
+    container = container.attr("id", "main-app");
+    container = container.attr("class", "container mx-auto");
+
+    // 3. Universal SSR (render_to_string)
+    let rendered_html = render_to_string(container);
+    println("RENDERED_HTML:");
+    println(rendered_html.as_ptr() as str);
+
+    // 4. Full Page SSR (render_page)
+    let page_html = render_page("Rad Reactive Web", h1("Welcome to Rad SSR"));
+    println("PAGE_HTML:");
+    println(page_html.as_ptr() as str);
+
+    // 5. WebSocket Live State Sync
+    let action_msg = StateSync::encode_action("increment", "counter", "10");
+    println("ACTION_JSON:");
+    println(action_msg.as_ptr() as str);
+
+    let patch_msg = StateSync::encode_patch("#counter-val", "<span>10</span>");
+    println("PATCH_JSON:");
+    println(patch_msg.as_ptr() as str);
+
+    return 0;
+}

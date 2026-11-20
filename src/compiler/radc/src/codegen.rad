@@ -21,6 +21,8 @@ struct Codegen {
     loop_end_labels: Vec<i32>,
     current_func_idx: usize,
     active_defers: Vec<usize>,
+    active_drops_var: Vec<String>,
+    active_drops_type: Vec<String>,
     debug_info: bool,
     source_file: String,
 }
@@ -517,7 +519,11 @@ impl Codegen {
     fn get_var_type(self, vname: str) -> str {
         let raw: str = self.get_raw_var_type(vname)
         if str_len(raw) > 0usize {
-            return self.emit_llvm_type(raw)
+            let lt = self.emit_llvm_type(raw)
+            if str_eq(lt, "void") {
+                return "i64"
+            }
+            return lt
         }
         return "i64"
     }
@@ -1136,6 +1142,11 @@ impl Codegen {
         if str_eq(field_name, "loop_cond_labels") { return 9i64 }
         if str_eq(field_name, "loop_end_labels") { return 10i64 }
         if str_eq(field_name, "current_func_idx") { return 11i64 }
+        if str_eq(field_name, "active_defers") { return 12i64 }
+        if str_eq(field_name, "active_drops_var") { return 13i64 }
+        if str_eq(field_name, "active_drops_type") { return 14i64 }
+        if str_eq(field_name, "debug_info") { return 15i64 }
+        if str_eq(field_name, "source_file") { return 16i64 }
 
         // CompilerOptions
         if str_eq(field_name, "input_paths") { return 0i64 }
@@ -3266,6 +3277,16 @@ impl Codegen {
                     k = k + 1usize
                 }
                 self.emit_str(")\n")
+                if str_eq(member, "drop") && !is_static && ep[recv_id].kind == EXPR_IDENT {
+                    let drop_vname = ep[recv_id].str_val.as_ptr() as str
+                    var di = 0usize
+                    while di < self.active_drops_var.len {
+                        if str_eq(self.active_drops_var.ptr[di].as_ptr() as str, drop_vname) {
+                            self.active_drops_var.ptr[di] = String.new()
+                        }
+                        di = di + 1usize
+                    }
+                }
                 return 0
             }
             let res = self.alloc_ssa()
@@ -3818,6 +3839,99 @@ impl Codegen {
         return 0
     }
 
+    fn struct_has_drop(self, type_name: str) -> bool {
+        let clean = self.clean_type_name(type_name)
+        if str_len(clean) == 0usize || str_eq(clean, "void") || str_eq(clean, "i32") || str_eq(clean, "i64") || str_eq(clean, "bool") || str_eq(clean, "f64") || str_eq(clean, "f32") {
+            return false
+        }
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if str_ends_with(fn_str, "__drop") && str_starts_with(fn_str, clean) {
+                return true
+            }
+            fi = fi + 1usize
+        }
+        return false
+    }
+
+    fn emit_drops_from(var self, from_idx: usize, skip_var: str) {
+        if self.active_drops_var.len <= from_idx {
+            return
+        }
+        var i = self.active_drops_var.len
+        while i > from_idx {
+            i = i - 1usize
+            let vname = self.active_drops_var.ptr[i].as_ptr() as str
+            if str_len(vname) == 0usize {
+                continue
+            }
+            let vty = self.active_drops_type.ptr[i].as_ptr() as str
+            if str_len(skip_var) > 0usize && str_eq(vname, skip_var) {
+                continue
+            }
+            let clean = self.clean_type_name(vty)
+            var drop_fn_name = ""
+            var fi = 0usize
+            while fi < self.parser.functions.len {
+                let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+                if str_ends_with(fn_str, "__drop") && str_starts_with(fn_str, clean) {
+                    drop_fn_name = fn_str
+                    break
+                }
+                fi = fi + 1usize
+            }
+            if str_len(drop_fn_name) == 0usize {
+                continue
+            }
+
+            let inst_ptr = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(inst_ptr).as_ptr() as str)
+            self.ir.push_str(" = load ptr, ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+
+            let check_null = self.alloc_ssa()
+            let drop_lbl = self.alloc_label()
+            let cont_lbl = self.alloc_label()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(check_null).as_ptr() as str)
+            self.ir.push_str(" = icmp ne ptr %")
+            self.ir.push_str(int_to_str(inst_ptr).as_ptr() as str)
+            self.ir.push_str(", null\n")
+            self.ir.push_str("  br i1 %")
+            self.ir.push_str(int_to_str(check_null).as_ptr() as str)
+            self.ir.push_str(", label %drop.")
+            self.ir.push_str(int_to_str(drop_lbl).as_ptr() as str)
+            self.ir.push_str(", label %drop.")
+            self.ir.push_str(int_to_str(cont_lbl).as_ptr() as str)
+            self.ir.push_str("\ndrop.")
+            self.ir.push_str(int_to_str(drop_lbl).as_ptr() as str)
+            self.ir.push_str(":\n")
+            self.ir.push_str("  call void @")
+            self.ir.push_str(drop_fn_name)
+            self.ir.push_str("(ptr %")
+            self.ir.push_str(int_to_str(inst_ptr).as_ptr() as str)
+            self.ir.push_str(")\n")
+            self.ir.push_str("  store ptr null, ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+            self.ir.push_str("  br label %drop.")
+            self.ir.push_str(int_to_str(cont_lbl).as_ptr() as str)
+            self.ir.push_str("\ndrop.")
+            self.ir.push_str(int_to_str(cont_lbl).as_ptr() as str)
+            self.ir.push_str(":\n")
+        }
+    }
+
+    fn pop_drops_to(var self, to_idx: usize) {
+        while self.active_drops_var.len > to_idx {
+            let _p1 = self.active_drops_var.pop()
+            let _p2 = self.active_drops_type.pop()
+        }
+    }
+
     fn emit_defers_from(var self, from_idx: usize) {
         if self.active_defers.len <= from_idx {
             return
@@ -3999,6 +4113,14 @@ impl Codegen {
                     self.ir.push_str(".addr, align 8\n")
                 }
             }
+            var raw_drop_ty = self.get_raw_var_type(vname)
+            if str_len(raw_drop_ty) == 0usize && sp[stmt_id].expr_id != 0usize {
+                raw_drop_ty = self.get_expr_struct_name(sp[stmt_id].expr_id)
+            }
+            if self.struct_has_drop(raw_drop_ty) {
+                self.active_drops_var.push(String.from_str(vname))
+                self.active_drops_type.push(String.from_str(raw_drop_ty))
+            }
         } else if k == STMT_ASSIGN {
             let vname = sp[stmt_id].name.as_ptr() as str
             let init_expr = sp[stmt_id].expr_id
@@ -4112,6 +4234,25 @@ impl Codegen {
                 self.ir.push_str(", ptr %")
                 self.ir.push_str(vname)
                 self.ir.push_str(".addr, align 8\n")
+            }
+            var raw_drop_ty = self.get_raw_var_type(vname)
+            if str_len(raw_drop_ty) == 0usize && sp[stmt_id].expr_id != 0usize {
+                raw_drop_ty = self.get_expr_struct_name(sp[stmt_id].expr_id)
+            }
+            if self.struct_has_drop(raw_drop_ty) {
+                var found = false
+                var di = 0usize
+                while di < self.active_drops_var.len {
+                    if str_eq(self.active_drops_var.ptr[di].as_ptr() as str, vname) {
+                        found = true
+                        break
+                    }
+                    di = di + 1usize
+                }
+                if !found {
+                    self.active_drops_var.push(String.from_str(vname))
+                    self.active_drops_type.push(String.from_str(raw_drop_ty))
+                }
             }
         } else if k == STMT_ASSIGN_INDEX {
             let val_expr = sp[stmt_id].expr_id
@@ -4574,6 +4715,7 @@ impl Codegen {
             }
 
             let prev_defers_then = self.active_defers.len
+            let prev_drops_then = self.active_drops_var.len
             var i = 0usize
             var then_terminates = false
             while i < sp[stmt_id].then_stmts.len {
@@ -4587,6 +4729,7 @@ impl Codegen {
                 i = i + 1usize
             }
             if !then_terminates {
+                self.emit_drops_from(prev_drops_then, "")
                 self.emit_defers_from(prev_defers_then)
                 var ri = 0usize
                 while ri < shadowed_names.len {
@@ -4606,6 +4749,7 @@ impl Codegen {
                 self.ir.push_str(int_to_str(lbl_merge).as_ptr() as str)
                 self.ir.push_str("\n")
             }
+            self.pop_drops_to(prev_drops_then)
             while self.active_defers.len > prev_defers_then {
                 let _pop_d = self.active_defers.pop()
             }
@@ -4614,6 +4758,7 @@ impl Codegen {
             self.ir.push_str(int_to_str(lbl_else).as_ptr() as str)
             self.ir.push_str(":\n")
             let prev_defers_else = self.active_defers.len
+            let prev_drops_else = self.active_drops_var.len
             var j = 0usize
             var else_terminates = false
             while j < sp[stmt_id].else_stmts.len {
@@ -4627,11 +4772,13 @@ impl Codegen {
                 j = j + 1usize
             }
             if !else_terminates {
+                self.emit_drops_from(prev_drops_else, "")
                 self.emit_defers_from(prev_defers_else)
                 self.ir.push_str("  br label %if.merge.")
                 self.ir.push_str(int_to_str(lbl_merge).as_ptr() as str)
                 self.ir.push_str("\n")
             }
+            self.pop_drops_to(prev_drops_else)
             while self.active_defers.len > prev_defers_else {
                 let _pop_d = self.active_defers.pop()
             }
@@ -4675,6 +4822,7 @@ impl Codegen {
             self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
             self.ir.push_str(":\n")
             let prev_defers_while = self.active_defers.len
+            let prev_drops_while = self.active_drops_var.len
             var i = 0usize
             var body_terminates = false
             while i < sp[stmt_id].body_stmts.len {
@@ -4688,11 +4836,13 @@ impl Codegen {
                 i = i + 1usize
             }
             if !body_terminates {
+                self.emit_drops_from(prev_drops_while, "")
                 self.emit_defers_from(prev_defers_while)
                 self.ir.push_str("  br label %while.cond.")
                 self.ir.push_str(int_to_str(lbl_cond).as_ptr() as str)
                 self.ir.push_str("\n")
             }
+            self.pop_drops_to(prev_drops_while)
             while self.active_defers.len > prev_defers_while {
                 let _pop_d = self.active_defers.pop()
             }
@@ -4758,6 +4908,7 @@ impl Codegen {
             self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
             self.ir.push_str(":\n")
             let prev_defers_for = self.active_defers.len
+            let prev_drops_for = self.active_drops_var.len
             var bi = 0usize
             var body_terminates = false
             while bi < sp[stmt_id].body_stmts.len {
@@ -4771,11 +4922,13 @@ impl Codegen {
                 bi = bi + 1usize
             }
             if !body_terminates {
+                self.emit_drops_from(prev_drops_for, "")
                 self.emit_defers_from(prev_defers_for)
                 self.ir.push_str("  br label %while.cond.")
                 self.ir.push_str(int_to_str(lbl_inc).as_ptr() as str)
                 self.ir.push_str("\n")
             }
+            self.pop_drops_to(prev_drops_for)
             while self.active_defers.len > prev_defers_for {
                 let _pop_d = self.active_defers.pop()
             }
@@ -4928,6 +5081,7 @@ impl Codegen {
             self.ir.push_str(".addr, align 8\n")
 
             let prev_defers_for_in = self.active_defers.len
+            let prev_drops_for_in = self.active_drops_var.len
             var bi = 0usize
             var body_terminates = false
             while bi < sp[stmt_id].body_stmts.len {
@@ -4941,11 +5095,13 @@ impl Codegen {
                 bi = bi + 1usize
             }
             if !body_terminates {
+                self.emit_drops_from(prev_drops_for_in, "")
                 self.emit_defers_from(prev_defers_for_in)
                 self.ir.push_str("  br label %while.cond.")
                 self.ir.push_str(int_to_str(lbl_inc).as_ptr() as str)
                 self.ir.push_str("\n")
             }
+            self.pop_drops_to(prev_drops_for_in)
             while self.active_defers.len > prev_defers_for_in {
                 let _pop_d = self.active_defers.pop()
             }
@@ -4996,7 +5152,13 @@ impl Codegen {
             }
         } else if k == STMT_RETURN {
             if sp[stmt_id].expr_id != 0usize {
-                let r = self.emit_expr(sp[stmt_id].expr_id)
+                let ret_eid = sp[stmt_id].expr_id
+                var skip_vname = ""
+                if self.parser.exprs.ptr[ret_eid].kind == EXPR_IDENT {
+                    skip_vname = self.parser.exprs.ptr[ret_eid].str_val.as_ptr() as str
+                }
+                let r = self.emit_expr(ret_eid)
+                self.emit_drops_from(0usize, skip_vname)
                 self.emit_defers_from(0usize)
                 let ret_ty = self.current_ret_type.as_ptr() as str
                 if str_eq(ret_ty, "void") {
@@ -5063,6 +5225,7 @@ impl Codegen {
                     self.ir.push_str("\n")
                 }
             } else {
+                self.emit_drops_from(0usize, "")
                 self.emit_defers_from(0usize)
                 self.ir.push_str("  ret void\n")
             }
@@ -5371,6 +5534,7 @@ impl Codegen {
                    !str_eq(fname, "dprintf") && !str_eq(fname, "sqrt") && !str_eq(fname, "remove") &&
                    !str_eq(fname, "getchar") && !str_eq(fname, "fflush") && !str_eq(fname, "input") &&
                    !str_starts_with(fname, "__rad_") && !str_eq(fname, "atexit") &&
+                   !str_starts_with(fname, "atomic_") &&
                    !str_starts_with(fname, "syscall") {
                     var already_declared = false
                     var prev_i = 0usize
@@ -5499,6 +5663,17 @@ impl Codegen {
         header.push_str("define void @insert(ptr %obj, ptr %key, i64 %val) {\nentry:\n  ret void\n}\n\n")
 
         header.push_str("define void @drop(ptr %obj) {\nentry:\n  %is_null = icmp eq ptr %obj, null\n  br i1 %is_null, label %exit, label %do_drop\ndo_drop:\n  %buf_slot = getelementptr inbounds i8, ptr %obj, i64 0\n  %buf = load ptr, ptr %buf_slot, align 8\n  %buf_is_null = icmp eq ptr %buf, null\n  br i1 %buf_is_null, label %zero_fields, label %free_buf\nfree_buf:\n  call void @free(ptr %buf)\n  store ptr null, ptr %buf_slot, align 8\n  br label %zero_fields\nzero_fields:\n  %cap_slot = getelementptr inbounds i8, ptr %obj, i64 8\n  store i64 0, ptr %cap_slot, align 8\n  %len_slot = getelementptr inbounds i8, ptr %obj, i64 16\n  store i64 0, ptr %len_slot, align 8\n  br label %exit\nexit:\n  ret void\n}\n\n")
+
+        header.push_str("define i64 @atomic_load_i64(ptr %p) {\nentry:\n  %v = load atomic i64, ptr %p seq_cst, align 8\n  ret i64 %v\n}\n\n")
+        header.push_str("define void @atomic_store_i64(ptr %p, i64 %v) {\nentry:\n  store atomic i64 %v, ptr %p seq_cst, align 8\n  ret void\n}\n\n")
+        header.push_str("define i64 @atomic_fetch_add_i64(ptr %p, i64 %v) {\nentry:\n  %res = atomicrmw add ptr %p, i64 %v seq_cst\n  ret i64 %res\n}\n\n")
+        header.push_str("define i64 @atomic_fetch_sub_i64(ptr %p, i64 %v) {\nentry:\n  %res = atomicrmw sub ptr %p, i64 %v seq_cst\n  ret i64 %res\n}\n\n")
+        header.push_str("define i64 @atomic_compare_exchange_i64(ptr %p, i64 %expected, i64 %desired) {\nentry:\n  %pair = cmpxchg ptr %p, i64 %expected, i64 %desired seq_cst seq_cst\n  %old = extractvalue { i64, i1 } %pair, 0\n  ret i64 %old\n}\n\n")
+        header.push_str("define i32 @atomic_load_i32(ptr %p) {\nentry:\n  %v = load atomic i32, ptr %p seq_cst, align 4\n  ret i32 %v\n}\n\n")
+        header.push_str("define void @atomic_store_i32(ptr %p, i32 %v) {\nentry:\n  store atomic i32 %v, ptr %p seq_cst, align 4\n  ret void\n}\n\n")
+        header.push_str("define i32 @atomic_fetch_add_i32(ptr %p, i32 %v) {\nentry:\n  %res = atomicrmw add ptr %p, i32 %v seq_cst\n  ret i32 %res\n}\n\n")
+        header.push_str("define i32 @atomic_fetch_sub_i32(ptr %p, i32 %v) {\nentry:\n  %res = atomicrmw sub ptr %p, i32 %v seq_cst\n  ret i32 %res\n}\n\n")
+        header.push_str("define i32 @atomic_compare_exchange_i32(ptr %p, i32 %expected, i32 %desired) {\nentry:\n  %pair = cmpxchg ptr %p, i32 %expected, i32 %desired seq_cst seq_cst\n  %old = extractvalue { i32, i1 } %pair, 0\n  ret i32 %old\n}\n\n")
 
         header.push_str("define i64 @now() {\nentry:\n  ret i64 0\n}\n\n")
 
@@ -5656,6 +5831,8 @@ impl Codegen {
             self.current_ret_type = String.from_str(self.emit_llvm_type(func.ret_type.as_ptr() as str))
             self.ir = String.new()
             self.active_defers = Vec.new()
+            self.active_drops_var = Vec.new()
+            self.active_drops_type = Vec.new()
             var si = 0usize
             var has_returned = false
             while si < func.body.len {
@@ -5665,6 +5842,7 @@ impl Codegen {
                 if !has_returned {
                     if is_last && !str_eq(func.ret_type.as_ptr() as str, "void") && sk == STMT_EXPR {
                         let r = self.emit_expr(self.parser.stmts.ptr[stmt_id].expr_id)
+                        self.emit_drops_from(0usize, "")
                         self.emit_defers_from(0usize)
                         let ret_ty = self.current_ret_type.as_ptr() as str
                         if str_eq(ret_ty, "void") {
@@ -5741,6 +5919,7 @@ impl Codegen {
                 si = si + 1usize
             }
             if !has_returned {
+                self.emit_drops_from(0usize, "")
                 self.emit_defers_from(0usize)
             }
             if self.ir.len() > 0usize {

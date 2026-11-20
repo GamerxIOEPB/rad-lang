@@ -1,0 +1,8 @@
+ELF_OBJ_WRITTEN
+  Class:                             ELF64
+  Type:                              REL (Relocatable file)
+  Machine:                           Advanced Micro Devices X86-64
+READELF_VERIFIED
+RELOCATION_PATCHED
+HASH_IDENTICAL_MATCH
+HASH_DIFF_DETECTED
