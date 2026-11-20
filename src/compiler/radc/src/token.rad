@@ -48,6 +48,9 @@ const TOK_HASH: i32 = 43       // #
 const TOK_DOTDOT: i32 = 44     // ..
 const TOK_QUESTION: i32 = 45   // ?
 const TOK_TRAIT: i32 = 71      // trait
+const TOK_DYN: i32 = 72        // dyn
+const TOK_ASYNC: i32 = 73      // async
+const TOK_AWAIT: i32 = 74      // await
 
 // Operators
 const TOK_PLUS: i32 = 50      // +
@@ -293,6 +296,12 @@ fn lex_source(src: String) -> Vec<Token> {
                     k = TOK_DEFER
                 } else if str_eq(s, "trait") {
                     k = TOK_TRAIT
+                } else if str_eq(s, "dyn") {
+                    k = TOK_DYN
+                } else if str_eq(s, "async") {
+                    k = TOK_ASYNC
+                } else if str_eq(s, "await") {
+                    k = TOK_AWAIT
                 }
 
                 let tok_len = (cur_col - tok_col) as i64

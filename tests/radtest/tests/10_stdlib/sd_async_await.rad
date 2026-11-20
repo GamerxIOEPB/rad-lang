@@ -1,0 +1,41 @@
+import std/task;
+
+async fn fetch_data(key: str) -> i64 {
+    return 42i64;
+}
+
+async fn compute_sum(a: i64, b: i64) -> i64 {
+    return a + b;
+}
+
+fn main() -> i32 {
+    let data = await fetch_data("user_profile");
+    printf("Fetched async data: %lld\n", data);
+
+    let total = await compute_sum(data, 58i64);
+    printf("Computed async total: %lld\n", total);
+
+    var sched = Scheduler.new();
+    let t1 = sched.spawn("worker_1", 2usize);
+    let t2 = sched.spawn("worker_2", 5usize);
+    let t3 = sched.spawn("worker_3", 1usize);
+
+    var group = Vec.new();
+    group.push(t1);
+    group.push(t3);
+
+    let winner = Task.race(sched, group);
+    printf("Race winner task: %lld\n", winner as i64);
+
+    var all_tasks = Vec.new();
+    all_tasks.push(t1);
+    all_tasks.push(t2);
+    all_tasks.push(t3);
+
+    let ok = Task.join_all(sched, all_tasks);
+    if ok {
+        println("JOIN_ALL_SUCCESS");
+    }
+
+    return 0;
+}

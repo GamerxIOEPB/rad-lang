@@ -1,0 +1,102 @@
+import std/sql;
+
+extern "C" {
+    fn unlink(path: str) -> i32;
+}
+
+fn main() -> i32 {
+    // 1. In-memory database test
+    let opt_db = Database.open(":memory:");
+    match opt_db {
+        Option.Some(database) => {
+            var db = database;
+            let c_ok = db.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT UNIQUE);");
+            if !c_ok {
+                println("CREATE_TABLE_FAILED");
+                return 1;
+            }
+
+            let _ = db.execute("INSERT INTO users VALUES (1, \"Alice\", \"alice@rad.org\");");
+            let _ = db.execute("INSERT INTO users VALUES (2, \"Bob\", \"bob@rad.org\");");
+            let _ = db.execute("INSERT INTO users VALUES (3, \"Charlie\", \"charlie@rad.org\");");
+
+            // Query single row
+            let rs1 = db.query("SELECT id, name, email FROM users WHERE id = 1 LIMIT 10;");
+            let rc1 = rs1.row_count();
+            println(f"Row count 1: {rc1}");
+            if rs1.row_count() > 0usize {
+                let id1 = rs1.get_int(0usize, 0usize);
+                let name1 = rs1.get_str(0usize, 1usize);
+                let email1 = rs1.get_str(0usize, 2usize);
+                println(f"User 1: {id1} | {name1} | {email1}");
+            }
+
+            // JSON serialization
+            let json = rs1.to_json();
+            let json_str = json.as_ptr() as str;
+            println(f"JSON: {json_str}");
+
+            // Update row
+            let u_ok = db.execute("UPDATE users SET name = \"Alicia\" WHERE id = 1;");
+            if u_ok {
+                let rs_u = db.query("SELECT id, name FROM users WHERE id = 1;");
+                if rs_u.row_count() > 0usize {
+                    let u_name = rs_u.get_str(0usize, 1usize);
+                    println(f"Updated Name: {u_name}");
+                }
+            }
+
+            // Delete row
+            let d_ok = db.execute("DELETE FROM users WHERE id = 2;");
+            if d_ok {
+                let rs_all = db.query("SELECT id, name FROM users;");
+                let rem_count = rs_all.row_count();
+                println(f"Remaining users count: {rem_count}");
+            }
+
+            db.close();
+            println("MEMORY_DB_SUCCESS");
+        },
+        Option.None => {
+            println("OPEN_FAILED");
+            return 1;
+        },
+    }
+
+    // 2. File-backed persistent database test with WAL checkpoint
+    let db_file = "/tmp/rad_test_store.db";
+    let _ = unlink(db_file);
+    let _ = unlink("/tmp/rad_test_store.db.wal");
+
+    let opt_file_db = Database.open(db_file);
+    match opt_file_db {
+        Option.Some(fdatabase) => {
+            var fdb = fdatabase;
+            let _ = fdb.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, title TEXT);");
+            let _ = fdb.execute("INSERT INTO products VALUES (101, \"Laptop\");");
+            let _ = fdb.execute("INSERT INTO products VALUES (102, \"Keyboard\");");
+
+            let rs_prod = fdb.query("SELECT id, title FROM products WHERE id = 101;");
+            if rs_prod.row_count() > 0usize {
+                let p_title = rs_prod.get_str(0usize, 1usize);
+                println(f"Product 101: {p_title}");
+            }
+
+            let cp_ok = fdb.checkpoint();
+            if cp_ok {
+                println("CHECKPOINT_SUCCESS");
+            }
+            fdb.close();
+            println("FILE_DB_SUCCESS");
+        },
+        Option.None => {
+            println("FILE_OPEN_FAILED");
+            return 1;
+        },
+    }
+
+    let _ = unlink(db_file);
+    let _ = unlink("/tmp/rad_test_store.db.wal");
+
+    return 0;
+}

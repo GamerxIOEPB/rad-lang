@@ -629,6 +629,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         stmts: Vec.new(),
         functions: Vec.new(),
         structs: Vec.new(),
+        traits: Vec.new(),
+        trait_impls: Vec.new(),
         const_names: Vec.new(),
         const_values: Vec.new(),
         filename: String.new(),
@@ -641,6 +643,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         json_format: opts.cli_json_format,
         test_mode: opts.test_mode,
         cur_is_test: false,
+        cur_is_async: false,
     }
     parser.const_names.push(String.from_str("Option::None"))
     parser.const_values.push(0i64)

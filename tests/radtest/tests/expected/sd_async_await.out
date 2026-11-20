@@ -1,0 +1,4 @@
+Fetched async data: 42
+Computed async total: 100
+Race winner task: 3
+JOIN_ALL_SUCCESS

@@ -9,6 +9,8 @@ struct Parser {
     stmts: Vec<Stmt>,
     functions: Vec<FunctionDef>,
     structs: Vec<StructDef>,
+    traits: Vec<TraitDef>,
+    trait_impls: Vec<TraitImplDef>,
     const_names: Vec<String>,
     const_values: Vec<i64>,
     filename: String,
@@ -21,6 +23,7 @@ struct Parser {
     json_format: bool,
     test_mode: bool,
     cur_is_test: bool,
+    cur_is_async: bool,
 }
 
 fn json_escape_str(s: str) -> String {
@@ -174,11 +177,11 @@ impl Parser {
     fn synchronize_item(var self) {
         while self.peek_kind() != TOK_EOF {
             let k = self.peek_kind()
-            if k == TOK_FN || k == TOK_STRUCT || k == TOK_ENUM {
+            if k == TOK_FN || k == TOK_STRUCT || k == TOK_ENUM || k == TOK_ASYNC {
                 return
             }
             let txt = self.peek_text()
-            if str_eq(txt, "impl") || str_eq(txt, "trait") || str_eq(txt, "const") || str_eq(txt, "import") || str_eq(txt, "mod") || str_eq(txt, "extern") {
+            if str_eq(txt, "impl") || str_eq(txt, "trait") || str_eq(txt, "const") || str_eq(txt, "import") || str_eq(txt, "mod") || str_eq(txt, "extern") || str_eq(txt, "async") {
                 return
             }
             if k == TOK_SEMI || k == TOK_RBRACE {
@@ -707,7 +710,19 @@ impl Parser {
                 }
             }
         }
-        // 2. Consume the single base type name: e.g. u8, i32, usize, String, Vec, etc.
+        // 2. Consume the single base type name: e.g. u8, i32, usize, String, Vec, dyn Trait, etc.
+        if self.peek_kind() == TOK_DYN || str_eq(self.peek_text(), "dyn") {
+            self.advance()
+            if ty.len() > 0usize {
+                ty.push_str(" ")
+            }
+            ty.push_str("dyn ")
+            if self.peek_kind() == TOK_IDENT {
+                ty.push_str(self.peek_text())
+                self.advance()
+            }
+            return ty
+        }
         if self.peek_kind() == TOK_IDENT {
             if ty.len() > 0usize {
                 ty.push_str(" ")
@@ -720,10 +735,25 @@ impl Parser {
                 self.advance()
                 var depth = 1
                 while depth > 0 && self.peek_kind() != TOK_EOF {
-                    if self.peek_kind() == TOK_LT { depth = depth + 1 }
-                    if self.peek_kind() == TOK_GT { depth = depth - 1 }
-                    ty.push_str(self.peek_text())
-                    self.advance()
+                    if self.peek_kind() == TOK_LT {
+                        depth = depth + 1
+                        ty.push_str("<")
+                        self.advance()
+                    } else if self.peek_kind() == TOK_GT {
+                        depth = depth - 1
+                        ty.push_str(">")
+                        self.advance()
+                    } else if self.peek_kind() == TOK_SHR {
+                        depth = depth - 2
+                        ty.push_str(">>")
+                        self.advance()
+                    } else if str_eq(self.peek_text(), "dyn") || self.peek_kind() == TOK_DYN {
+                        ty.push_str("dyn ")
+                        self.advance()
+                    } else {
+                        ty.push_str(self.peek_text())
+                        self.advance()
+                    }
                 }
             }
         }
@@ -916,6 +946,23 @@ impl Parser {
                 left: 0usize,
                 right: 0usize,
                 args: elems,
+                field_name: String.new(),
+                expr_line: tok_l,
+                expr_col: tok_c,
+            })
+        }
+        if k == TOK_AWAIT || str_eq(self.peek_text(), "await") {
+            self.advance()
+            let operand = self.parse_expr(10)
+            return self.add_expr(Expr {
+                kind: EXPR_AWAIT,
+                op: 0,
+                int_val: 0i64,
+                str_val: String.new(),
+                target_type: String.new(),
+                left: operand,
+                right: 0usize,
+                args: Vec.new(),
                 field_name: String.new(),
                 expr_line: tok_l,
                 expr_col: tok_c,
@@ -2074,6 +2121,8 @@ impl Parser {
 
         let f_is_test = self.cur_is_test
         self.cur_is_test = false
+        let f_is_async = self.cur_is_async
+        self.cur_is_async = false
 
         self.functions.push(FunctionDef {
             fn_name: fn_name,
@@ -2082,6 +2131,7 @@ impl Parser {
             ret_type: ret_type,
             body: body,
             is_test: f_is_test,
+            is_async: f_is_async,
         })
     }
 
@@ -2131,6 +2181,7 @@ impl Parser {
             ret_type: ret_type,
             body: Vec.new(),
             is_test: false,
+            is_async: false,
         })
     }
 
@@ -2278,7 +2329,10 @@ impl Parser {
                 }
             }
             self.cur_is_test = is_test
-            while self.peek_kind() == TOK_PUB || str_eq(self.peek_text(), "extern") || self.peek_kind() == TOK_STR {
+            while self.peek_kind() == TOK_PUB || str_eq(self.peek_text(), "extern") || self.peek_kind() == TOK_STR || self.peek_kind() == TOK_ASYNC || str_eq(self.peek_text(), "async") {
+                if self.peek_kind() == TOK_ASYNC || str_eq(self.peek_text(), "async") {
+                    self.cur_is_async = true
+                }
                 if str_eq(self.peek_text(), "extern") {
                     let next_p = self.pos + 1usize
                     if next_p < self.tokens.len && self.tokens.ptr[next_p].kind == TOK_LBRACE {
@@ -2307,17 +2361,48 @@ impl Parser {
                     }
                 }
                 self.expect_tok(TOK_LBRACE, "{")
+                var trait_methods = Vec.new()
                 while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
                     if self.peek_kind() == TOK_PUB {
                         self.advance()
                     }
+                    if self.peek_kind() == TOK_ASYNC || str_eq(self.peek_text(), "async") {
+                        self.cur_is_async = true
+                        self.advance()
+                    }
                     if self.peek_kind() == TOK_FN {
+                        let fn_idx_before = self.functions.len
                         self.parse_function(trait_name.as_ptr() as str)
+                        if self.functions.len > fn_idx_before {
+                            let fdef = self.functions.ptr[fn_idx_before]
+                            var m_name = fdef.fn_name
+                            let prefix_len = trait_name.len() + 2usize
+                            if m_name.len() > prefix_len {
+                                var short_name = String.new()
+                                let mp = m_name.as_ptr() as *raw u8
+                                var mi = prefix_len
+                                while mi < m_name.len() {
+                                    short_name.push_byte(mp[mi])
+                                    mi = mi + 1usize
+                                }
+                                m_name = short_name
+                            }
+                            trait_methods.push(TraitMethodDef {
+                                method_name: m_name,
+                                param_names: fdef.param_names,
+                                param_types: fdef.param_types,
+                                ret_type: fdef.ret_type,
+                            })
+                        }
                     } else {
                         self.advance()
                     }
                 }
                 let _disc_tr = self.expect_tok(TOK_RBRACE, "}")
+                self.traits.push(TraitDef {
+                    trait_name: trait_name,
+                    methods: trait_methods,
+                })
             } else if str_eq(self.peek_text(), "impl") {
                 self.advance() // skip 'impl'
                 if self.peek_kind() == TOK_LT {
@@ -2340,7 +2425,8 @@ impl Parser {
                 }
                 if str_eq(self.peek_text(), "for") {
                     self.advance() // skip 'for'
-                    target_name = String.from_str(self.peek_text())
+                    let t_trait = String.from_str(target_name.as_ptr() as str)
+                    let s_struct = String.from_str(self.peek_text())
                     self.match_tok(TOK_IDENT)
                     if self.peek_kind() == TOK_LT {
                         while self.peek_kind() != TOK_GT && self.peek_kind() != TOK_EOF {
@@ -2350,11 +2436,20 @@ impl Parser {
                             self.advance()
                         }
                     }
+                    self.trait_impls.push(TraitImplDef {
+                        trait_name: t_trait,
+                        target_struct_name: String.from_str(s_struct.as_ptr() as str),
+                    })
+                    target_name = s_struct
                 }
                 let struct_name = target_name
                 self.expect_tok(TOK_LBRACE, "{")
                 while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
                     if self.peek_kind() == TOK_PUB {
+                        self.advance()
+                    }
+                    if self.peek_kind() == TOK_ASYNC || str_eq(self.peek_text(), "async") {
+                        self.cur_is_async = true
                         self.advance()
                     }
                     if self.peek_kind() == TOK_FN {

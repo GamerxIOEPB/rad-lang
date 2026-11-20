@@ -139,4 +139,62 @@ impl Scheduler {
         }
         return 0usize
     }
+
+    pub fn is_task_done(self, task_id: usize) -> bool {
+        return self.get_status(task_id) == TASK_DONE
+    }
+
+    pub fn join_all(var self, task_ids: Vec<usize>) -> bool {
+        var all_done = false
+        while !all_done {
+            all_done = true
+            var i = 0usize
+            while i < task_ids.len {
+                if !self.is_task_done(task_ids.ptr[i]) {
+                    all_done = false
+                    break
+                }
+                i = i + 1usize
+            }
+            if all_done {
+                return true
+            }
+            if !self.step() {
+                return false
+            }
+        }
+        return true
+    }
+
+    pub fn race(var self, task_ids: Vec<usize>) -> usize {
+        while true {
+            var i = 0usize
+            while i < task_ids.len {
+                let tid = task_ids.ptr[i]
+                if self.is_task_done(tid) {
+                    return tid
+                }
+                i = i + 1usize
+            }
+            if !self.step() {
+                return 0usize
+            }
+        }
+        return 0usize
+    }
+}
+
+pub struct Task {
+    pub id: usize,
+    pub name: String,
+}
+
+impl Task {
+    pub fn join_all(sched: var Scheduler, task_ids: Vec<usize>) -> bool {
+        return sched.join_all(task_ids)
+    }
+
+    pub fn race(sched: var Scheduler, task_ids: Vec<usize>) -> usize {
+        return sched.race(task_ids)
+    }
 }

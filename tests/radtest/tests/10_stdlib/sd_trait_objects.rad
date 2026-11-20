@@ -1,0 +1,58 @@
+pub trait Shape {
+    fn area(self) -> f64;
+    fn name(self) -> str;
+}
+
+struct Circle {
+    pub radius: f64,
+}
+
+impl Shape for Circle {
+    pub fn area(self) -> f64 {
+        return 3.1415926535 * self.radius * self.radius;
+    }
+
+    pub fn name(self) -> str {
+        return "Circle";
+    }
+}
+
+struct Rectangle {
+    pub width: f64,
+    pub height: f64,
+}
+
+impl Shape for Rectangle {
+    pub fn area(self) -> f64 {
+        return self.width * self.height;
+    }
+
+    pub fn name(self) -> str {
+        return "Rectangle";
+    }
+}
+
+fn print_shape_info(s: dyn Shape) {
+    printf("%s area: %.2f\n", s.name(), s.area());
+}
+
+fn main() -> i32 {
+    let c = Circle { radius: 2.0 };
+    let r = Rectangle { width: 3.0, height: 4.0 };
+
+    print_shape_info(c);
+    print_shape_info(r);
+
+    var shapes: Vec<dyn Shape> = Vec.new();
+    shapes.push(Circle { radius: 5.0 });
+    shapes.push(Rectangle { width: 10.0, height: 4.0 });
+
+    var i = 0usize;
+    while i < shapes.len {
+        let sh: dyn Shape = shapes[i];
+        printf("Dynamic shape %lld: %s area: %.2f\n", i as i64, sh.name(), sh.area());
+        i = i + 1usize;
+    }
+
+    return 0;
+}

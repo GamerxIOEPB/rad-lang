@@ -519,6 +519,26 @@ fn handle_hover(id: i64, doc_text: String, line: i64, col: i64) {
         md.push_str("### Standard Type `String`\nDynamically allocated, growable UTF-8 string buffer.")
     } else if str_eq(s, "Vec") {
         md.push_str("### Standard Type `Vec<T>`\nDynamically allocated, growable array.")
+    } else if str_eq(s, "dyn") {
+        md.push_str("### Keyword `dyn`\nDeclares a dynamically dispatched trait object fat-pointer.\n```rad\nlet s: dyn Shape = Circle { radius: 5.0 };\n```")
+    } else if str_eq(s, "async") {
+        md.push_str("### Keyword `async`\nDeclares an asynchronous function executing cooperatively without blocking threads.\n```rad\nasync fn fetch() -> Result<Data, Error>\n```")
+    } else if str_eq(s, "await") {
+        md.push_str("### Keyword `await`\nSuspends execution until the awaited asynchronous future completes.\n```rad\nlet res = await stream.read();\n```")
+    } else if str_eq(s, "TlsStream") {
+        md.push_str("### Standard Type `TlsStream` (std/tls)\nPure-Rad TLS 1.3 encrypted connection stream over TCP with X25519 and ChaCha20-Poly1305.")
+    } else if str_eq(s, "HttpServer") {
+        md.push_str("### Standard Type `HttpServer` (std/http)\nEvent-driven non-blocking HTTP server powered by Linux epoll reactor.")
+    } else if str_eq(s, "HttpRouter") {
+        md.push_str("### Standard Type `HttpRouter` (std/http)\nExpress-style HTTP router supporting parameterized routes (`/users/:id`).")
+    } else if str_eq(s, "Database") {
+        md.push_str("### Standard Type `Database` (std/sql)\nPure-Rad embedded relational SQL database engine with ACID transactions and B-tree storage.")
+    } else if str_eq(s, "KvStore") {
+        md.push_str("### Standard Type `KvStore` (std/kv)\nAppend-only transactional key-value store with in-memory hash indexing.")
+    } else if str_eq(s, "EventLoop") {
+        md.push_str("### Standard Type `EventLoop` (std/event)\nLinux epoll event loop multiplexing thousands of concurrent file descriptors.")
+    } else if str_eq(s, "Scheduler") {
+        md.push_str("### Standard Type `Scheduler` (std/task)\nCooperative green thread and coroutine task scheduler.")
     } else {
         // Search document for declaration of function, struct, enum, or const
         let lines = split_source_lines(doc_text)
@@ -607,6 +627,16 @@ fn handle_completion(id: i64, doc_text: String) {
     items.push_str("{\"label\":\"break\",\"kind\":14,\"detail\":\"break loop\"},")
     items.push_str("{\"label\":\"continue\",\"kind\":14,\"detail\":\"continue loop\"},")
     items.push_str("{\"label\":\"as\",\"kind\":14,\"detail\":\"explicit type cast\"},")
+    items.push_str("{\"label\":\"dyn\",\"kind\":14,\"detail\":\"dynamic trait object\"},")
+    items.push_str("{\"label\":\"async\",\"kind\":14,\"detail\":\"asynchronous function\"},")
+    items.push_str("{\"label\":\"await\",\"kind\":14,\"detail\":\"await future completion\"},")
+    items.push_str("{\"label\":\"trait\",\"kind\":14,\"detail\":\"trait interface definition\"},")
+    items.push_str("{\"label\":\"impl\",\"kind\":14,\"detail\":\"implementation block\"},")
+    items.push_str("{\"label\":\"enum\",\"kind\":14,\"detail\":\"enum type definition\"},")
+    items.push_str("{\"label\":\"const\",\"kind\":14,\"detail\":\"compile-time constant\"},")
+    items.push_str("{\"label\":\"import\",\"kind\":14,\"detail\":\"import module\"},")
+    items.push_str("{\"label\":\"pub\",\"kind\":14,\"detail\":\"public visibility\"},")
+    items.push_str("{\"label\":\"match\",\"kind\":14,\"detail\":\"pattern matching\"},")
     items.push_str("{\"label\":\"true\",\"kind\":14,\"detail\":\"boolean true\"},")
     items.push_str("{\"label\":\"false\",\"kind\":14,\"detail\":\"boolean false\"},")
 
@@ -627,6 +657,16 @@ fn handle_completion(id: i64, doc_text: String) {
     items.push_str("{\"label\":\"str\",\"kind\":7,\"detail\":\"string slice pointer\"},")
     items.push_str("{\"label\":\"String\",\"kind\":7,\"detail\":\"dynamic string\"},")
     items.push_str("{\"label\":\"Vec\",\"kind\":7,\"detail\":\"dynamic vector\"},")
+    items.push_str("{\"label\":\"TlsStream\",\"kind\":7,\"detail\":\"TLS 1.3 encrypted stream\"},")
+    items.push_str("{\"label\":\"HttpServer\",\"kind\":7,\"detail\":\"async HTTP epoll server\"},")
+    items.push_str("{\"label\":\"HttpRouter\",\"kind\":7,\"detail\":\"parameterized HTTP router\"},")
+    items.push_str("{\"label\":\"HttpRequest\",\"kind\":7,\"detail\":\"HTTP request object\"},")
+    items.push_str("{\"label\":\"HttpResponse\",\"kind\":7,\"detail\":\"HTTP response object\"},")
+    items.push_str("{\"label\":\"EventLoop\",\"kind\":7,\"detail\":\"Linux epoll event reactor\"},")
+    items.push_str("{\"label\":\"Scheduler\",\"kind\":7,\"detail\":\"coroutine green thread scheduler\"},")
+    items.push_str("{\"label\":\"KvStore\",\"kind\":7,\"detail\":\"embedded transactional KV store\"},")
+    items.push_str("{\"label\":\"Database\",\"kind\":7,\"detail\":\"embedded SQL database engine\"},")
+    items.push_str("{\"label\":\"SqlResultSet\",\"kind\":7,\"detail\":\"SQL query result table\"},")
 
     // Standard functions (kind = 3)
     items.push_str("{\"label\":\"println\",\"kind\":3,\"detail\":\"println(fmt, ...)\"},")
@@ -761,6 +801,16 @@ fn handle_definition(id: i64, uri: str, doc_text: String, line: i64, col: i64) {
                 mod_spec.push_byte(0u8)
 
                 // Try candidates
+                var cand_std = String.new()
+                let m_str = mod_spec.as_ptr() as str
+                if str_starts_with(m_str, "std/") {
+                    let sub = (m_str as usize + 4usize) as str
+                    cand_std.push_str("lib/rad/std/src/")
+                    cand_std.push_str(sub)
+                    cand_std.push_str(".rad")
+                    cand_std.push_byte(0u8)
+                }
+
                 var cand1 = String.new()
                 cand1.push_str("lib/rad/")
                 cand1.push_str(mod_spec.as_ptr() as str)
@@ -774,7 +824,9 @@ fn handle_definition(id: i64, uri: str, doc_text: String, line: i64, col: i64) {
                 cand2.push_byte(0u8)
 
                 var cand_chosen = String.new()
-                if file_exists(cand1.as_ptr() as str) {
+                if cand_std.len() > 0usize && file_exists(cand_std.as_ptr() as str) {
+                    cand_chosen = cand_std
+                } else if file_exists(cand1.as_ptr() as str) {
                     cand_chosen = cand1
                 } else if file_exists(cand2.as_ptr() as str) {
                     cand_chosen = cand2

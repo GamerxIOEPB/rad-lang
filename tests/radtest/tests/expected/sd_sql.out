@@ -1,0 +1,9 @@
+Row count 1: 1
+User 1: 1 | Alice | alice@rad.org
+JSON: [{"id": 1, "name": "Alice", "email": "alice@rad.org"}]
+Updated Name: Alicia
+Remaining users count: 2
+MEMORY_DB_SUCCESS
+Product 101: Laptop
+CHECKPOINT_SUCCESS
+FILE_DB_SUCCESS

@@ -17,6 +17,7 @@ const EXPR_FLOAT: i32 = 12
 const EXPR_ARRAY_LITERAL: i32 = 13
 const EXPR_RANGE: i32 = 14
 const EXPR_TRY: i32 = 15
+const EXPR_AWAIT: i32 = 16
 
 struct Expr {
     kind: i32,
@@ -67,6 +68,24 @@ struct FunctionDef {
     ret_type: String,
     body: Vec<usize>,
     is_test: bool,
+    is_async: bool,
+}
+
+struct TraitMethodDef {
+    method_name: String,
+    param_names: Vec<String>,
+    param_types: Vec<String>,
+    ret_type: String,
+}
+
+struct TraitDef {
+    trait_name: String,
+    methods: Vec<TraitMethodDef>,
+}
+
+struct TraitImplDef {
+    trait_name: String,
+    target_struct_name: String,
 }
 
 struct StructDef {
