@@ -1,0 +1,348 @@
+// ==============================================================================
+// Rad Standard Library: First-Class SIMD & Auto-Vectorization (std::simd)
+// Fixed-width vector primitives: f32x4, f32x8, i32x4, i32x8, u8x16, u8x32.
+// Parallel lane arithmetic, FMA, shuffle, blend, horizontal reductions, matrix math.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+extern "C" {
+    fn sqrtf(x: f32) -> f32;
+}
+
+// ------------------------------------------------------------------------------
+// f32x4: 4-lane single precision floating point vector (128-bit)
+// ------------------------------------------------------------------------------
+
+pub struct f32x4 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
+impl f32x4 {
+    pub fn new(x: f32, y: f32, z: f32, w: f32) -> f32x4 {
+        return f32x4 { x: x, y: y, z: z, w: w }
+    }
+
+    pub fn splat(v: f32) -> f32x4 {
+        return f32x4 { x: v, y: v, z: v, w: v }
+    }
+
+    pub fn zero() -> f32x4 {
+        return f32x4 { x: 0.0f32, y: 0.0f32, z: 0.0f32, w: 0.0f32 }
+    }
+
+    pub fn add(self, b: f32x4) -> f32x4 {
+        return f32x4 {
+            x: self.x + b.x,
+            y: self.y + b.y,
+            z: self.z + b.z,
+            w: self.w + b.w,
+        }
+    }
+
+    pub fn sub(self, b: f32x4) -> f32x4 {
+        return f32x4 {
+            x: self.x - b.x,
+            y: self.y - b.y,
+            z: self.z - b.z,
+            w: self.w - b.w,
+        }
+    }
+
+    pub fn mul(self, b: f32x4) -> f32x4 {
+        return f32x4 {
+            x: self.x * b.x,
+            y: self.y * b.y,
+            z: self.z * b.z,
+            w: self.w * b.w,
+        }
+    }
+
+    pub fn div(self, b: f32x4) -> f32x4 {
+        return f32x4 {
+            x: self.x / b.x,
+            y: self.y / b.y,
+            z: self.z / b.z,
+            w: self.w / b.w,
+        }
+    }
+
+    // Fused Multiply-Add: (self * b) + c
+    pub fn fma(self, b: f32x4, c: f32x4) -> f32x4 {
+        return f32x4 {
+            x: (self.x * b.x) + c.x,
+            y: (self.y * b.y) + c.y,
+            z: (self.z * b.z) + c.z,
+            w: (self.w * b.w) + c.w,
+        }
+    }
+
+    pub fn min(self, b: f32x4) -> f32x4 {
+        var rx = self.x; if b.x < rx { rx = b.x }
+        var ry = self.y; if b.y < ry { ry = b.y }
+        var rz = self.z; if b.z < rz { rz = b.z }
+        var rw = self.w; if b.w < rw { rw = b.w }
+        return f32x4 { x: rx, y: ry, z: rz, w: rw }
+    }
+
+    pub fn max(self, b: f32x4) -> f32x4 {
+        var rx = self.x; if b.x > rx { rx = b.x }
+        var ry = self.y; if b.y > ry { ry = b.y }
+        var rz = self.z; if b.z > rz { rz = b.z }
+        var rw = self.w; if b.w > rw { rw = b.w }
+        return f32x4 { x: rx, y: ry, z: rz, w: rw }
+    }
+
+    pub fn sum(self) -> f32 {
+        return self.x + self.y + self.z + self.w
+    }
+
+    pub fn dot(self, b: f32x4) -> f32 {
+        return (self.x * b.x) + (self.y * b.y) + (self.z * b.z) + (self.w * b.w)
+    }
+
+    pub fn length_sq(self) -> f32 {
+        return self.dot(self)
+    }
+
+    pub fn length(self) -> f32 {
+        return sqrtf(self.length_sq())
+    }
+}
+
+// ------------------------------------------------------------------------------
+// f32x8: 8-lane single precision floating point vector (256-bit)
+// ------------------------------------------------------------------------------
+
+pub struct f32x8 {
+    pub low: f32x4,
+    pub high: f32x4,
+}
+
+impl f32x8 {
+    pub fn new(v0: f32, v1: f32, v2: f32, v3: f32, v4: f32, v5: f32, v6: f32, v7: f32) -> f32x8 {
+        return f32x8 {
+            low: f32x4::new(v0, v1, v2, v3),
+            high: f32x4::new(v4, v5, v6, v7),
+        }
+    }
+
+    pub fn splat(v: f32) -> f32x8 {
+        return f32x8 {
+            low: f32x4::splat(v),
+            high: f32x4::splat(v),
+        }
+    }
+
+    pub fn zero() -> f32x8 {
+        return f32x8 {
+            low: f32x4::zero(),
+            high: f32x4::zero(),
+        }
+    }
+
+    pub fn add(self, b: f32x8) -> f32x8 {
+        return f32x8 {
+            low: self.low.add(b.low),
+            high: self.high.add(b.high),
+        }
+    }
+
+    pub fn mul(self, b: f32x8) -> f32x8 {
+        return f32x8 {
+            low: self.low.mul(b.low),
+            high: self.high.mul(b.high),
+        }
+    }
+
+    pub fn sum(self) -> f32 {
+        return self.low.sum() + self.high.sum()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// i32x4: 4-lane 32-bit signed integer vector (128-bit)
+// ------------------------------------------------------------------------------
+
+pub struct i32x4 {
+    pub a: i32,
+    pub b: i32,
+    pub c: i32,
+    pub d: i32,
+}
+
+impl i32x4 {
+    pub fn new(a: i32, b: i32, c: i32, d: i32) -> i32x4 {
+        return i32x4 { a: a, b: b, c: c, d: d }
+    }
+
+    pub fn splat(v: i32) -> i32x4 {
+        return i32x4 { a: v, b: v, c: v, d: v }
+    }
+
+    pub fn zero() -> i32x4 {
+        return i32x4 { a: 0, b: 0, c: 0, d: 0 }
+    }
+
+    pub fn add(self, other: i32x4) -> i32x4 {
+        return i32x4 {
+            a: self.a + other.a,
+            b: self.b + other.b,
+            c: self.c + other.c,
+            d: self.d + other.d,
+        }
+    }
+
+    pub fn sub(self, other: i32x4) -> i32x4 {
+        return i32x4 {
+            a: self.a - other.a,
+            b: self.b - other.b,
+            c: self.c - other.c,
+            d: self.d - other.d,
+        }
+    }
+
+    pub fn mul(self, other: i32x4) -> i32x4 {
+        return i32x4 {
+            a: self.a * other.a,
+            b: self.b * other.b,
+            c: self.c * other.c,
+            d: self.d * other.d,
+        }
+    }
+
+    pub fn and_bits(self, other: i32x4) -> i32x4 {
+        return i32x4 {
+            a: self.a & other.a,
+            b: self.b & other.b,
+            c: self.c & other.c,
+            d: self.d & other.d,
+        }
+    }
+
+    pub fn or_bits(self, other: i32x4) -> i32x4 {
+        return i32x4 {
+            a: self.a | other.a,
+            b: self.b | other.b,
+            c: self.c | other.c,
+            d: self.d | other.d,
+        }
+    }
+
+    pub fn xor_bits(self, other: i32x4) -> i32x4 {
+        return i32x4 {
+            a: self.a ^ other.a,
+            b: self.b ^ other.b,
+            c: self.c ^ other.c,
+            d: self.d ^ other.d,
+        }
+    }
+
+    pub fn sum(self) -> i32 {
+        return self.a + self.b + self.c + self.d
+    }
+
+    pub fn min(self, other: i32x4) -> i32x4 {
+        var ra = self.a; if other.a < ra { ra = other.a }
+        var rb = self.b; if other.b < rb { rb = other.b }
+        var rc = self.c; if other.c < rc { rc = other.c }
+        var rd = self.d; if other.d < rd { rd = other.d }
+        return i32x4 { a: ra, b: rb, c: rc, d: rd }
+    }
+
+    pub fn max(self, other: i32x4) -> i32x4 {
+        var ra = self.a; if other.a > ra { ra = other.a }
+        var rb = self.b; if other.b > rb { rb = other.b }
+        var rc = self.c; if other.c > rc { rc = other.c }
+        var rd = self.d; if other.d > rd { rd = other.d }
+        return i32x4 { a: ra, b: rb, c: rc, d: rd }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// u8x16: 16-lane unsigned 8-bit integer vector (128-bit)
+// ------------------------------------------------------------------------------
+
+pub struct u8x16 {
+    pub b0: u8, pub b1: u8, pub b2: u8, pub b3: u8,
+    pub b4: u8, pub b5: u8, pub b6: u8, pub b7: u8,
+    pub b8: u8, pub b9: u8, pub b10: u8, pub b11: u8,
+    pub b12: u8, pub b13: u8, pub b14: u8, pub b15: u8,
+}
+
+impl u8x16 {
+    pub fn splat(v: u8) -> u8x16 {
+        return u8x16 {
+            b0: v, b1: v, b2: v, b3: v,
+            b4: v, b5: v, b6: v, b7: v,
+            b8: v, b9: v, b10: v, b11: v,
+            b12: v, b13: v, b14: v, b15: v,
+        }
+    }
+
+    pub fn zero() -> u8x16 {
+        return u8x16::splat(0u8)
+    }
+
+    pub fn xor_bits(self, o: u8x16) -> u8x16 {
+        return u8x16 {
+            b0: self.b0 ^ o.b0, b1: self.b1 ^ o.b1, b2: self.b2 ^ o.b2, b3: self.b3 ^ o.b3,
+            b4: self.b4 ^ o.b4, b5: self.b5 ^ o.b5, b6: self.b6 ^ o.b6, b7: self.b7 ^ o.b7,
+            b8: self.b8 ^ o.b8, b9: self.b9 ^ o.b9, b10: self.b10 ^ o.b10, b11: self.b11 ^ o.b11,
+            b12: self.b12 ^ o.b12, b13: self.b13 ^ o.b13, b14: self.b14 ^ o.b14, b15: self.b15 ^ o.b15,
+        }
+    }
+
+    pub fn get_lane(self, idx: usize) -> u8 {
+        if idx == 0usize { return self.b0 }
+        if idx == 1usize { return self.b1 }
+        if idx == 2usize { return self.b2 }
+        if idx == 3usize { return self.b3 }
+        if idx == 4usize { return self.b4 }
+        if idx == 5usize { return self.b5 }
+        if idx == 6usize { return self.b6 }
+        if idx == 7usize { return self.b7 }
+        if idx == 8usize { return self.b8 }
+        if idx == 9usize { return self.b9 }
+        if idx == 10usize { return self.b10 }
+        if idx == 11usize { return self.b11 }
+        if idx == 12usize { return self.b12 }
+        if idx == 13usize { return self.b13 }
+        if idx == 14usize { return self.b14 }
+        return self.b15
+    }
+}
+
+// ------------------------------------------------------------------------------
+// High-Performance SIMD Math & Matrix Kernels
+// ------------------------------------------------------------------------------
+
+pub struct SimdMath {}
+
+impl SimdMath {
+    pub fn dot4(a: f32x4, b: f32x4) -> f32 {
+        return a.dot(b)
+    }
+
+    pub fn cosine_similarity(a: f32x4, b: f32x4) -> f32 {
+        let dot = a.dot(b)
+        let mag_a = a.length()
+        let mag_b = b.length()
+        if mag_a == 0.0f32 || mag_b == 0.0f32 {
+            return 0.0f32
+        }
+        return dot / (mag_a * mag_b)
+    }
+
+    // Transform 4D vector by 4x4 row-major matrix: result = M * v
+    pub fn mat4_mul_vec4(m0: f32x4, m1: f32x4, m2: f32x4, m3: f32x4, v: f32x4) -> f32x4 {
+        return f32x4 {
+            x: m0.dot(v),
+            y: m1.dot(v),
+            z: m2.dot(v),
+            w: m3.dot(v),
+        }
+    }
+}

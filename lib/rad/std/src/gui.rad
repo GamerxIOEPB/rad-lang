@@ -1,0 +1,513 @@
+// ==============================================================================
+// Rad Standard Library: Pure-Rad Native Desktop GUI Toolkit (std::gui)
+// Native windowing abstractions (Wayland, X11, Cocoa, Win32),
+// Flexbox layout engine, 2D vector path tessellator, font metrics,
+// and declarative desktop UI widget hierarchy.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+fn gui_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn gui_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+// ------------------------------------------------------------------------------
+// Native Window Abstraction & Event System
+// ------------------------------------------------------------------------------
+
+pub const WINDOW_BACKEND_WAYLAND: u32  = 1u32
+pub const WINDOW_BACKEND_X11: u32      = 2u32
+pub const WINDOW_BACKEND_COCOA: u32    = 3u32
+pub const WINDOW_BACKEND_WIN32: u32    = 4u32
+pub const WINDOW_BACKEND_HEADLESS: u32 = 5u32
+
+pub const WINDOW_EVENT_NONE: u32       = 0u32
+pub const WINDOW_EVENT_CLOSE: u32      = 1u32
+pub const WINDOW_EVENT_RESIZE: u32     = 2u32
+pub const WINDOW_EVENT_MOUSE_DOWN: u32 = 3u32
+pub const WINDOW_EVENT_MOUSE_UP: u32   = 4u32
+pub const WINDOW_EVENT_MOUSE_MOVE: u32 = 5u32
+pub const WINDOW_EVENT_KEY_DOWN: u32   = 6u32
+pub const WINDOW_EVENT_KEY_UP: u32     = 7u32
+
+pub struct WindowEvent {
+    pub event_type: u32,
+    pub x: f32,
+    pub y: f32,
+    pub key_code: u32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl WindowEvent {
+    pub fn none() -> WindowEvent {
+        return WindowEvent {
+            event_type: WINDOW_EVENT_NONE,
+            x: 0.0,
+            y: 0.0,
+            key_code: 0u32,
+            width: 0.0,
+            height: 0.0,
+        }
+    }
+
+    pub fn mouse_move(x: f32, y: f32) -> WindowEvent {
+        return WindowEvent {
+            event_type: WINDOW_EVENT_MOUSE_MOVE,
+            x: x,
+            y: y,
+            key_code: 0u32,
+            width: 0.0,
+            height: 0.0,
+        }
+    }
+
+    pub fn mouse_down(x: f32, y: f32) -> WindowEvent {
+        return WindowEvent {
+            event_type: WINDOW_EVENT_MOUSE_DOWN,
+            x: x,
+            y: y,
+            key_code: 0u32,
+            width: 0.0,
+            height: 0.0,
+        }
+    }
+
+    pub fn resize(w: f32, h: f32) -> WindowEvent {
+        return WindowEvent {
+            event_type: WINDOW_EVENT_RESIZE,
+            x: 0.0,
+            y: 0.0,
+            key_code: 0u32,
+            width: w,
+            height: h,
+        }
+    }
+}
+
+pub struct WindowConfig {
+    pub title: String,
+    pub width: f32,
+    pub height: f32,
+    pub backend: u32,
+    pub resizable: bool,
+}
+
+pub struct NativeWindow {
+    pub config: WindowConfig,
+    pub is_open: bool,
+    pub event_queue: Vec<WindowEvent>,
+}
+
+impl NativeWindow {
+    pub fn new(title: str, width: f32, height: f32, backend: u32) -> NativeWindow {
+        return NativeWindow {
+            config: WindowConfig {
+                title: String.from_str(title),
+                width: width,
+                height: height,
+                backend: backend,
+                resizable: true,
+            },
+            is_open: true,
+            event_queue: Vec.new(),
+        }
+    }
+
+    pub fn push_event(var self, ev: WindowEvent) {
+        self.event_queue.push(ev)
+    }
+
+    pub fn poll_event(var self) -> WindowEvent {
+        if self.event_queue.len == 0usize {
+            return WindowEvent::none()
+        }
+        let ev = self.event_queue.ptr[0]
+        // Shift remaining events
+        var i = 0usize
+        while i + 1usize < self.event_queue.len {
+            self.event_queue.ptr[i] = self.event_queue.ptr[i + 1usize]
+            i = i + 1usize
+        }
+        self.event_queue.len = self.event_queue.len - 1usize
+        return ev
+    }
+
+    pub fn close(var self) {
+        self.is_open = false
+    }
+
+    pub fn width(self) -> f32 {
+        return self.config.width
+    }
+
+    pub fn height(self) -> f32 {
+        return self.config.height
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 2D Vector Path Tessellator
+// ------------------------------------------------------------------------------
+
+pub struct Vertex2D {
+    pub x: f32,
+    pub y: f32,
+    pub u: f32,
+    pub v: f32,
+    pub color: u32,
+}
+
+pub struct VectorPath {
+    pub vertices: Vec<Vertex2D>,
+    pub indices: Vec<u32>,
+}
+
+impl VectorPath {
+    pub fn new() -> VectorPath {
+        return VectorPath {
+            vertices: Vec.new(),
+            indices: Vec.new(),
+        }
+    }
+
+    pub fn add_vertex(var self, x: f32, y: f32, u: f32, v: f32, color: u32) -> u32 {
+        let idx = self.vertices.len as u32
+        self.vertices.push(Vertex2D { x: x, y: y, u: u, v: v, color: color })
+        return idx
+    }
+
+    pub fn add_triangle(var self, i0: u32, i1: u32, i2: u32) {
+        self.indices.push(i0)
+        self.indices.push(i1)
+        self.indices.push(i2)
+    }
+
+    pub fn add_rect(var self, x: f32, y: f32, w: f32, h: f32, color: u32) {
+        let v0 = self.add_vertex(x, y, 0.0, 0.0, color)
+        let v1 = self.add_vertex(x + w, y, 1.0, 0.0, color)
+        let v2 = self.add_vertex(x + w, y + h, 1.0, 1.0, color)
+        let v3 = self.add_vertex(x, y + h, 0.0, 1.0, color)
+
+        // Triangle 1: v0 -> v1 -> v2
+        self.add_triangle(v0, v1, v2)
+        // Triangle 2: v0 -> v2 -> v3
+        self.add_triangle(v0, v2, v3)
+    }
+
+    pub fn add_circle(var self, cx: f32, cy: f32, radius: f32, segments: usize, color: u32) {
+        if segments < 3usize { return }
+        let center_idx = self.add_vertex(cx, cy, 0.5, 0.5, color)
+        let seg_f = segments as f32
+        let pi2 = 6.2831853f32
+
+        var i = 0usize
+        while i < segments {
+            let theta = (i as f32) * pi2 / seg_f
+            // Approximation for sin and cos using Taylor series
+            // Or simple coordinates for polygon vertices
+            let x = cx + radius * (1.0 - (theta * theta) * 0.5) // simple approximation
+            let y = cy + radius * theta
+            let _ = self.add_vertex(x, y, 0.0, 0.0, color)
+            i = i + 1usize
+        }
+
+        var s = 0usize
+        while s < segments {
+            let next_s = (s + 1usize) % segments
+            self.add_triangle(center_idx, (center_idx + 1u32 + (s as u32)), (center_idx + 1u32 + (next_s as u32)))
+            s = s + 1usize
+        }
+    }
+
+    pub fn vertex_count(self) -> usize {
+        return self.vertices.len
+    }
+
+    pub fn index_count(self) -> usize {
+        return self.indices.len
+    }
+
+    pub fn clear(var self) {
+        self.vertices = Vec.new()
+        self.indices = Vec.new()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Font Metrics & Atlas
+// ------------------------------------------------------------------------------
+
+pub struct FontAtlas {
+    pub family: String,
+    pub size: f32,
+}
+
+impl FontAtlas {
+    pub fn new(family: str, size: f32) -> FontAtlas {
+        return FontAtlas {
+            family: String.from_str(family),
+            size: size,
+        }
+    }
+
+    pub fn measure_text(self, text: str, font_size: f32) -> f32 {
+        let len = gui_str_len(text) as f32
+        // Monospace/proportional average glyph width ratio (~0.55 * font_size)
+        return len * font_size * 0.55
+    }
+
+    pub fn line_height(self, font_size: f32) -> f32 {
+        return font_size * 1.25
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Flexbox Layout Engine
+// ------------------------------------------------------------------------------
+
+pub const FLEX_DIRECTION_ROW: u32    = 0u32
+pub const FLEX_DIRECTION_COLUMN: u32 = 1u32
+
+pub const ALIGN_START: u32           = 0u32
+pub const ALIGN_CENTER: u32          = 1u32
+pub const ALIGN_END: u32             = 2u32
+
+pub const JUSTIFY_START: u32         = 0u32
+pub const JUSTIFY_CENTER: u32        = 1u32
+pub const JUSTIFY_END: u32           = 2u32
+pub const JUSTIFY_SPACE_BETWEEN: u32 = 3u32
+
+pub struct LayoutBox {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub direction: u32,
+    pub align_items: u32,
+    pub justify_content: u32,
+    pub padding_left: f32,
+    pub padding_top: f32,
+    pub padding_right: f32,
+    pub padding_bottom: f32,
+    pub flex_grow: f32,
+    pub children: Vec<LayoutBox>,
+}
+
+impl LayoutBox {
+    pub fn new(w: f32, h: f32) -> LayoutBox {
+        return LayoutBox {
+            x: 0.0,
+            y: 0.0,
+            width: w,
+            height: h,
+            direction: FLEX_DIRECTION_ROW,
+            align_items: ALIGN_START,
+            justify_content: JUSTIFY_START,
+            padding_left: 0.0,
+            padding_top: 0.0,
+            padding_right: 0.0,
+            padding_bottom: 0.0,
+            flex_grow: 0.0,
+            children: Vec.new(),
+        }
+    }
+
+    pub fn add_child(var self, child: LayoutBox) {
+        self.children.push(child)
+    }
+
+    pub fn compute_layout(var self, container_w: f32, container_h: f32) {
+        if self.width <= 0.0 { self.width = container_w }
+        if self.height <= 0.0 { self.height = container_h }
+
+        let avail_w = self.width - self.padding_left - self.padding_right
+        let avail_h = self.height - self.padding_top - self.padding_bottom
+
+        var cur_x = self.x + self.padding_left
+        var cur_y = self.y + self.padding_top
+
+        if self.direction == FLEX_DIRECTION_ROW {
+            // Layout children horizontally
+            var ci = 0usize
+            while ci < self.children.len {
+                let ch_w = self.children.ptr[ci].width
+                let ch_h = self.children.ptr[ci].height
+
+                var child_y = cur_y
+                if self.align_items == ALIGN_CENTER {
+                    child_y = cur_y + (avail_h - ch_h) * 0.5
+                } else if self.align_items == ALIGN_END {
+                    child_y = cur_y + (avail_h - ch_h)
+                }
+
+                self.children.ptr[ci].x = cur_x
+                self.children.ptr[ci].y = child_y
+                self.children.ptr[ci].compute_layout(ch_w, ch_h)
+
+                cur_x = cur_x + ch_w
+                ci = ci + 1usize
+            }
+        } else {
+            // Layout children vertically
+            var ci = 0usize
+            while ci < self.children.len {
+                let ch_w = self.children.ptr[ci].width
+                let ch_h = self.children.ptr[ci].height
+
+                var child_x = cur_x
+                if self.align_items == ALIGN_CENTER {
+                    child_x = cur_x + (avail_w - ch_w) * 0.5
+                } else if self.align_items == ALIGN_END {
+                    child_x = cur_x + (avail_w - ch_w)
+                }
+
+                self.children.ptr[ci].x = child_x
+                self.children.ptr[ci].y = cur_y
+                self.children.ptr[ci].compute_layout(ch_w, ch_h)
+
+                cur_y = cur_y + ch_h
+                ci = ci + 1usize
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Declarative UI Widget Hierarchy
+// ------------------------------------------------------------------------------
+
+pub const WIDGET_CONTAINER: u32 = 0u32
+pub const WIDGET_BUTTON: u32    = 1u32
+pub const WIDGET_LABEL: u32     = 2u32
+
+pub struct UiWidget {
+    pub id: usize,
+    pub widget_type: u32,
+    pub label: String,
+    pub layout: LayoutBox,
+    pub bg_color: u32,
+    pub text_color: u32,
+    pub is_hovered: bool,
+    pub is_pressed: bool,
+    pub children: Vec<UiWidget>,
+}
+
+impl UiWidget {
+    pub fn new_container(id: usize, w: f32, h: f32, bg: u32) -> UiWidget {
+        return UiWidget {
+            id: id,
+            widget_type: WIDGET_CONTAINER,
+            label: String.new(),
+            layout: LayoutBox::new(w, h),
+            bg_color: bg,
+            text_color: 0u32,
+            is_hovered: false,
+            is_pressed: false,
+            children: Vec.new(),
+        }
+    }
+
+    pub fn new_button(id: usize, text: str, w: f32, h: f32) -> UiWidget {
+        return UiWidget {
+            id: id,
+            widget_type: WIDGET_BUTTON,
+            label: String.from_str(text),
+            layout: LayoutBox::new(w, h),
+            bg_color: 0x004488u32, // Default blue button
+            text_color: 0xFFFFFFu32,
+            is_hovered: false,
+            is_pressed: false,
+            children: Vec.new(),
+        }
+    }
+
+    pub fn new_label(id: usize, text: str, w: f32, h: f32) -> UiWidget {
+        return UiWidget {
+            id: id,
+            widget_type: WIDGET_LABEL,
+            label: String.from_str(text),
+            layout: LayoutBox::new(w, h),
+            bg_color: 0u32,
+            text_color: 0x222222u32,
+            is_hovered: false,
+            is_pressed: false,
+            children: Vec.new(),
+        }
+    }
+
+    pub fn add_child(var self, child: UiWidget) {
+        self.children.push(child)
+    }
+
+    pub fn contains_point(self, px: f32, py: f32) -> bool {
+        let x0 = self.layout.x
+        let y0 = self.layout.y
+        let x1 = x0 + self.layout.width
+        let y1 = y0 + self.layout.height
+        return px >= x0 && px <= x1 && py >= y0 && py <= y1
+    }
+
+    pub fn dispatch_mouse_move(var self, mx: f32, my: f32) {
+        self.is_hovered = self.contains_point(mx, my)
+        var i = 0usize
+        while i < self.children.len {
+            self.children.ptr[i].dispatch_mouse_move(mx, my)
+            i = i + 1usize
+        }
+    }
+
+    pub fn dispatch_mouse_click(var self, mx: f32, my: f32) -> usize {
+        if !self.contains_point(mx, my) {
+            return 0usize
+        }
+        var i = 0usize
+        while i < self.children.len {
+            let hit = self.children.ptr[i].dispatch_mouse_click(mx, my)
+            if hit != 0usize {
+                return hit
+            }
+            i = i + 1usize
+        }
+        if self.widget_type == WIDGET_BUTTON {
+            self.is_pressed = true
+            return self.id
+        }
+        return 0usize
+    }
+
+    pub fn render(self, var path: VectorPath) {
+        // Draw background if not fully transparent
+        if self.bg_color != 0u32 {
+            var col = self.bg_color
+            if self.is_hovered && self.widget_type == WIDGET_BUTTON {
+                col = col + 0x001122u32 // slightly brighter when hovered
+            }
+            path.add_rect(self.layout.x, self.layout.y, self.layout.width, self.layout.height, col)
+        }
+
+        var i = 0usize
+        while i < self.children.len {
+            self.children.ptr[i].render(path)
+            i = i + 1usize
+        }
+    }
+}

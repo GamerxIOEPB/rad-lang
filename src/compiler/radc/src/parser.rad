@@ -1292,16 +1292,17 @@ impl Parser {
                     let p_name: *raw u8 = self.exprs.ptr[base].str_val.as_ptr()
                     let slen = str_len(p_name as str)
                     if (p_name as usize) != 0usize && slen > 0usize {
-                        if p_name[0usize] >= 65u8 && p_name[0usize] <= 90u8 {
-                            let p1 = self.pos + 1usize
-                            if p1 < self.tokens.len {
-                                let k1 = self.tokens.ptr[p1].kind
-                                if k1 == TOK_RBRACE {
+                        let is_upper = p_name[0usize] >= 65u8 && p_name[0usize] <= 90u8
+                        let p1 = self.pos + 1usize
+                        if p1 < self.tokens.len {
+                            let k1 = self.tokens.ptr[p1].kind
+                            if k1 == TOK_RBRACE {
+                                if is_upper {
                                     is_struct = true
-                                } else if (k1 == TOK_IDENT || k1 == TOK_HANDLE || k1 == TOK_PERFORM || k1 == TOK_RESUME || k1 == TOK_EFFECT || k1 == TOK_WITH || k1 == TOK_REQUIRES || k1 == TOK_ENSURES || k1 == TOK_ACTOR || k1 == TOK_ASYNC || k1 == TOK_AWAIT || k1 == TOK_DYN) && p1 + 1usize < self.tokens.len {
-                                    if self.tokens.ptr[p1 + 1usize].kind == TOK_COLON {
-                                        is_struct = true
-                                    }
+                                }
+                            } else if (k1 == TOK_IDENT || k1 == TOK_HANDLE || k1 == TOK_PERFORM || k1 == TOK_RESUME || k1 == TOK_EFFECT || k1 == TOK_WITH || k1 == TOK_REQUIRES || k1 == TOK_ENSURES || k1 == TOK_ACTOR || k1 == TOK_ASYNC || k1 == TOK_AWAIT || k1 == TOK_DYN) && p1 + 1usize < self.tokens.len {
+                                if self.tokens.ptr[p1 + 1usize].kind == TOK_COLON {
+                                    is_struct = true
                                 }
                             }
                         }

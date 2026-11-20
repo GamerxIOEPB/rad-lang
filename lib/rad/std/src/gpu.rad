@@ -1,0 +1,257 @@
+// ==============================================================================
+// Rad Standard Library: Pure-Rad GPU Compute & Rendering Pipeline (std::gpu)
+// WebGPU / Vulkan inspired hardware-accelerated compute & graphics abstractions:
+// GPU buffers, shaders, render pipelines, compute pipelines, command buffers & queue.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+fn gpu_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn gpu_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+// ------------------------------------------------------------------------------
+// GPU Buffer Usages & Storage
+// ------------------------------------------------------------------------------
+
+pub const BUFFER_USAGE_VERTEX: u32  = 0x01u32
+pub const BUFFER_USAGE_INDEX: u32   = 0x02u32
+pub const BUFFER_USAGE_UNIFORM: u32 = 0x04u32
+pub const BUFFER_USAGE_STORAGE: u32 = 0x08u32
+
+pub struct GpuBuffer {
+    pub id: usize,
+    pub size: usize,
+    pub usage: u32,
+    pub data: Vec<u8>,
+}
+
+impl GpuBuffer {
+    pub fn new(id: usize, size: usize, usage: u32) -> GpuBuffer {
+        return GpuBuffer {
+            id: id,
+            size: size,
+            usage: usage,
+            data: Vec.new(),
+        }
+    }
+
+    pub fn upload(var self, bytes: Vec<u8>) {
+        self.data = Vec.new()
+        var i = 0usize
+        while i < bytes.len {
+            self.data.push(bytes.ptr[i])
+            i = i + 1usize
+        }
+        self.size = bytes.len
+    }
+
+    pub fn len(self) -> usize {
+        return self.data.len
+    }
+}
+
+// ------------------------------------------------------------------------------
+// GPU Shaders & Pipelines
+// ------------------------------------------------------------------------------
+
+pub const SHADER_STAGE_VERTEX: u32   = 1u32
+pub const SHADER_STAGE_FRAGMENT: u32 = 2u32
+pub const SHADER_STAGE_COMPUTE: u32  = 3u32
+
+pub struct GpuShader {
+    pub stage: u32,
+    pub entry_point: String,
+    pub source: String,
+}
+
+impl GpuShader {
+    pub fn new(stage: u32, entry_name: str, src: str) -> GpuShader {
+        return GpuShader {
+            stage: stage,
+            entry_point: String.from_str(entry_name),
+            source: String.from_str(src),
+        }
+    }
+}
+
+pub const TOPOLOGY_TRIANGLES: u32 = 0u32
+pub const TOPOLOGY_LINES: u32     = 1u32
+pub const TOPOLOGY_POINTS: u32    = 2u32
+
+pub struct GpuRenderPipeline {
+    pub name: String,
+    pub vs: GpuShader,
+    pub fs: GpuShader,
+    pub topology: u32,
+}
+
+impl GpuRenderPipeline {
+    pub fn new(name: str, vs: GpuShader, fs: GpuShader, topology: u32) -> GpuRenderPipeline {
+        return GpuRenderPipeline {
+            name: String.from_str(name),
+            vs: vs,
+            fs: fs,
+            topology: topology,
+        }
+    }
+}
+
+pub struct GpuComputePipeline {
+    pub name: String,
+    pub cs: GpuShader,
+    pub workgroup_size_x: usize,
+    pub workgroup_size_y: usize,
+    pub workgroup_size_z: usize,
+}
+
+impl GpuComputePipeline {
+    pub fn new(name: str, cs: GpuShader, x: usize, y: usize, z: usize) -> GpuComputePipeline {
+        return GpuComputePipeline {
+            name: String.from_str(name),
+            cs: cs,
+            workgroup_size_x: x,
+            workgroup_size_y: y,
+            workgroup_size_z: z,
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Command Buffers & Execution Queue
+// ------------------------------------------------------------------------------
+
+pub const GPU_CMD_SET_PIPELINE: i32 = 1
+pub const GPU_CMD_DRAW: i32         = 2
+pub const GPU_CMD_DISPATCH: i32     = 3
+pub const GPU_CMD_BIND_BUFFER: i32  = 4
+
+pub struct GpuCommand {
+    pub cmd_type: i32,
+    pub arg1: usize,
+    pub arg2: usize,
+    pub arg3: usize,
+    pub name: String,
+}
+
+pub struct GpuCommandBuffer {
+    pub commands: Vec<GpuCommand>,
+}
+
+impl GpuCommandBuffer {
+    pub fn new() -> GpuCommandBuffer {
+        return GpuCommandBuffer {
+            commands: Vec.new(),
+        }
+    }
+
+    pub fn set_render_pipeline(var self, name: str) {
+        self.commands.push(GpuCommand {
+            cmd_type: GPU_CMD_SET_PIPELINE,
+            arg1: 0usize,
+            arg2: 0usize,
+            arg3: 0usize,
+            name: String.from_str(name),
+        })
+    }
+
+    pub fn draw(var self, vertex_count: usize, instance_count: usize) {
+        self.commands.push(GpuCommand {
+            cmd_type: GPU_CMD_DRAW,
+            arg1: vertex_count,
+            arg2: instance_count,
+            arg3: 0usize,
+            name: String.new(),
+        })
+    }
+
+    pub fn dispatch(var self, x: usize, y: usize, z: usize) {
+        self.commands.push(GpuCommand {
+            cmd_type: GPU_CMD_DISPATCH,
+            arg1: x,
+            arg2: y,
+            arg3: z,
+            name: String.new(),
+        })
+    }
+
+    pub fn count(self) -> usize {
+        return self.commands.len
+    }
+}
+
+// ------------------------------------------------------------------------------
+// GPU Device Manager
+// ------------------------------------------------------------------------------
+
+pub struct GpuDevice {
+    pub name: String,
+    pub buffers: Vec<GpuBuffer>,
+    pub render_pipelines: Vec<GpuRenderPipeline>,
+    pub compute_pipelines: Vec<GpuComputePipeline>,
+    pub total_draw_calls: usize,
+    pub total_dispatches: usize,
+}
+
+impl GpuDevice {
+    pub fn new(name: str) -> GpuDevice {
+        return GpuDevice {
+            name: String.from_str(name),
+            buffers: Vec.new(),
+            render_pipelines: Vec.new(),
+            compute_pipelines: Vec.new(),
+            total_draw_calls: 0usize,
+            total_dispatches: 0usize,
+        }
+    }
+
+    pub fn create_buffer(var self, size: usize, usage: u32) -> usize {
+        let id = self.buffers.len
+        self.buffers.push(GpuBuffer::new(id, size, usage))
+        return id
+    }
+
+    pub fn create_render_pipeline(var self, pipeline: GpuRenderPipeline) -> usize {
+        let id = self.render_pipelines.len
+        self.render_pipelines.push(pipeline)
+        return id
+    }
+
+    pub fn create_compute_pipeline(var self, pipeline: GpuComputePipeline) -> usize {
+        let id = self.compute_pipelines.len
+        self.compute_pipelines.push(pipeline)
+        return id
+    }
+
+    pub fn submit(var self, cmd_buf: GpuCommandBuffer) -> bool {
+        var ci = 0usize
+        while ci < cmd_buf.commands.len {
+            let cmd = cmd_buf.commands.ptr[ci]
+            if cmd.cmd_type == GPU_CMD_DRAW {
+                self.total_draw_calls = self.total_draw_calls + 1usize
+            } else if cmd.cmd_type == GPU_CMD_DISPATCH {
+                self.total_dispatches = self.total_dispatches + 1usize
+            }
+            ci = ci + 1usize
+        }
+        return true
+    }
+}

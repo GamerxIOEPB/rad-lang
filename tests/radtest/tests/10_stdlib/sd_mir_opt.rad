@@ -1,0 +1,45 @@
+import std/mir;
+
+fn main() -> i32 {
+    println("--- Rad-MIR Optimization Pipeline ---");
+
+    var fn1 = MirFunction::new("test_compute", "i64");
+    let v1 = fn1.alloc_vreg();
+    let v2 = fn1.alloc_vreg();
+    let v3 = fn1.alloc_vreg();
+    let v4 = fn1.alloc_vreg();
+    let v5 = fn1.alloc_vreg();
+
+    // Constant addition: 10 + 20 -> will fold to 30 via SCCP
+    fn1.blocks.ptr[0].append(MirInstr::new(MIR_ADD, v1, MirOperand::const_int(10i64), MirOperand::const_int(20i64)));
+
+    // Dead computation: v2 = v1 * 5 (never used) -> DCE will eliminate
+    fn1.blocks.ptr[0].append(MirInstr::new(MIR_MUL, v2, MirOperand::vreg(v1), MirOperand::const_int(5i64)));
+
+    // CSE candidate: v3 = v1 + v1, v4 = v1 + v1
+    fn1.blocks.ptr[0].append(MirInstr::new(MIR_ADD, v3, MirOperand::vreg(v1), MirOperand::vreg(v1)));
+    fn1.blocks.ptr[0].append(MirInstr::new(MIR_ADD, v4, MirOperand::vreg(v1), MirOperand::vreg(v1)));
+
+    // Devirtualization candidate: dyn Trait call
+    fn1.blocks.ptr[0].append(MirInstr::vtable_call(v5, "Shape", "area", "Circle"));
+
+    // Stack promotion candidate: heap alloc that does not escape
+    let v6 = fn1.alloc_vreg();
+    fn1.blocks.ptr[0].append(MirInstr::heap_alloc(v6, 64i64));
+
+    // Return v3
+    fn1.blocks.ptr[0].append(MirInstr::ret(MirOperand::vreg(v3)));
+
+    let initial_instrs = fn1.total_instructions();
+    println(f"Initial instruction count: {initial_instrs}");
+
+    let stats = MirOptimizer::run_optimization_pipeline(fn1, "Circle");
+    println(f"SCCP constant folded: {stats.sccp_folded}");
+    println(f"CSE eliminated: {stats.cse_eliminated}");
+    println(f"DCE eliminated: {stats.dce_eliminated}");
+    println(f"Devirtualized calls: {stats.devirtualized}");
+    println(f"Stack promoted allocs: {stats.stack_promoted}");
+
+    println("MIR optimization passes completed successfully.");
+    return 0;
+}

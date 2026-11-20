@@ -1,0 +1,10 @@
+--- Rad GPU & GUI Stack ---
+GPU buffer created with id: 0
+GPU render pipeline created with id: 0
+GPU draw calls: 1, dispatches: 1
+Window dimensions: 1280x720
+Polled event type: 3
+Tessellated vertices: 4, indices: 6
+Clicked widget id: 2
+Measured text width: 52
+GPU and GUI stack verified successfully.

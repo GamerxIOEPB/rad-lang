@@ -1,0 +1,60 @@
+import std/gpu;
+import std/gui;
+
+fn main() -> i32 {
+    println("--- Rad GPU & GUI Stack ---");
+
+    // 1. GPU Abstractions
+    var gpu = GpuDevice::new("Rad Hardware WebGPU/Vulkan Virtual Adapter");
+    let buf_id = gpu.create_buffer(1024usize, BUFFER_USAGE_VERTEX);
+    println(f"GPU buffer created with id: {buf_id}");
+
+    let vs = GpuShader::new(SHADER_STAGE_VERTEX, "vs_main", "vertex shader source");
+    let fs = GpuShader::new(SHADER_STAGE_FRAGMENT, "fs_main", "fragment shader source");
+    let pipe_id = gpu.create_render_pipeline(GpuRenderPipeline::new("ui_pipeline", vs, fs, TOPOLOGY_TRIANGLES));
+    println(f"GPU render pipeline created with id: {pipe_id}");
+
+    var cmd = GpuCommandBuffer::new();
+    cmd.set_render_pipeline("ui_pipeline");
+    cmd.draw(6usize, 1usize);
+    cmd.dispatch(16usize, 16usize, 1usize);
+    let _sub = gpu.submit(cmd);
+    let draws = gpu.total_draw_calls;
+    let dispatches = gpu.total_dispatches;
+    println(f"GPU draw calls: {draws}, dispatches: {dispatches}");
+
+    // 2. Native Window Abstraction
+    var win = NativeWindow::new("Rad Studio", 1280.0, 720.0, WINDOW_BACKEND_WAYLAND);
+    let win_w = win.width() as i32;
+    let win_h = win.height() as i32;
+    println(f"Window dimensions: {win_w}x{win_h}");
+    win.push_event(WindowEvent::mouse_down(100.0, 50.0));
+    let ev = win.poll_event();
+    let ev_ty = ev.event_type;
+    println(f"Polled event type: {ev_ty}");
+
+    // 3. 2D Vector Path Tessellator
+    var path = VectorPath::new();
+    path.add_rect(10.0, 10.0, 200.0, 50.0, 0xFF00FFu32);
+    let v_cnt = path.vertex_count();
+    let idx_cnt = path.index_count();
+    println(f"Tessellated vertices: {v_cnt}, indices: {idx_cnt}");
+
+    // 4. Flexbox Layout Engine & UI Widgets
+    var root = UiWidget::new_container(1usize, 800.0, 600.0, 0x1E1E1Eu32);
+    let btn = UiWidget::new_button(2usize, "Submit", 120.0, 40.0);
+    root.add_child(btn);
+    root.layout.compute_layout(800.0, 600.0);
+
+    // Test hit testing and click dispatch
+    root.dispatch_mouse_move(20.0, 20.0);
+    let clicked_id = root.dispatch_mouse_click(20.0, 20.0);
+    println(f"Clicked widget id: {clicked_id}");
+
+    let atlas = FontAtlas::new("Inter", 16.0);
+    let text_w = atlas.measure_text("Submit", 16.0) as i32;
+    println(f"Measured text width: {text_w}");
+
+    println("GPU and GUI stack verified successfully.");
+    return 0;
+}

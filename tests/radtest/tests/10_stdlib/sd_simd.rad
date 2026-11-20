@@ -1,0 +1,50 @@
+import std/simd;
+
+fn main() -> i32 {
+    println("--- Rad SIMD Primitives ---");
+
+    // 1. f32x4 lane arithmetic
+    let a = f32x4::new(1.0f32, 2.0f32, 3.0f32, 4.0f32);
+    let b = f32x4::new(5.0f32, 6.0f32, 7.0f32, 8.0f32);
+    let sum_vec = a.add(b);
+    let sum_add = sum_vec.sum() as i32;
+    println(f"f32x4 add sum: {sum_add}");
+
+    let dot = a.dot(b) as i32;
+    println(f"f32x4 dot product: {dot}");
+
+    let c = f32x4::splat(2.0f32);
+    let fma_res = a.fma(b, c);
+    let sum_fma = fma_res.sum() as i32;
+    println(f"f32x4 FMA sum: {sum_fma}");
+
+    // 2. i32x4 lane operations
+    let ia = i32x4::new(10, 20, 30, 40);
+    let ib = i32x4::new(1, 2, 3, 4);
+    let isub = ia.sub(ib);
+    let sum_sub = isub.sum();
+    println(f"i32x4 sub sum: {sum_sub}");
+
+    // 3. u8x16 byte operations
+    let u1 = u8x16::splat(0xAAu8);
+    let u2 = u8x16::splat(0x55u8);
+    let u_xor = u1.xor_bits(u2);
+    let xor_val = u_xor.get_lane(0usize) as i32;
+    println(f"u8x16 xor lane 0: {xor_val}");
+
+    // 4. Matrix vector transformation
+    let m0 = f32x4::new(1.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let m1 = f32x4::new(0.0f32, 2.0f32, 0.0f32, 0.0f32);
+    let m2 = f32x4::new(0.0f32, 0.0f32, 3.0f32, 0.0f32);
+    let m3 = f32x4::new(0.0f32, 0.0f32, 0.0f32, 4.0f32);
+    let v = f32x4::new(2.0f32, 3.0f32, 4.0f32, 5.0f32);
+    let mv = SimdMath::mat4_mul_vec4(m0, m1, m2, m3, v);
+    let mx = mv.x as i32;
+    let my = mv.y as i32;
+    let mz = mv.z as i32;
+    let mw = mv.w as i32;
+    println(f"mat4_mul_vec4: x={mx}, y={my}, z={mz}, w={mw}");
+
+    println("SIMD primitives verified successfully.");
+    return 0;
+}

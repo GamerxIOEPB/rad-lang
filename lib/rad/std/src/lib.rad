@@ -42,3 +42,8 @@ pub import smt
 pub import macho
 pub import pe
 pub import jit
+pub import mir
+pub import simd
+pub import kernel
+pub import gpu
+pub import gui

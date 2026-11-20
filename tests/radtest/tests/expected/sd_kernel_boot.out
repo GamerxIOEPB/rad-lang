@@ -1,0 +1,12 @@
+--- Rad Bare-Metal Microkernel Subsystem ---
+Multiboot2 header length: 16
+Multiboot2 header magic match: 1
+UART bytes queued: 45
+VGA cursor row: 1, col: 0
+Paging mapped pages: 2
+Paging translate 0x1050: 32848
+Paging translate unmapped: 0
+GDT descriptor count: 5
+Kernel code selector: 8
+IDT gate 0x80 present: 1
+Bare-metal kernel subsystem verified successfully.

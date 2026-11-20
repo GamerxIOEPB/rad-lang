@@ -1,0 +1,8 @@
+--- Rad-MIR Optimization Pipeline ---
+Initial instruction count: 7
+SCCP constant folded: 1
+CSE eliminated: 1
+DCE eliminated: 1
+Devirtualized calls: 1
+Stack promoted allocs: 1
+MIR optimization passes completed successfully.

@@ -1,0 +1,53 @@
+import std/kernel;
+
+fn main() -> i32 {
+    println("--- Rad Bare-Metal Microkernel Subsystem ---");
+
+    // 1. Multiboot2 Header verification
+    let builder = KernelImageBuilder::new("rad_kernel", 0x100000u64);
+    let hdr = builder.emit_multiboot_header();
+    let hdr_len = hdr.len;
+    println(f"Multiboot2 header length: {hdr_len}");
+    let magic = (hdr.ptr[0] as u32) | ((hdr.ptr[1] as u32) << 8u32) | ((hdr.ptr[2] as u32) << 16u32) | ((hdr.ptr[3] as u32) << 24u32);
+    let magic_match = magic == MULTIBOOT2_HEADER_MAGIC;
+    println(f"Multiboot2 header magic match: {magic_match}");
+
+    // 2. 16550 UART Serial driver
+    var uart = UartPort::new(UART_COM1_BASE);
+    uart.write_line("Booting Rad Bare-Metal Microkernel v0.2.4...");
+    let bytes_queued = uart.bytes_sent();
+    println(f"UART bytes queued: {bytes_queued}");
+
+    // 3. VGA 80x25 Text Console
+    var vga = VgaConsole::new(0usize as *raw var u8);
+    vga.write_str("Rad VGA Console Online\n");
+    let vga_row = vga.row;
+    let vga_col = vga.col;
+    println(f"VGA cursor row: {vga_row}, col: {vga_col}");
+
+    // 4. 4-Level Paging Memory Manager
+    var paging = PageTableManager::new();
+    let _m1 = paging.map_page(0x1000u64, 0x8000u64, PAGE_WRITABLE);
+    let _m2 = paging.map_page(0x2000u64, 0x9000u64, PAGE_WRITABLE | PAGE_USER);
+    let page_cnt = paging.mapped_page_count();
+    let trans_ok = paging.translate(0x1050u64);
+    let trans_unmapped = paging.translate(0x5000u64);
+    println(f"Paging mapped pages: {page_cnt}");
+    println(f"Paging translate 0x1050: {trans_ok}");
+    println(f"Paging translate unmapped: {trans_unmapped}");
+
+    // 5. GDT & IDT tables
+    let gdt = GdtTable::new();
+    let gdt_cnt = gdt.count();
+    let k_code_sel = gdt.kernel_code_selector();
+    println(f"GDT descriptor count: {gdt_cnt}");
+    println(f"Kernel code selector: {k_code_sel}");
+
+    var idt = IdtTable::new();
+    idt.set_gate(0x80u8, 0xFFFFFFFF80001000u64, k_code_sel, IDT_FLAG_INTERRUPT | IDT_FLAG_RING3);
+    let gate_ok = idt.is_gate_present(0x80u8);
+    println(f"IDT gate 0x80 present: {gate_ok}");
+
+    println("Bare-metal kernel subsystem verified successfully.");
+    return 0;
+}

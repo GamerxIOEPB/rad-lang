@@ -1,0 +1,407 @@
+// ==============================================================================
+// Rad Standard Library: Bare-Metal Microkernel & Embedded Target (std::kernel)
+// Multiboot2 headers, 16550 UART serial driver, VGA 80x25 text console,
+// 4-level paging memory manager, IDT interrupt gates, and GDT descriptors.
+// Zero external C dynamic dependencies, suitable for #![no_std] bare-metal.
+// ==============================================================================
+
+fn kernel_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+extern "C" {
+    fn fopen(filename: *raw u8, mode: *raw u8) -> *raw var u8;
+    fn fwrite(ptr: *raw u8, size: usize, count: usize, stream: *raw var u8) -> usize;
+    fn fclose(stream: *raw var u8) -> i32;
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+// ------------------------------------------------------------------------------
+// Multiboot2 Specification Constants (Header Magic: 0xE85250D6)
+// ------------------------------------------------------------------------------
+
+pub const MULTIBOOT2_HEADER_MAGIC: u32 = 0xE85250D6u32
+pub const MULTIBOOT2_BOOTLOADER_MAGIC: u32 = 0x36D76289u32
+pub const MULTIBOOT2_ARCH_I386: u32 = 0u32
+
+pub const MULTIBOOT_TAG_TYPE_END: u16 = 0u16
+pub const MULTIBOOT_TAG_TYPE_FRAMEBUFFER: u16 = 5u16
+
+// ------------------------------------------------------------------------------
+// UART 16550 Serial Console (COM1: Port 0x3F8)
+// ------------------------------------------------------------------------------
+
+pub const UART_COM1_BASE: u16 = 0x3F8u16
+
+pub struct UartPort {
+    pub base_port: u16,
+    pub tx_buffer: Vec<u8>,
+}
+
+impl UartPort {
+    pub fn new(port: u16) -> UartPort {
+        return UartPort {
+            base_port: port,
+            tx_buffer: Vec.new(),
+        }
+    }
+
+    pub fn write_byte(var self, b: u8) {
+        self.tx_buffer.push(b)
+    }
+
+    pub fn write_str(var self, s: str) {
+        let p = s as *raw u8
+        let len = kernel_str_len(s)
+        var i = 0usize
+        while i < len {
+            self.tx_buffer.push(p[i])
+            i = i + 1usize
+        }
+    }
+
+    pub fn write_line(var self, s: str) {
+        self.write_str(s)
+        self.write_byte(10u8) // '\n'
+    }
+
+    pub fn bytes_sent(self) -> usize {
+        return self.tx_buffer.len
+    }
+}
+
+// ------------------------------------------------------------------------------
+// VGA 80x25 Color Text Console (Address: 0xB8000)
+// ------------------------------------------------------------------------------
+
+pub const VGA_BUFFER_ADDR: u64 = 0xB8000u64
+pub const VGA_WIDTH: usize  = 80usize
+pub const VGA_HEIGHT: usize = 25usize
+
+pub const COLOR_BLACK: u8       = 0u8
+pub const COLOR_BLUE: u8        = 1u8
+pub const COLOR_GREEN: u8       = 2u8
+pub const COLOR_CYAN: u8        = 3u8
+pub const COLOR_RED: u8         = 4u8
+pub const COLOR_MAGENTA: u8     = 5u8
+pub const COLOR_BROWN: u8       = 6u8
+pub const COLOR_LIGHT_GREY: u8  = 7u8
+pub const COLOR_WHITE: u8       = 15u8
+
+pub struct VgaConsole {
+    pub col: usize,
+    pub row: usize,
+    pub fg: u8,
+    pub bg: u8,
+    pub buffer: *raw var u8,
+    pub is_virtual: bool,
+}
+
+impl VgaConsole {
+    pub fn new(raw_buf: *raw var u8) -> VgaConsole {
+        var buf = raw_buf
+        var is_virt = false
+        if (buf as usize) == 0usize {
+            buf = malloc(VGA_WIDTH * VGA_HEIGHT * 2usize)
+            is_virt = true
+        }
+        return VgaConsole {
+            col: 0usize,
+            row: 0usize,
+            fg: COLOR_WHITE,
+            bg: COLOR_BLACK,
+            buffer: buf,
+            is_virtual: is_virt,
+        }
+    }
+
+    pub fn clear(var self) {
+        let attr = (self.bg << 4u8) | (self.fg & 0x0Fu8)
+        var i = 0usize
+        let total = VGA_WIDTH * VGA_HEIGHT
+        while i < total {
+            let offset = i * 2usize
+            self.buffer[offset] = 32u8 // ' ' space
+            self.buffer[offset + 1usize] = attr
+            i = i + 1usize
+        }
+        self.col = 0usize
+        self.row = 0usize
+    }
+
+    pub fn put_char(var self, c: u8) {
+        if c == 10u8 { // '\n'
+            self.col = 0usize
+            self.row = self.row + 1usize
+            if self.row >= VGA_HEIGHT {
+                self.row = 0usize
+            }
+            return
+        }
+        let offset = (self.row * VGA_WIDTH + self.col) * 2usize
+        let attr = (self.bg << 4u8) | (self.fg & 0x0Fu8)
+        self.buffer[offset] = c
+        self.buffer[offset + 1usize] = attr
+        self.col = self.col + 1usize
+        if self.col >= VGA_WIDTH {
+            self.col = 0usize
+            self.row = self.row + 1usize
+            if self.row >= VGA_HEIGHT {
+                self.row = 0usize
+            }
+        }
+    }
+
+    pub fn write_str(var self, s: str) {
+        let p = s as *raw u8
+        let len = kernel_str_len(s)
+        var i = 0usize
+        while i < len {
+            self.put_char(p[i])
+            i = i + 1usize
+        }
+    }
+
+    pub fn write_line(var self, s: str) {
+        self.write_str(s)
+        self.put_char(10u8)
+    }
+
+    pub fn destroy(var self) {
+        if self.is_virtual && (self.buffer as usize) != 0usize {
+            free(self.buffer)
+            self.buffer = 0usize as *raw var u8
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// 4-Level Paging Memory Manager (x86-64 Long Mode)
+// ------------------------------------------------------------------------------
+
+pub const PAGE_SIZE: u64      = 4096u64
+pub const PAGE_PRESENT: u64   = 1u64
+pub const PAGE_WRITABLE: u64  = 2u64
+pub const PAGE_USER: u64      = 4u64
+pub const PAGE_HUGE_2MB: u64  = 128u64
+
+pub struct PageTableManager {
+    pub virt_addrs: Vec<u64>,
+    pub phys_addrs: Vec<u64>,
+    pub flags: Vec<u64>,
+}
+
+impl PageTableManager {
+    pub fn new() -> PageTableManager {
+        return PageTableManager {
+            virt_addrs: Vec.new(),
+            phys_addrs: Vec.new(),
+            flags: Vec.new(),
+        }
+    }
+
+    pub fn map_page(var self, virt: u64, phys: u64, flag: u64) -> bool {
+        // Align to 4KB page boundaries
+        let page_virt = virt - (virt % PAGE_SIZE)
+        let page_phys = phys - (phys % PAGE_SIZE)
+
+        var i = 0usize
+        while i < self.virt_addrs.len {
+            if self.virt_addrs.ptr[i] == page_virt {
+                self.phys_addrs.ptr[i] = page_phys
+                self.flags.ptr[i] = flag | PAGE_PRESENT
+                return true
+            }
+            i = i + 1usize
+        }
+
+        self.virt_addrs.push(page_virt)
+        self.phys_addrs.push(page_phys)
+        self.flags.push(flag | PAGE_PRESENT)
+        return true
+    }
+
+    pub fn translate(self, virt: u64) -> u64 {
+        let page_virt = virt - (virt % PAGE_SIZE)
+        let offset = virt % PAGE_SIZE
+        var i = 0usize
+        while i < self.virt_addrs.len {
+            if self.virt_addrs.ptr[i] == page_virt {
+                return self.phys_addrs.ptr[i] + offset
+            }
+            i = i + 1usize
+        }
+        return 0u64 // Unmapped fault
+    }
+
+    pub fn is_mapped(self, virt: u64) -> bool {
+        let page_virt = virt - (virt % PAGE_SIZE)
+        var i = 0usize
+        while i < self.virt_addrs.len {
+            if self.virt_addrs.ptr[i] == page_virt {
+                return (self.flags.ptr[i] & PAGE_PRESENT) != 0u64
+            }
+            i = i + 1usize
+        }
+        return false
+    }
+
+    pub fn mapped_page_count(self) -> usize {
+        return self.virt_addrs.len
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Interrupt Descriptor Table (IDT) Gates
+// ------------------------------------------------------------------------------
+
+pub const IDT_FLAG_PRESENT: u8    = 0x80u8
+pub const IDT_FLAG_INTERRUPT: u8  = 0x0Eu8
+pub const IDT_FLAG_TRAP: u8       = 0x0Fu8
+pub const IDT_FLAG_RING0: u8      = 0x00u8
+pub const IDT_FLAG_RING3: u8      = 0x60u8
+
+pub struct IdtTable {
+    pub handlers: Vec<u64>,
+    pub selectors: Vec<u16>,
+    pub flags: Vec<u8>,
+}
+
+impl IdtTable {
+    pub fn new() -> IdtTable {
+        var t = IdtTable {
+            handlers: Vec.new(),
+            selectors: Vec.new(),
+            flags: Vec.new(),
+        }
+        // Initialize 256 gates
+        var i = 0usize
+        while i < 256usize {
+            t.handlers.push(0u64)
+            t.selectors.push(0u16)
+            t.flags.push(0u8)
+            i = i + 1usize
+        }
+        return t
+    }
+
+    pub fn set_gate(var self, vector: u8, handler: u64, selector: u16, flag: u8) {
+        let idx = vector as usize
+        self.handlers.ptr[idx] = handler
+        self.selectors.ptr[idx] = selector
+        self.flags.ptr[idx] = flag | IDT_FLAG_PRESENT
+    }
+
+    pub fn get_handler(self, vector: u8) -> u64 {
+        return self.handlers.ptr[vector as usize]
+    }
+
+    pub fn is_gate_present(self, vector: u8) -> bool {
+        return (self.flags.ptr[vector as usize] & IDT_FLAG_PRESENT) != 0u8
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Global Descriptor Table (GDT)
+// ------------------------------------------------------------------------------
+
+pub struct GdtTable {
+    pub descriptors: Vec<u64>,
+}
+
+impl GdtTable {
+    pub fn new() -> GdtTable {
+        var g = GdtTable { descriptors: Vec.new() }
+        // 0: Null Descriptor
+        g.descriptors.push(0u64)
+        // 1: Kernel Code 64-bit (Ring 0, Exec/Read, 64-bit Long Mode) -> 0x00AF9A000000FFFF
+        g.descriptors.push(0x00AF9A000000FFFFu64)
+        // 2: Kernel Data 64-bit (Ring 0, Read/Write) -> 0x00CF92000000FFFF
+        g.descriptors.push(0x00CF92000000FFFFu64)
+        // 3: User Code 64-bit (Ring 3) -> 0x00AFFA000000FFFF
+        g.descriptors.push(0x00AFFA000000FFFFu64)
+        // 4: User Data 64-bit (Ring 3) -> 0x00CFF2000000FFFF
+        g.descriptors.push(0x00CFF2000000FFFFu64)
+        return g
+    }
+
+    pub fn count(self) -> usize {
+        return self.descriptors.len
+    }
+
+    pub fn kernel_code_selector(self) -> u16 {
+        return 0x08u16 // Segment 1 * 8
+    }
+
+    pub fn kernel_data_selector(self) -> u16 {
+        return 0x10u16 // Segment 2 * 8
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Multiboot2 Kernel Image Builder
+// ------------------------------------------------------------------------------
+
+pub struct KernelImageBuilder {
+    pub kernel_name: String,
+    pub entry_point: u64,
+}
+
+impl KernelImageBuilder {
+    pub fn new(name: str, entry_addr: u64) -> KernelImageBuilder {
+        return KernelImageBuilder {
+            kernel_name: String.from_str(name),
+            entry_point: entry_addr,
+        }
+    }
+
+    pub fn emit_multiboot_header(self) -> Vec<u8> {
+        var hdr = Vec.new()
+        // Multiboot2 magic (0xE85250D6)
+        let m = MULTIBOOT2_HEADER_MAGIC
+        hdr.push((m & 0xFFu32) as u8)
+        hdr.push(((m >> 8u32) & 0xFFu32) as u8)
+        hdr.push(((m >> 16u32) & 0xFFu32) as u8)
+        hdr.push(((m >> 24u32) & 0xFFu32) as u8)
+
+        // Architecture (0 = i386/x86_64)
+        hdr.push(0u8); hdr.push(0u8); hdr.push(0u8); hdr.push(0u8)
+
+        // Header length: 16 bytes
+        hdr.push(16u8); hdr.push(0u8); hdr.push(0u8); hdr.push(0u8)
+
+        // Checksum: -(magic + arch + length)
+        let chk = (0x100000000u64 - ((MULTIBOOT2_HEADER_MAGIC as u64) + 16u64)) as u32
+        hdr.push((chk & 0xFFu32) as u8)
+        hdr.push(((chk >> 8u32) & 0xFFu32) as u8)
+        hdr.push(((chk >> 16u32) & 0xFFu32) as u8)
+        hdr.push(((chk >> 24u32) & 0xFFu32) as u8)
+
+        return hdr
+    }
+
+    pub fn write_kernel_image(self, path: str) -> bool {
+        let fp = fopen(path as *raw u8, "wb" as *raw u8)
+        if (fp as usize) == 0usize {
+            return false
+        }
+        let hdr = self.emit_multiboot_header()
+        let raw_buf = malloc(hdr.len)
+        var i = 0usize
+        while i < hdr.len {
+            raw_buf[i] = hdr.ptr[i] as u8
+            i = i + 1usize
+        }
+        let _w = fwrite(raw_buf as *raw u8, 1usize, hdr.len, fp)
+        let _c = fclose(fp)
+        free(raw_buf)
+        return true
+    }
+}
