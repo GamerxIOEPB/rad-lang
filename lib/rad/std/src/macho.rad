@@ -1,0 +1,389 @@
+// ==============================================================================
+// Rad Standard Library: Apple Mach-O 64-Bit Object Generator (std::macho)
+// Pure-Rad Mach-O generation for Apple Silicon (ARM64) and macOS x86_64.
+// Zero external C dynamic dependencies, no Xcode or LLVM required.
+// ==============================================================================
+
+fn macho_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn macho_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+extern "C" {
+    fn fopen(filename: *raw u8, mode: *raw u8) -> *raw var u8;
+    fn fwrite(ptr: *raw u8, size: usize, count: usize, stream: *raw var u8) -> usize;
+    fn fclose(stream: *raw var u8) -> i32;
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+// Mach-O Magic & CPU Architecture Constants
+pub const MH_MAGIC_64: u32        = 0xFEEDFACFu32
+pub const MH_CIGAM_64: u32        = 0xCFFAEDFEu32
+pub const CPU_TYPE_X86_64: u32     = 0x01000007u32
+pub const CPU_TYPE_ARM64: u32      = 0x0100000Cu32
+pub const CPU_SUBTYPE_LIB64: u32   = 0x80000000u32
+pub const CPU_SUBTYPE_ARM64_ALL: u32 = 0u32
+
+pub const MH_OBJECT: u32 = 0x1u32
+
+// Load Command Constants
+pub const LC_SEGMENT_64: u32     = 0x19u32
+pub const LC_SYMTAB: u32         = 0x02u32
+pub const LC_DYSYMTAB: u32       = 0x0Bu32
+pub const LC_BUILD_VERSION: u32  = 0x32u32
+
+// Section Flags
+pub const S_REGULAR: u32                  = 0x0u32
+pub const S_ATTR_PURE_INSTRUCTIONS: u32   = 0x80000000u32
+pub const S_ATTR_SOME_INSTRUCTIONS: u32   = 0x00000400u32
+
+// Symbol Types
+pub const N_EXT: u8  = 0x01u8
+pub const N_SECT: u8 = 0x0Eu8
+pub const N_UNDF: u8 = 0x00u8
+
+fn macho_push_u16_le(var buf: Vec<u8>, val: u16) {
+    buf.push((val & 0xFFu16) as u8)
+    buf.push(((val >> 8u16) & 0xFFu16) as u8)
+}
+
+fn macho_push_u32_le(var buf: Vec<u8>, val: u32) {
+    buf.push((val & 0xFFu32) as u8)
+    buf.push(((val >> 8u32) & 0xFFu32) as u8)
+    buf.push(((val >> 16u32) & 0xFFu32) as u8)
+    buf.push(((val >> 24u32) & 0xFFu32) as u8)
+}
+
+fn macho_push_u64_le(var buf: Vec<u8>, val: u64) {
+    buf.push((val & 0xFFu64) as u8)
+    buf.push(((val >> 8u64) & 0xFFu64) as u8)
+    buf.push(((val >> 16u64) & 0xFFu64) as u8)
+    buf.push(((val >> 24u64) & 0xFFu64) as u8)
+    buf.push(((val >> 32u64) & 0xFFu64) as u8)
+    buf.push(((val >> 40u64) & 0xFFu64) as u8)
+    buf.push(((val >> 48u64) & 0xFFu64) as u8)
+    buf.push(((val >> 56u64) & 0xFFu64) as u8)
+}
+
+pub struct MachoSection {
+    pub sectname: String,
+    pub segname: String,
+    pub addr: u64,
+    pub align: u32,
+    pub flags: u32,
+    pub data: Vec<u8>,
+}
+
+pub struct MachoSymbol {
+    pub name: String,
+    pub n_type: u8,
+    pub n_sect: u8,
+    pub n_desc: u16,
+    pub n_value: u64,
+}
+
+pub struct MachoRelocation {
+    pub r_address: i32,
+    pub r_symbolnum: u32,
+    pub r_pcrel: bool,
+    pub r_length: u32,
+    pub r_extern: bool,
+    pub r_type: u32,
+}
+
+pub struct MachoBuilder {
+    pub cpu_type: u32,
+    pub cpu_subtype: u32,
+    pub sections: Vec<MachoSection>,
+    pub symbols: Vec<MachoSymbol>,
+    pub relocations: Vec<MachoRelocation>,
+}
+
+impl MachoBuilder {
+    pub fn new(cpu_type: u32, cpu_subtype: u32) -> MachoBuilder {
+        return MachoBuilder {
+            cpu_type: cpu_type,
+            cpu_subtype: cpu_subtype,
+            sections: Vec.new(),
+            symbols: Vec.new(),
+            relocations: Vec.new(),
+        }
+    }
+
+    pub fn new_arm64() -> MachoBuilder {
+        return MachoBuilder::new(CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64_ALL)
+    }
+
+    pub fn new_x86_64() -> MachoBuilder {
+        return MachoBuilder::new(CPU_TYPE_X86_64, CPU_SUBTYPE_LIB64)
+    }
+
+    pub fn add_section(var self, segname: str, sectname: str, align: u32, flags: u32) -> usize {
+        let idx = self.sections.len
+        self.sections.push(MachoSection {
+            sectname: String.from_str(sectname),
+            segname: String.from_str(segname),
+            addr: 0u64,
+            align: align,
+            flags: flags,
+            data: Vec.new(),
+        })
+        return idx
+    }
+
+    pub fn append_byte(var self, sec_idx: usize, b: u8) {
+        if sec_idx < self.sections.len {
+            self.sections.ptr[sec_idx].data.push(b)
+        }
+    }
+
+    pub fn append_bytes(var self, sec_idx: usize, bytes: Vec<u8>) {
+        if sec_idx < self.sections.len {
+            var i = 0usize
+            while i < bytes.len {
+                self.sections.ptr[sec_idx].data.push(bytes.ptr[i])
+                i = i + 1usize
+            }
+        }
+    }
+
+    pub fn add_symbol(var self, name: str, n_sect: u8, n_value: u64, is_ext: bool) -> usize {
+        var n_type = N_SECT
+        if is_ext {
+            n_type = n_type | N_EXT
+        }
+        let idx = self.symbols.len
+        self.symbols.push(MachoSymbol {
+            name: String.from_str(name),
+            n_type: n_type,
+            n_sect: n_sect,
+            n_desc: 0u16,
+            n_value: n_value,
+        })
+        return idx
+    }
+
+    pub fn add_relocation(var self, r_address: i32, r_symbolnum: u32, r_pcrel: bool, r_length: u32, r_extern: bool, r_type: u32) {
+        self.relocations.push(MachoRelocation {
+            r_address: r_address,
+            r_symbolnum: r_symbolnum,
+            r_pcrel: r_pcrel,
+            r_length: r_length,
+            r_extern: r_extern,
+            r_type: r_type,
+        })
+    }
+
+    pub fn emit_object(var self) -> Vec<u8> {
+        var out = Vec.new()
+
+        // String table: starts with null byte
+        var strtab = Vec.new()
+        strtab.push(0u8)
+        var sym_str_offsets = Vec.new()
+
+        var si = 0usize
+        while si < self.symbols.len {
+            let offset = strtab.len as u32
+            sym_str_offsets.push(offset)
+            let sname = self.symbols.ptr[si].name.as_ptr() as *raw u8
+            let slen = self.symbols.ptr[si].name.len()
+            var j = 0usize
+            while j < slen {
+                strtab.push(sname[j])
+                j = j + 1usize
+            }
+            strtab.push(0u8)
+            si = si + 1usize
+        }
+
+        // Header size: 32 bytes
+        // LC_SEGMENT_64: 72 + (80 * nsects)
+        let nsects = self.sections.len
+        let seg_cmd_size = 72u32 + (80u32 * (nsects as u32))
+        // LC_BUILD_VERSION: 24 bytes
+        let build_cmd_size = 24u32
+        // LC_SYMTAB: 24 bytes
+        let symtab_cmd_size = 24u32
+
+        let total_cmd_size = seg_cmd_size + build_cmd_size + symtab_cmd_size
+        let ncmds = 3u32
+
+        // Write mach_header_64 (32 bytes)
+        macho_push_u32_le(out, MH_MAGIC_64)
+        macho_push_u32_le(out, self.cpu_type)
+        macho_push_u32_le(out, self.cpu_subtype)
+        macho_push_u32_le(out, MH_OBJECT)
+        macho_push_u32_le(out, ncmds)
+        macho_push_u32_le(out, total_cmd_size)
+        macho_push_u32_le(out, 0u32) // flags
+        macho_push_u32_le(out, 0u32) // reserved
+
+        // Compute offsets for sections data
+        let header_plus_cmds = 32u32 + total_cmd_size
+        var current_offset = header_plus_cmds
+        var total_sec_size = 0u64
+
+        var sec_offsets = Vec.new()
+        si = 0usize
+        while si < nsects {
+            sec_offsets.push(current_offset)
+            let sec_sz = self.sections.ptr[si].data.len as u32
+            current_offset = current_offset + sec_sz
+            total_sec_size = total_sec_size + (sec_sz as u64)
+            si = si + 1usize
+        }
+
+        // Write LC_SEGMENT_64
+        macho_push_u32_le(out, LC_SEGMENT_64)
+        macho_push_u32_le(out, seg_cmd_size)
+        // segname (16 bytes)
+        var b = 0usize
+        while b < 16usize {
+            out.push(0u8)
+            b = b + 1usize
+        }
+        macho_push_u64_le(out, 0u64) // vmaddr
+        macho_push_u64_le(out, total_sec_size) // vmsize
+        macho_push_u64_le(out, header_plus_cmds as u64) // fileoff
+        macho_push_u64_le(out, total_sec_size) // filesize
+        macho_push_u32_le(out, 7u32) // maxprot (rwx)
+        macho_push_u32_le(out, 7u32) // initprot (rwx)
+        macho_push_u32_le(out, nsects as u32) // nsects
+        macho_push_u32_le(out, 0u32) // flags
+
+        // Write each section_64 (80 bytes)
+        si = 0usize
+        while si < nsects {
+            let sec = self.sections.ptr[si]
+            // sectname (16 bytes)
+            let sc_name_p = sec.sectname.as_ptr() as *raw u8
+            let sc_name_l = sec.sectname.len()
+            b = 0usize
+            while b < 16usize {
+                if b < sc_name_l {
+                    out.push(sc_name_p[b])
+                } else {
+                    out.push(0u8)
+                }
+                b = b + 1usize
+            }
+            // segname (16 bytes)
+            let sg_name_p = sec.segname.as_ptr() as *raw u8
+            let sg_name_l = sec.segname.len()
+            b = 0usize
+            while b < 16usize {
+                if b < sg_name_l {
+                    out.push(sg_name_p[b])
+                } else {
+                    out.push(0u8)
+                }
+                b = b + 1usize
+            }
+            macho_push_u64_le(out, sec.addr)
+            macho_push_u64_le(out, sec.data.len as u64)
+            macho_push_u32_le(out, sec_offsets.ptr[si])
+            macho_push_u32_le(out, sec.align)
+            macho_push_u32_le(out, 0u32) // reloff
+            macho_push_u32_le(out, 0u32) // nreloc
+            macho_push_u32_le(out, sec.flags)
+            macho_push_u32_le(out, 0u32) // reserved1
+            macho_push_u32_le(out, 0u32) // reserved2
+            macho_push_u32_le(out, 0u32) // reserved3
+            si = si + 1usize
+        }
+
+        // Write LC_BUILD_VERSION (24 bytes)
+        macho_push_u32_le(out, LC_BUILD_VERSION)
+        macho_push_u32_le(out, build_cmd_size)
+        macho_push_u32_le(out, 1u32) // platform: macOS
+        macho_push_u32_le(out, 0x000E0000u32) // minos: 14.0
+        macho_push_u32_le(out, 0x000E0000u32) // sdk: 14.0
+        macho_push_u32_le(out, 0u32) // ntools
+
+        // Symbol table location
+        let sym_offset = current_offset
+        let sym_count = self.symbols.len as u32
+        let sym_bytes = sym_count * 16u32
+        let str_offset = sym_offset + sym_bytes
+        let str_size = strtab.len as u32
+
+        // Write LC_SYMTAB (24 bytes)
+        macho_push_u32_le(out, LC_SYMTAB)
+        macho_push_u32_le(out, symtab_cmd_size)
+        macho_push_u32_le(out, sym_offset)
+        macho_push_u32_le(out, sym_count)
+        macho_push_u32_le(out, str_offset)
+        macho_push_u32_le(out, str_size)
+
+        // Write sections raw data
+        si = 0usize
+        while si < nsects {
+            let sdata = self.sections.ptr[si].data
+            var di = 0usize
+            while di < sdata.len {
+                out.push(sdata.ptr[di])
+                di = di + 1usize
+            }
+            si = si + 1usize
+        }
+
+        // Write nlist_64 symbol entries (16 bytes each)
+        si = 0usize
+        while si < self.symbols.len {
+            let sym = self.symbols.ptr[si]
+            macho_push_u32_le(out, sym_str_offsets.ptr[si])
+            out.push(sym.n_type)
+            out.push(sym.n_sect)
+            macho_push_u16_le(out, sym.n_desc)
+            macho_push_u64_le(out, sym.n_value)
+            si = si + 1usize
+        }
+
+        // Write string table
+        var ti = 0usize
+        while ti < strtab.len {
+            out.push(strtab.ptr[ti])
+            ti = ti + 1usize
+        }
+
+        return out
+    }
+
+    pub fn write_file(var self, path: str) -> bool {
+        let fp = fopen(path as *raw u8, "wb" as *raw u8)
+        if (fp as usize) == 0usize {
+            return false
+        }
+        let data = self.emit_object()
+        let raw_buf = malloc(data.len)
+        var i = 0usize
+        while i < data.len {
+            raw_buf[i] = data.ptr[i] as u8
+            i = i + 1usize
+        }
+        let _w = fwrite(raw_buf as *raw u8, 1usize, data.len, fp)
+        let _c = fclose(fp)
+        free(raw_buf)
+        return true
+    }
+}

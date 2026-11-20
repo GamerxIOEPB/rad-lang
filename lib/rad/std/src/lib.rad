@@ -37,3 +37,8 @@ pub import actor
 pub import arc
 pub import dom
 pub import elf
+pub import effect
+pub import smt
+pub import macho
+pub import pe
+pub import jit

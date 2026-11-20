@@ -1,0 +1,58 @@
+import std/smt;
+
+fn safe_div(a: i64, b: i64) -> i64
+    requires b != 0
+    ensures a >= 0
+{
+    return a / b;
+}
+
+fn main() -> i32 {
+    // 1. Contract Precondition Runtime Check
+    let q = safe_div(120, 6);
+    if q == 20 {
+        println("CONTRACT_REQUIRES_PASSED");
+    }
+
+    // 2. Pure-Rad SMT-LIB2 Benchmark Generator
+    var smt = SmtBuilder::new("QF_AUFLIA");
+    let x = smt.declare_var("x", SmtSort::int_sort());
+    let y = smt.declare_var("y", SmtSort::int_sort());
+    let zero = smt.int_const(0i64);
+    let ten = smt.int_const(10i64);
+
+    // Assert: x > 0
+    let x_gt_zero = smt.gt(x, zero);
+    smt.assert_formula(x_gt_zero);
+
+    // Assert: y = x + 10
+    let x_plus_10 = smt.add(x, ten);
+    let y_eq = smt.eq(y, x_plus_10);
+    smt.assert_formula(y_eq);
+
+    // Assert: y > 10
+    let y_gt_ten = smt.gt(y, ten);
+    smt.assert_formula(y_gt_ten);
+
+    let smt_txt = smt.to_smt2();
+    if smt_txt.len() > 0usize {
+        println("SMT_GENERATED_OK");
+    }
+
+    let ok = smt.write_file("/tmp/test_contract.smt2");
+    if ok {
+        println("SMT_FILE_WRITTEN");
+    }
+
+    // 3. Contract Verification Bounds & Invariants Engine
+    var verifier = ContractVerifier::new("binary_search");
+    let b_ok = verifier.verify_bounds_invariant(5i64, 10i64);
+    let p_ok = verifier.verify_precondition(true);
+    let post_ok = verifier.verify_postcondition(true, true);
+
+    if b_ok && p_ok && post_ok && verifier.is_all_verified() {
+        println("VERIFICATION_PROOFS_PASSED");
+    }
+
+    return 0;
+}

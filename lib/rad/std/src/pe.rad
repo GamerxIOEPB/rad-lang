@@ -1,0 +1,359 @@
+// ==============================================================================
+// Rad Standard Library: Windows PE/COFF 64-Bit Object Generator (std::pe)
+// Pure-Rad COFF relocatable object file generation for Windows x64.
+// Zero external C dynamic dependencies, no MSVC or MinGW required.
+// ==============================================================================
+
+fn pe_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn pe_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+extern "C" {
+    fn fopen(filename: *raw u8, mode: *raw u8) -> *raw var u8;
+    fn fwrite(ptr: *raw u8, size: usize, count: usize, stream: *raw var u8) -> usize;
+    fn fclose(stream: *raw var u8) -> i32;
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+// Machine Architectures
+pub const IMAGE_FILE_MACHINE_AMD64: u16 = 0x8664u16
+pub const IMAGE_FILE_MACHINE_ARM64: u16 = 0xAA64u16
+
+// Section Characteristics
+pub const IMAGE_SCN_CNT_CODE: u32               = 0x00000020u32
+pub const IMAGE_SCN_CNT_INITIALIZED_DATA: u32   = 0x00000040u32
+pub const IMAGE_SCN_CNT_UNINITIALIZED_DATA: u32 = 0x00000080u32
+pub const IMAGE_SCN_ALIGN_16BYTES: u32          = 0x00500000u32
+pub const IMAGE_SCN_MEM_EXECUTE: u32            = 0x20000000u32
+pub const IMAGE_SCN_MEM_READ: u32               = 0x40000000u32
+pub const IMAGE_SCN_MEM_WRITE: u32              = 0x80000000u32
+
+// Symbol Storage Classes
+pub const IMAGE_SYM_CLASS_EXTERNAL: u8 = 2u8
+pub const IMAGE_SYM_CLASS_STATIC: u8   = 3u8
+
+// Relocation Types for AMD64
+pub const IMAGE_REL_AMD64_ABSOLUTE: u16 = 0x0000u16
+pub const IMAGE_REL_AMD64_ADDR64: u16   = 0x0001u16
+pub const IMAGE_REL_AMD64_ADDR32NB: u16 = 0x0003u16
+pub const IMAGE_REL_AMD64_REL32: u16    = 0x0004u16
+
+fn pe_push_u16_le(var buf: Vec<u8>, val: u16) {
+    buf.push((val & 0xFFu16) as u8)
+    buf.push(((val >> 8u16) & 0xFFu16) as u8)
+}
+
+fn pe_push_u32_le(var buf: Vec<u8>, val: u32) {
+    buf.push((val & 0xFFu32) as u8)
+    buf.push(((val >> 8u32) & 0xFFu32) as u8)
+    buf.push(((val >> 16u32) & 0xFFu32) as u8)
+    buf.push(((val >> 24u32) & 0xFFu32) as u8)
+}
+
+pub struct PeSection {
+    pub name: String,
+    pub characteristics: u32,
+    pub data: Vec<u8>,
+}
+
+pub struct PeSymbol {
+    pub name: String,
+    pub value: u32,
+    pub section_number: i16,
+    pub sym_type: u16,
+    pub storage_class: u8,
+}
+
+pub struct PeRelocation {
+    pub sec_idx: usize,
+    pub vaddr: u32,
+    pub sym_idx: u32,
+    pub rel_type: u16,
+}
+
+pub struct PeBuilder {
+    pub machine: u16,
+    pub sections: Vec<PeSection>,
+    pub symbols: Vec<PeSymbol>,
+    pub relocations: Vec<PeRelocation>,
+}
+
+impl PeBuilder {
+    pub fn new(machine: u16) -> PeBuilder {
+        return PeBuilder {
+            machine: machine,
+            sections: Vec.new(),
+            symbols: Vec.new(),
+            relocations: Vec.new(),
+        }
+    }
+
+    pub fn new_amd64() -> PeBuilder {
+        return PeBuilder::new(IMAGE_FILE_MACHINE_AMD64)
+    }
+
+    pub fn add_section(var self, name: str, characteristics: u32) -> usize {
+        let idx = self.sections.len
+        self.sections.push(PeSection {
+            name: String.from_str(name),
+            characteristics: characteristics,
+            data: Vec.new(),
+        })
+        return idx
+    }
+
+    pub fn append_byte(var self, sec_idx: usize, b: u8) {
+        if sec_idx < self.sections.len {
+            self.sections.ptr[sec_idx].data.push(b)
+        }
+    }
+
+    pub fn append_bytes(var self, sec_idx: usize, bytes: Vec<u8>) {
+        if sec_idx < self.sections.len {
+            var i = 0usize
+            while i < bytes.len {
+                self.sections.ptr[sec_idx].data.push(bytes.ptr[i])
+                i = i + 1usize
+            }
+        }
+    }
+
+    pub fn add_symbol(var self, name: str, value: u32, section_number: i16, sym_type: u16, storage_class: u8) -> usize {
+        let idx = self.symbols.len
+        self.symbols.push(PeSymbol {
+            name: String.from_str(name),
+            value: value,
+            section_number: section_number,
+            sym_type: sym_type,
+            storage_class: storage_class,
+        })
+        return idx
+    }
+
+    pub fn add_relocation(var self, sec_idx: usize, vaddr: u32, sym_idx: u32, rel_type: u16) {
+        self.relocations.push(PeRelocation {
+            sec_idx: sec_idx,
+            vaddr: vaddr,
+            sym_idx: sym_idx,
+            rel_type: rel_type,
+        })
+    }
+
+    pub fn emit_object(var self) -> Vec<u8> {
+        var out = Vec.new()
+
+        let num_sections = self.sections.len as u16
+        let header_size = 20u32 // COFF Header
+        let sec_headers_size = (self.sections.len as u32) * 40u32
+
+        // String table: 4 bytes initial length (le), then null terminated strings
+        var strtab = Vec.new()
+        pe_push_u32_le(strtab, 4u32) // placeholder, will update later
+        var sym_strtab_offsets = Vec.new()
+
+        var si = 0usize
+        while si < self.symbols.len {
+            let sname = self.symbols.ptr[si].name.as_ptr() as *raw u8
+            let slen = self.symbols.ptr[si].name.len()
+            if slen > 8usize {
+                let off = strtab.len as u32
+                sym_strtab_offsets.push(off)
+                var j = 0usize
+                while j < slen {
+                    strtab.push(sname[j])
+                    j = j + 1usize
+                }
+                strtab.push(0u8)
+            } else {
+                sym_strtab_offsets.push(0u32)
+            }
+            si = si + 1usize
+        }
+
+        // Update strtab 4-byte header length
+        let strtab_len = strtab.len as u32
+        strtab.ptr[0] = (strtab_len & 0xFFu32) as u8
+        strtab.ptr[1] = ((strtab_len >> 8u32) & 0xFFu32) as u8
+        strtab.ptr[2] = ((strtab_len >> 16u32) & 0xFFu32) as u8
+        strtab.ptr[3] = ((strtab_len >> 24u32) & 0xFFu32) as u8
+
+        // Calculate offsets
+        var current_offset = header_size + sec_headers_size
+        var sec_raw_offsets = Vec.new()
+
+        si = 0usize
+        while si < self.sections.len {
+            sec_raw_offsets.push(current_offset)
+            let sz = self.sections.ptr[si].data.len as u32
+            current_offset = current_offset + sz
+            si = si + 1usize
+        }
+
+        // Relocations per section
+        var sec_reloc_offsets = Vec.new()
+        var sec_reloc_counts = Vec.new()
+
+        si = 0usize
+        while si < self.sections.len {
+            var cnt = 0u16
+            var ri = 0usize
+            while ri < self.relocations.len {
+                if self.relocations.ptr[ri].sec_idx == si {
+                    cnt = cnt + 1u16
+                }
+                ri = ri + 1usize
+            }
+            sec_reloc_counts.push(cnt)
+            if cnt > 0u16 {
+                sec_reloc_offsets.push(current_offset)
+                current_offset = current_offset + ((cnt as u32) * 10u32)
+            } else {
+                sec_reloc_offsets.push(0u32)
+            }
+            si = si + 1usize
+        }
+
+        let symtab_offset = current_offset
+        let sym_count = self.symbols.len as u32
+
+        // Write COFF File Header (20 bytes)
+        pe_push_u16_le(out, self.machine)
+        pe_push_u16_le(out, num_sections)
+        pe_push_u32_le(out, 0u32) // TimeDateStamp
+        pe_push_u32_le(out, symtab_offset)
+        pe_push_u32_le(out, sym_count)
+        pe_push_u16_le(out, 0u16) // SizeOfOptionalHeader = 0 for .obj
+        pe_push_u16_le(out, 0u16) // Characteristics
+
+        // Write Section Headers (40 bytes each)
+        si = 0usize
+        while si < self.sections.len {
+            let sec = self.sections.ptr[si]
+            let sc_p = sec.name.as_ptr() as *raw u8
+            let sc_l = sec.name.len()
+            var b = 0usize
+            while b < 8usize {
+                if b < sc_l {
+                    out.push(sc_p[b])
+                } else {
+                    out.push(0u8)
+                }
+                b = b + 1usize
+            }
+            pe_push_u32_le(out, 0u32) // VirtualSize
+            pe_push_u32_le(out, 0u32) // VirtualAddress
+            pe_push_u32_le(out, sec.data.len as u32) // SizeOfRawData
+            pe_push_u32_le(out, sec_raw_offsets.ptr[si]) // PointerToRawData
+            pe_push_u32_le(out, sec_reloc_offsets.ptr[si]) // PointerToRelocations
+            pe_push_u32_le(out, 0u32) // PointerToLinenumbers
+            pe_push_u16_le(out, sec_reloc_counts.ptr[si]) // NumberOfRelocations
+            pe_push_u16_le(out, 0u16) // NumberOfLinenumbers
+            pe_push_u32_le(out, sec.characteristics)
+            si = si + 1usize
+        }
+
+        // Write Sections Raw Data
+        si = 0usize
+        while si < self.sections.len {
+            let sdata = self.sections.ptr[si].data
+            var di = 0usize
+            while di < sdata.len {
+                out.push(sdata.ptr[di])
+                di = di + 1usize
+            }
+            si = si + 1usize
+        }
+
+        // Write Relocations (10 bytes each)
+        si = 0usize
+        while si < self.sections.len {
+            var ri = 0usize
+            while ri < self.relocations.len {
+                let r = self.relocations.ptr[ri]
+                if r.sec_idx == si {
+                    pe_push_u32_le(out, r.vaddr)
+                    pe_push_u32_le(out, r.sym_idx)
+                    pe_push_u16_le(out, r.rel_type)
+                }
+                ri = ri + 1usize
+            }
+            si = si + 1usize
+        }
+
+        // Write Symbol Table (18 bytes each)
+        si = 0usize
+        while si < self.symbols.len {
+            let sym = self.symbols.ptr[si]
+            let sname = sym.name.as_ptr() as *raw u8
+            let slen = sym.name.len()
+            if slen <= 8usize {
+                var b = 0usize
+                while b < 8usize {
+                    if b < slen {
+                        out.push(sname[b])
+                    } else {
+                        out.push(0u8)
+                    }
+                    b = b + 1usize
+                }
+            } else {
+                // First 4 bytes zero, next 4 bytes offset into string table
+                pe_push_u32_le(out, 0u32)
+                pe_push_u32_le(out, sym_strtab_offsets.ptr[si])
+            }
+            pe_push_u32_le(out, sym.value)
+            pe_push_u16_le(out, sym.section_number as u16)
+            pe_push_u16_le(out, sym.sym_type)
+            out.push(sym.storage_class)
+            out.push(0u8) // NumberOfAuxSymbols
+            si = si + 1usize
+        }
+
+        // Write String Table
+        var ti = 0usize
+        while ti < strtab.len {
+            out.push(strtab.ptr[ti])
+            ti = ti + 1usize
+        }
+
+        return out
+    }
+
+    pub fn write_file(var self, path: str) -> bool {
+        let fp = fopen(path as *raw u8, "wb" as *raw u8)
+        if (fp as usize) == 0usize {
+            return false
+        }
+        let data = self.emit_object()
+        let raw_buf = malloc(data.len)
+        var i = 0usize
+        while i < data.len {
+            raw_buf[i] = data.ptr[i] as u8
+            i = i + 1usize
+        }
+        let _w = fwrite(raw_buf as *raw u8, 1usize, data.len, fp)
+        let _c = fclose(fp)
+        free(raw_buf)
+        return true
+    }
+}

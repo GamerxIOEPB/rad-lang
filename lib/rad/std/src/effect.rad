@@ -1,0 +1,267 @@
+// ==============================================================================
+// Rad Standard Library: First-Class Algebraic Effects & Handlers (std::effect)
+// Delimited resumptions, effect contexts, state, reader, writer, and generators.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+fn effect_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn effect_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+// Effect Operation Identifiers
+pub const EFFECT_OP_GET: i32    = 1
+pub const EFFECT_OP_SET: i32    = 2
+pub const EFFECT_OP_ASK: i32    = 3
+pub const EFFECT_OP_TELL: i32   = 4
+pub const EFFECT_OP_YIELD: i32  = 5
+pub const EFFECT_OP_ABORT: i32  = 6
+pub const EFFECT_OP_RESUME: i32 = 7
+
+pub struct EffectOp {
+    pub op_kind: i32,
+    pub name: String,
+    pub int_payload: i64,
+    pub str_payload: String,
+    pub is_resumed: bool,
+}
+
+impl EffectOp {
+    pub fn new(op_kind: i32, name: str, int_payload: i64) -> EffectOp {
+        return EffectOp {
+            op_kind: op_kind,
+            name: String.from_str(name),
+            int_payload: int_payload,
+            str_payload: String.new(),
+            is_resumed: false,
+        }
+    }
+
+    pub fn with_str(op_kind: i32, name: str, str_payload: str) -> EffectOp {
+        return EffectOp {
+            op_kind: op_kind,
+            name: String.from_str(name),
+            int_payload: 0i64,
+            str_payload: String.from_str(str_payload),
+            is_resumed: false,
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// State Effect: mutable state capability without global variables
+// ------------------------------------------------------------------------------
+
+pub struct StateEffect {
+    pub value: i64,
+    pub history: Vec<i64>,
+}
+
+impl StateEffect {
+    pub fn new(initial: i64) -> StateEffect {
+        var hist = Vec.new()
+        hist.push(initial)
+        return StateEffect {
+            value: initial,
+            history: hist,
+        }
+    }
+
+    pub fn get(self) -> i64 {
+        return self.value
+    }
+
+    pub fn set(var self, new_val: i64) {
+        self.value = new_val
+        self.history.push(new_val)
+    }
+
+    pub fn modify(var self, delta: i64) {
+        self.set(self.value + delta)
+    }
+
+    pub fn history_len(self) -> usize {
+        return self.history.len
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Reader Effect: ambient environmental configuration
+// ------------------------------------------------------------------------------
+
+pub struct ReaderEffect {
+    pub int_env: i64,
+    pub str_env: String,
+}
+
+impl ReaderEffect {
+    pub fn new(int_env: i64, str_env: str) -> ReaderEffect {
+        return ReaderEffect {
+            int_env: int_env,
+            str_env: String.from_str(str_env),
+        }
+    }
+
+    pub fn ask(self) -> i64 {
+        return self.int_env
+    }
+
+    pub fn ask_str(self) -> String {
+        return self.str_env
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Writer Effect: accumulation / logging capability
+// ------------------------------------------------------------------------------
+
+pub struct WriterEffect {
+    pub entries: Vec<String>,
+}
+
+impl WriterEffect {
+    pub fn new() -> WriterEffect {
+        return WriterEffect {
+            entries: Vec.new(),
+        }
+    }
+
+    pub fn tell(var self, msg: str) {
+        self.entries.push(String.from_str(msg))
+    }
+
+    pub fn count(self) -> usize {
+        return self.entries.len
+    }
+
+    pub fn get_entry(self, idx: usize) -> String {
+        if idx < self.entries.len {
+            return self.entries.ptr[idx]
+        }
+        return String.new()
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Yield Effect: generator / delimited suspension capability
+// ------------------------------------------------------------------------------
+
+pub struct YieldEffect {
+    pub values: Vec<i64>,
+}
+
+impl YieldEffect {
+    pub fn new() -> YieldEffect {
+        return YieldEffect {
+            values: Vec.new(),
+        }
+    }
+
+    pub fn yield_val(var self, val: i64) {
+        self.values.push(val)
+    }
+
+    pub fn count(self) -> usize {
+        return self.values.len
+    }
+
+    pub fn get(self, idx: usize) -> i64 {
+        if idx < self.values.len {
+            return self.values.ptr[idx]
+        }
+        return 0i64
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Delimited Effect Scope & Handlers
+// ------------------------------------------------------------------------------
+
+pub struct EffectContext {
+    pub state: StateEffect,
+    pub reader: ReaderEffect,
+    pub writer: WriterEffect,
+    pub generator: YieldEffect,
+    pub operations: Vec<EffectOp>,
+    pub aborted: bool,
+}
+
+impl EffectContext {
+    pub fn new(initial_state: i64, env_str: str) -> EffectContext {
+        return EffectContext {
+            state: StateEffect::new(initial_state),
+            reader: ReaderEffect::new(initial_state, env_str),
+            writer: WriterEffect::new(),
+            generator: YieldEffect::new(),
+            operations: Vec.new(),
+            aborted: false,
+        }
+    }
+
+    pub fn perform_get(var self) -> i64 {
+        let op = EffectOp::new(EFFECT_OP_GET, "State.get", self.state.get())
+        self.operations.push(op)
+        return self.state.get()
+    }
+
+    pub fn perform_set(var self, val: i64) {
+        let op = EffectOp::new(EFFECT_OP_SET, "State.set", val)
+        self.operations.push(op)
+        self.state.set(val)
+    }
+
+    pub fn perform_ask(var self) -> i64 {
+        let op = EffectOp::new(EFFECT_OP_ASK, "Reader.ask", self.reader.ask())
+        self.operations.push(op)
+        return self.reader.ask()
+    }
+
+    pub fn perform_tell(var self, msg: str) {
+        let op = EffectOp::with_str(EFFECT_OP_TELL, "Writer.tell", msg)
+        self.operations.push(op)
+        self.writer.tell(msg)
+    }
+
+    pub fn perform_yield(var self, val: i64) {
+        let op = EffectOp::new(EFFECT_OP_YIELD, "Yield.yield_val", val)
+        self.operations.push(op)
+        self.generator.yield_val(val)
+    }
+
+    pub fn perform_abort(var self, reason: str) {
+        let op = EffectOp::with_str(EFFECT_OP_ABORT, "Abort", reason)
+        self.operations.push(op)
+        self.aborted = true
+    }
+
+    pub fn resume_latest(var self, resume_val: i64) -> i64 {
+        if self.operations.len > 0usize {
+            let last_idx = self.operations.len - 1usize
+            self.operations.ptr[last_idx].is_resumed = true
+            return resume_val
+        }
+        return 0i64
+    }
+
+    pub fn op_count(self) -> usize {
+        return self.operations.len
+    }
+}

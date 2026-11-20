@@ -1,0 +1,89 @@
+import std/macho;
+import std/pe;
+
+extern "C" {
+    fn fopen(filename: *raw u8, mode: *raw u8) -> *raw var u8;
+    fn fread(ptr: *raw u8, size: usize, count: usize, stream: *raw var u8) -> usize;
+    fn fclose(stream: *raw var u8) -> i32;
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn check_macho_magic(path: str) -> bool {
+    let fp = fopen(path as *raw u8, "rb" as *raw u8);
+    if (fp as usize) == 0usize { return false; }
+    let buf = malloc(8usize);
+    let _r = fread(buf, 1usize, 4usize, fp);
+    let _c = fclose(fp);
+    let ok = buf[0] == 0xCFu8 && buf[1] == 0xFAu8 && buf[2] == 0xEDu8 && buf[3] == 0xFEu8;
+    free(buf);
+    return ok;
+}
+
+fn read_u16_le(path: str) -> u16 {
+    let fp = fopen(path as *raw u8, "rb" as *raw u8);
+    if (fp as usize) == 0usize { return 0u16; }
+    let buf = malloc(8usize);
+    let _r = fread(buf, 1usize, 2usize, fp);
+    let _c = fclose(fp);
+    let b0 = buf[0] as u16;
+    let b1 = buf[1] as u16;
+    free(buf);
+    return b0 | (b1 << 8u16);
+}
+
+fn main() -> i32 {
+    // 1. Mach-O ARM64 Object File Generation
+    var mb = MachoBuilder::new_arm64();
+    let text_idx = mb.add_section("__TEXT", "__text", 4u32, S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS);
+    // mov w0, #42; ret -> 0x52800540, 0xD65F03C0 (ARM64 LE)
+    mb.append_byte(text_idx, 0x40u8);
+    mb.append_byte(text_idx, 0x05u8);
+    mb.append_byte(text_idx, 0x80u8);
+    mb.append_byte(text_idx, 0x52u8);
+    mb.append_byte(text_idx, 0xC0u8);
+    mb.append_byte(text_idx, 0x03u8);
+    mb.append_byte(text_idx, 0x5Fu8);
+    mb.append_byte(text_idx, 0xD6u8);
+
+    let _sym = mb.add_symbol("_main", 1u8, 0u64, true);
+
+    let macho_path = "/tmp/test_arm64.o";
+    let m_ok = mb.write_file(macho_path);
+    if m_ok {
+        println("MACHO_OBJ_WRITTEN");
+    }
+
+    let m_magic_ok = check_macho_magic(macho_path);
+    if m_magic_ok {
+        println("MACHO_MAGIC_VERIFIED");
+    }
+
+    // 2. Windows PE/COFF AMD64 Object File Generation
+    var pb = PeBuilder::new_amd64();
+    let pe_text = pb.add_section(".text", IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ);
+    // x86_64: mov eax, 42; ret -> b8 2a 00 00 00 c3
+    pb.append_byte(pe_text, 0xB8u8);
+    pb.append_byte(pe_text, 0x2Au8);
+    pb.append_byte(pe_text, 0x00u8);
+    pb.append_byte(pe_text, 0x00u8);
+    pb.append_byte(pe_text, 0x00u8);
+    pb.append_byte(pe_text, 0xC3u8);
+
+    let pe_sym_main = pb.add_symbol("main", 0u32, 1i16, 0x20u16, IMAGE_SYM_CLASS_EXTERNAL);
+    pb.add_relocation(pe_text, 1u32, pe_sym_main as u32, IMAGE_REL_AMD64_REL32);
+
+    let pe_path = "/tmp/test_win64.obj";
+    let p_ok = pb.write_file(pe_path);
+    if p_ok {
+        println("PE_COFF_OBJ_WRITTEN");
+    }
+
+    let pe_mach = read_u16_le(pe_path);
+    if pe_mach == IMAGE_FILE_MACHINE_AMD64 {
+        println("PE_MACHINE_VERIFIED");
+    }
+
+    println("ALL_OBJECT_FORMATS_PASSED");
+    return 0;
+}

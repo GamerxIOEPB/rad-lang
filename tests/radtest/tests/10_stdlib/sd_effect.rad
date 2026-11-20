@@ -1,0 +1,60 @@
+import std/effect;
+
+pub effect CounterEffect {
+    fn increment(amount: i64) -> i64;
+    fn current() -> i64;
+}
+
+fn compute() -> i64 {
+    let x = perform 100i64;
+    return x;
+}
+
+fn main() -> i32 {
+    // 1. Syntax check for effect & handle
+    handle compute() with {
+        CounterEffect => 0
+    }
+    println("EFFECT_SYNTAX_OK");
+
+    // 2. Algebraic Effect Context Execution
+    var ctx = EffectContext::new(42i64, "production");
+
+    let v1 = ctx.perform_get();
+    if v1 == 42i64 {
+        println("STATE_GET_OK");
+    }
+
+    ctx.perform_set(100i64);
+    let v2 = ctx.perform_get();
+    if v2 == 100i64 {
+        println("STATE_SET_OK");
+    }
+
+    let env_val = ctx.perform_ask();
+    if env_val == 42i64 {
+        println("READER_ASK_OK");
+    }
+
+    ctx.perform_tell("Worker initiated");
+    ctx.perform_tell("Processing batch");
+    if ctx.writer.count() == 2usize {
+        println("WRITER_TELL_OK");
+    }
+
+    ctx.perform_yield(10i64);
+    ctx.perform_yield(20i64);
+    ctx.perform_yield(30i64);
+    if ctx.generator.count() == 3usize && ctx.generator.get(1usize) == 20i64 {
+        println("YIELD_GENERATOR_OK");
+    }
+
+    // 3. Delimited Resumption
+    let res = ctx.resume_latest(999i64);
+    if res == 999i64 {
+        println("RESUME_OK");
+    }
+
+    println("EFFECT_ALL_PASSED");
+    return 0;
+}

@@ -5711,6 +5711,13 @@ impl Codegen {
         header.push_str("@.panic_div_fmt = private unnamed_addr constant [46 x i8] c\"rad runtime panic: attempt to divide by zero\\0A\\00\", align 1\n")
         header.push_str("define void @__rad_panic_div_zero() {\nentry:\n  call void @__rad_run_panic_hook()\n  %fmt = getelementptr inbounds [46 x i8], ptr @.panic_div_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt)\n  call void @exit(i32 1)\n  ret void\n}\n\n")
 
+        header.push_str("@.contract_panic_msg = private unnamed_addr constant [49 x i8] c\"rad runtime panic: contract precondition failed\\0A\\00\", align 1\n")
+        header.push_str("define void @__rad_contract_violation() {\nentry:\n  call void @__rad_run_panic_hook()\n  %fmt = getelementptr inbounds [49 x i8], ptr @.contract_panic_msg, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt)\n  call void @exit(i32 101)\n  ret void\n}\n\n")
+
+        header.push_str("define i64 @__rad_jit_call0(ptr %fn) {\nentry:\n  %res = call i64 %fn()\n  ret i64 %res\n}\n\n")
+        header.push_str("define i64 @__rad_jit_call1(ptr %fn, i64 %a1) {\nentry:\n  %res = call i64 %fn(i64 %a1)\n  ret i64 %res\n}\n\n")
+        header.push_str("define i64 @__rad_jit_call2(ptr %fn, i64 %a1, i64 %a2) {\nentry:\n  %res = call i64 %fn(i64 %a1, i64 %a2)\n  ret i64 %res\n}\n\n")
+
         header.push_str("define ptr @vec_from(ptr %slice) {\nentry:\n  %is_null = icmp eq ptr %slice, null\n  br i1 %is_null, label %ret_empty, label %do_copy\nret_empty:\n  %empty_vec = call ptr @new()\n  ret ptr %empty_vec\ndo_copy:\n  %len_ptr = getelementptr inbounds i8, ptr %slice, i64 16\n  %len = load i64, ptr %len_ptr, align 8\n  %obj = call ptr @malloc(i64 24)\n  %cap = shl i64 %len, 1\n  %adj_cap_cond = icmp ult i64 %cap, 16\n  %adj_cap = select i1 %adj_cap_cond, i64 16, i64 %cap\n  %bytes = shl i64 %adj_cap, 3\n  %buf = call ptr @malloc(i64 %bytes)\n  store ptr %buf, ptr %obj, align 8\n  %cap_slot = getelementptr inbounds i8, ptr %obj, i64 8\n  store i64 %adj_cap, ptr %cap_slot, align 8\n  %len_slot = getelementptr inbounds i8, ptr %obj, i64 16\n  store i64 %len, ptr %len_slot, align 8\n  %src_buf = load ptr, ptr %slice, align 8\n  br label %loop\nloop:\n  %i = phi i64 [ 0, %do_copy ], [ %next_i, %body ]\n  %is_done = icmp uge i64 %i, %len\n  br i1 %is_done, label %exit, label %body\nbody:\n  %src_slot = getelementptr inbounds i64, ptr %src_buf, i64 %i\n  %val = load i64, ptr %src_slot, align 8\n  %dst_slot = getelementptr inbounds i64, ptr %buf, i64 %i\n  store i64 %val, ptr %dst_slot, align 8\n  %next_i = add i64 %i, 1\n  br label %loop\nexit:\n  ret ptr %obj\n}\n\n")
 
         var fn_ir = String.new()

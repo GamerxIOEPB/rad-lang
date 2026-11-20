@@ -1,0 +1,89 @@
+import std/jit;
+
+fn main() -> i32 {
+    // 1. Test JitAssembler & JitEngine
+    var asm0 = JitAssembler::new();
+    // Return 777
+    asm0.mov_rax_imm32(777);
+    asm0.ret();
+
+    var engine = JitEngine::new(4096usize);
+    if engine.is_valid() {
+        println("JIT_ENGINE_INITIALIZED");
+    }
+
+    let fn0_ptr = engine.compile(asm0.get_code());
+    let r0 = engine.call_fn0(fn0_ptr);
+    if r0 == 777i64 {
+        println("JIT_CALL0_OK");
+    }
+
+    // Function 1: takes rdi, adds 50
+    var asm1 = JitAssembler::new();
+    asm1.mov_rax_rdi();
+    asm1.add_rax_imm32(50);
+    asm1.ret();
+
+    let fn1_ptr = engine.compile(asm1.get_code());
+    let r1 = engine.call_fn1(fn1_ptr, 50i64);
+    if r1 == 100i64 {
+        println("JIT_CALL1_OK");
+    }
+
+    // Function 2: takes rdi, rsi, multiplies them
+    var asm2 = JitAssembler::new();
+    asm2.mov_rax_rdi();
+    asm2.imul_rax_rsi();
+    asm2.ret();
+
+    let fn2_ptr = engine.compile(asm2.get_code());
+    let r2 = engine.call_fn2(fn2_ptr, 6i64, 7i64);
+    if r2 == 42i64 {
+        println("JIT_CALL2_OK");
+    }
+
+    // 2. State-Preserving Hot Reload Engine
+    var hot = HotReloadEngine::new();
+
+    // Initial behavior v1: return arg * 2 (add rax, rdi)
+    var v1_asm = JitAssembler::new();
+    v1_asm.mov_rax_rdi();
+    v1_asm.add_rax_rdi();
+    v1_asm.ret();
+
+    let _h1 = hot.register_handler("calculate_tax", v1_asm.get_code());
+    hot.set_state("active_sessions", 42i64);
+
+    let res_v1 = hot.dispatch1("calculate_tax", 10i64);
+    if res_v1 == 20i64 && hot.get_version("calculate_tax") == 1u32 {
+        println("HOT_RELOAD_V1_OK");
+    }
+
+    // Hot-reload behavior v2: return arg * 3 (mov rax, rdi; add rax, rdi; add rax, rdi)
+    var v2_asm = JitAssembler::new();
+    v2_asm.mov_rax_rdi();
+    v2_asm.add_rax_rdi();
+    v2_asm.add_rax_rdi();
+    v2_asm.ret();
+
+    let reload_ok = hot.reload_handler("calculate_tax", v2_asm.get_code());
+    if reload_ok && hot.get_version("calculate_tax") == 2u32 {
+        println("HOT_RELOAD_UPDATED");
+    }
+
+    let res_v2 = hot.dispatch1("calculate_tax", 10i64);
+    if res_v2 == 30i64 {
+        println("HOT_RELOAD_V2_OK");
+    }
+
+    // Verify state was completely preserved across hot reload
+    let saved_state = hot.get_state("active_sessions", 0i64);
+    if saved_state == 42i64 {
+        println("HOT_RELOAD_STATE_PRESERVED");
+    }
+
+    engine.free_engine();
+    hot.jit.free_engine();
+    println("ALL_JIT_HOT_RELOAD_PASSED");
+    return 0;
+}

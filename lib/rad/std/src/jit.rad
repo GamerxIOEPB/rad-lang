@@ -1,0 +1,376 @@
+// ==============================================================================
+// Rad Standard Library: High-Performance JIT Engine & Hot Reloading (std::jit)
+// x86-64 machine code assembler, mmap executable memory, dynamic execution,
+// and state-preserving live function hot-reloader.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+fn jit_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn jit_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+extern "C" {
+    fn __rad_jit_call0(f: *raw u8) -> i64;
+    fn __rad_jit_call1(f: *raw u8, a: i64) -> i64;
+    fn __rad_jit_call2(f: *raw u8, a: i64, b: i64) -> i64;
+}
+
+// ------------------------------------------------------------------------------
+// x86-64 Machine Code Assembler
+// ------------------------------------------------------------------------------
+
+pub struct JitAssembler {
+    pub code: Vec<u8>,
+}
+
+impl JitAssembler {
+    pub fn new() -> JitAssembler {
+        return JitAssembler {
+            code: Vec.new(),
+        }
+    }
+
+    pub fn push_byte(var self, b: u8) {
+        self.code.push(b)
+    }
+
+    pub fn push_u32_le(var self, val: u32) {
+        self.code.push((val & 0xFFu32) as u8)
+        self.code.push(((val >> 8u32) & 0xFFu32) as u8)
+        self.code.push(((val >> 16u32) & 0xFFu32) as u8)
+        self.code.push(((val >> 24u32) & 0xFFu32) as u8)
+    }
+
+    pub fn push_u64_le(var self, val: u64) {
+        self.code.push((val & 0xFFu64) as u8)
+        self.code.push(((val >> 8u64) & 0xFFu64) as u8)
+        self.code.push(((val >> 16u64) & 0xFFu64) as u8)
+        self.code.push(((val >> 24u64) & 0xFFu64) as u8)
+        self.code.push(((val >> 32u64) & 0xFFu64) as u8)
+        self.code.push(((val >> 40u64) & 0xFFu64) as u8)
+        self.code.push(((val >> 48u64) & 0xFFu64) as u8)
+        self.code.push(((val >> 56u64) & 0xFFu64) as u8)
+    }
+
+    // mov rax, imm64 -> 48 B8 <8 bytes>
+    pub fn mov_rax_imm64(var self, val: u64) {
+        self.push_byte(0x48u8)
+        self.push_byte(0xB8u8)
+        self.push_u64_le(val)
+    }
+
+    // mov rax, imm32 (sign-extended) -> 48 C7 C0 <4 bytes>
+    pub fn mov_rax_imm32(var self, val: i32) {
+        self.push_byte(0x48u8)
+        self.push_byte(0xC7u8)
+        self.push_byte(0xC0u8)
+        self.push_u32_le(val as u32)
+    }
+
+    // mov rax, rdi -> 48 89 F8
+    pub fn mov_rax_rdi(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x89u8)
+        self.push_byte(0xF8u8)
+    }
+
+    // add rax, rdi -> 48 01 F8
+    pub fn add_rax_rdi(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x01u8)
+        self.push_byte(0xF8u8)
+    }
+
+    // sub rax, rdi -> 48 29 F8
+    pub fn sub_rax_rdi(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x29u8)
+        self.push_byte(0xF8u8)
+    }
+
+    // imul rax, rdi -> 48 0F AF C7
+    pub fn imul_rax_rdi(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x0Fu8)
+        self.push_byte(0xAFu8)
+        self.push_byte(0xC7u8)
+    }
+
+    // add rax, rsi -> 48 01 F0
+    pub fn add_rax_rsi(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x01u8)
+        self.push_byte(0xF0u8)
+    }
+
+    // sub rax, rsi -> 48 29 F0
+    pub fn sub_rax_rsi(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x29u8)
+        self.push_byte(0xF0u8)
+    }
+
+    // imul rax, rsi -> 48 0F AF C6
+    pub fn imul_rax_rsi(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x0Fu8)
+        self.push_byte(0xAFu8)
+        self.push_byte(0xC6u8)
+    }
+
+    // add rax, imm32 -> 48 05 <4 bytes>
+    pub fn add_rax_imm32(var self, val: i32) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x05u8)
+        self.push_u32_le(val as u32)
+    }
+
+    // sub rax, imm32 -> 48 2D <4 bytes>
+    pub fn sub_rax_imm32(var self, val: i32) {
+        self.push_byte(0x48u8)
+        self.push_byte(0x2Du8)
+        self.push_u32_le(val as u32)
+    }
+
+    // inc rax -> 48 FF C0
+    pub fn inc_rax(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0xFFu8)
+        self.push_byte(0xC0u8)
+    }
+
+    // dec rax -> 48 FF C8
+    pub fn dec_rax(var self) {
+        self.push_byte(0x48u8)
+        self.push_byte(0xFFu8)
+        self.push_byte(0xC8u8)
+    }
+
+    // ret -> C3
+    pub fn ret(var self) {
+        self.push_byte(0xC3u8)
+    }
+
+    pub fn len(self) -> usize {
+        return self.code.len
+    }
+
+    pub fn get_code(self) -> Vec<u8> {
+        return self.code
+    }
+}
+
+// ------------------------------------------------------------------------------
+// JIT Execution Engine
+// ------------------------------------------------------------------------------
+
+pub struct JitEngine {
+    pub page_addr: i64,
+    pub page_size: usize,
+    pub used_bytes: usize,
+}
+
+impl JitEngine {
+    pub fn new(page_size: usize) -> JitEngine {
+        var size = page_size
+        if size == 0usize {
+            size = 65536usize // 64KB default
+        }
+        // SYS_mmap = 9, prot = PROT_READ|PROT_WRITE|PROT_EXEC (7), flags = MAP_PRIVATE|MAP_ANONYMOUS (34)
+        let addr = syscall6(9i64, 0i64, size as i64, 7i64, 34i64, -1i64, 0i64)
+        return JitEngine {
+            page_addr: addr,
+            page_size: size,
+            used_bytes: 0usize,
+        }
+    }
+
+    pub fn is_valid(self) -> bool {
+        return self.page_addr > 0i64
+    }
+
+    pub fn compile(var self, code: Vec<u8>) -> *raw u8 {
+        if self.page_addr <= 0i64 || self.used_bytes + code.len > self.page_size {
+            return 0usize as *raw u8
+        }
+        let start_offset = self.used_bytes
+        let base_ptr = (self.page_addr + (start_offset as i64)) as *raw var u8
+
+        var i = 0usize
+        while i < code.len {
+            base_ptr[i] = code.ptr[i]
+            i = i + 1usize
+        }
+
+        // Align next compilation to 16 bytes
+        var next_used = self.used_bytes + code.len
+        let rem = next_used % 16usize
+        if rem != 0usize {
+            next_used = next_used + (16usize - rem)
+        }
+        self.used_bytes = next_used
+
+        return base_ptr as *raw u8
+    }
+
+    pub fn call_fn0(self, fn_ptr: *raw u8) -> i64 {
+        if (fn_ptr as usize) == 0usize {
+            return 0i64
+        }
+        return __rad_jit_call0(fn_ptr)
+    }
+
+    pub fn call_fn1(self, fn_ptr: *raw u8, arg1: i64) -> i64 {
+        if (fn_ptr as usize) == 0usize {
+            return 0i64
+        }
+        return __rad_jit_call1(fn_ptr, arg1)
+    }
+
+    pub fn call_fn2(self, fn_ptr: *raw u8, arg1: i64, arg2: i64) -> i64 {
+        if (fn_ptr as usize) == 0usize {
+            return 0i64
+        }
+        return __rad_jit_call2(fn_ptr, arg1, arg2)
+    }
+
+    pub fn free_engine(var self) {
+        if self.page_addr > 0i64 {
+            // SYS_munmap = 11
+            let _ = syscall2(11i64, self.page_addr, self.page_size as i64)
+            self.page_addr = 0i64
+            self.used_bytes = 0usize
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// State-Preserving Hot Reload Engine
+// ------------------------------------------------------------------------------
+
+pub struct HotReloadEngine {
+    pub jit: JitEngine,
+    pub handler_names: Vec<String>,
+    pub handler_ptrs: Vec<*raw u8>,
+    pub handler_versions: Vec<u32>,
+    pub state_keys: Vec<String>,
+    pub state_values: Vec<i64>,
+}
+
+impl HotReloadEngine {
+    pub fn new() -> HotReloadEngine {
+        return HotReloadEngine {
+            jit: JitEngine::new(65536usize),
+            handler_names: Vec.new(),
+            handler_ptrs: Vec.new(),
+            handler_versions: Vec.new(),
+            state_keys: Vec.new(),
+            state_values: Vec.new(),
+        }
+    }
+
+    pub fn register_handler(var self, name: str, code: Vec<u8>) -> *raw u8 {
+        let ptr = self.jit.compile(code)
+        self.handler_names.push(String.from_str(name))
+        self.handler_ptrs.push(ptr)
+        self.handler_versions.push(1u32)
+        return ptr
+    }
+
+    pub fn reload_handler(var self, name: str, new_code: Vec<u8>) -> bool {
+        var i = 0usize
+        while i < self.handler_names.len {
+            if jit_str_eq(self.handler_names.ptr[i].as_ptr() as str, name) {
+                let new_ptr = self.jit.compile(new_code)
+                if (new_ptr as usize) == 0usize {
+                    return false
+                }
+                self.handler_ptrs.ptr[i] = new_ptr
+                self.handler_versions.ptr[i] = self.handler_versions.ptr[i] + 1u32
+                return true
+            }
+            i = i + 1usize
+        }
+        return false
+    }
+
+    pub fn get_handler(self, name: str) -> *raw u8 {
+        var i = 0usize
+        while i < self.handler_names.len {
+            if jit_str_eq(self.handler_names.ptr[i].as_ptr() as str, name) {
+                return self.handler_ptrs.ptr[i]
+            }
+            i = i + 1usize
+        }
+        return 0usize as *raw u8
+    }
+
+    pub fn get_version(self, name: str) -> u32 {
+        var i = 0usize
+        while i < self.handler_names.len {
+            if jit_str_eq(self.handler_names.ptr[i].as_ptr() as str, name) {
+                return self.handler_versions.ptr[i]
+            }
+            i = i + 1usize
+        }
+        return 0u32
+    }
+
+    pub fn dispatch0(self, name: str) -> i64 {
+        let ptr = self.get_handler(name)
+        return self.jit.call_fn0(ptr)
+    }
+
+    pub fn dispatch1(self, name: str, arg1: i64) -> i64 {
+        let ptr = self.get_handler(name)
+        return self.jit.call_fn1(ptr, arg1)
+    }
+
+    pub fn dispatch2(self, name: str, arg1: i64, arg2: i64) -> i64 {
+        let ptr = self.get_handler(name)
+        return self.jit.call_fn2(ptr, arg1, arg2)
+    }
+
+    pub fn set_state(var self, key: str, val: i64) {
+        var i = 0usize
+        while i < self.state_keys.len {
+            if jit_str_eq(self.state_keys.ptr[i].as_ptr() as str, key) {
+                self.state_values.ptr[i] = val
+                return
+            }
+            i = i + 1usize
+        }
+        self.state_keys.push(String.from_str(key))
+        self.state_values.push(val)
+    }
+
+    pub fn get_state(self, key: str, default_val: i64) -> i64 {
+        var i = 0usize
+        while i < self.state_keys.len {
+            if jit_str_eq(self.state_keys.ptr[i].as_ptr() as str, key) {
+                return self.state_values.ptr[i]
+            }
+            i = i + 1usize
+        }
+        return default_val
+    }
+}

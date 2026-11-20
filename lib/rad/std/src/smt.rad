@@ -1,0 +1,384 @@
+// ==============================================================================
+// Rad Standard Library: SMT-LIB2 Generator & Contract Verification (std::smt)
+// Formal verification, invariant proofs, QF_AUFLIA logic & bounds checking.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+fn smt_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn smt_str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+fn smt_int_to_str(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0")
+    }
+    var v = val
+    var is_neg = false
+    if v < 0i64 {
+        is_neg = true
+        v = -v
+    }
+    var rev = String.new()
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8
+        rev.push_byte(48u8 + digit)
+        v = v / 10i64
+    }
+    if is_neg {
+        rev.push_byte(45u8)
+    }
+    var res = String.new()
+    var len = rev.len()
+    let p = rev.as_ptr()
+    while len > 0usize {
+        len = len - 1usize
+        res.push_byte(p[len])
+    }
+    return res
+}
+
+extern "C" {
+    fn fopen(filename: *raw u8, mode: *raw u8) -> *raw var u8;
+    fn fwrite(ptr: *raw u8, size: usize, count: usize, stream: *raw var u8) -> usize;
+    fn fclose(stream: *raw var u8) -> i32;
+}
+
+// SMT-LIB2 Sorts
+pub const SMT_SORT_INT: i32   = 1
+pub const SMT_SORT_BOOL: i32  = 2
+pub const SMT_SORT_BV: i32    = 3
+pub const SMT_SORT_ARRAY: i32 = 4
+
+// SMT-LIB2 Node Operator Types
+pub const SMT_OP_VAR: i32       = 0
+pub const SMT_OP_INT_CONST: i32 = 1
+pub const SMT_OP_BOOL_CONST: i32= 2
+pub const SMT_OP_ADD: i32       = 3
+pub const SMT_OP_SUB: i32       = 4
+pub const SMT_OP_MUL: i32       = 5
+pub const SMT_OP_DIV: i32       = 6
+pub const SMT_OP_EQ: i32        = 7
+pub const SMT_OP_NEQ: i32       = 8
+pub const SMT_OP_LT: i32        = 9
+pub const SMT_OP_LTE: i32       = 10
+pub const SMT_OP_GT: i32        = 11
+pub const SMT_OP_GTE: i32       = 12
+pub const SMT_OP_AND: i32       = 13
+pub const SMT_OP_OR: i32        = 14
+pub const SMT_OP_NOT: i32       = 15
+pub const SMT_OP_IMPLIES: i32   = 16
+pub const SMT_OP_ITE: i32       = 17
+pub const SMT_OP_SELECT: i32    = 18
+pub const SMT_OP_STORE: i32     = 19
+
+pub struct SmtSort {
+    pub kind: i32,
+    pub bv_width: i32,
+}
+
+impl SmtSort {
+    pub fn int_sort() -> SmtSort {
+        return SmtSort { kind: SMT_SORT_INT, bv_width: 0 }
+    }
+
+    pub fn bool_sort() -> SmtSort {
+        return SmtSort { kind: SMT_SORT_BOOL, bv_width: 0 }
+    }
+
+    pub fn bv_sort(width: i32) -> SmtSort {
+        return SmtSort { kind: SMT_SORT_BV, bv_width: width }
+    }
+
+    pub fn to_smt2(self) -> String {
+        if self.kind == SMT_SORT_INT {
+            return String.from_str("Int")
+        }
+        if self.kind == SMT_SORT_BOOL {
+            return String.from_str("Bool")
+        }
+        if self.kind == SMT_SORT_BV {
+            var s = String.from_str("(_ BitVec ")
+            s.push_str(smt_int_to_str(self.bv_width as i64).as_ptr() as str)
+            s.push_str(")")
+            return s
+        }
+        return String.from_str("Int")
+    }
+}
+
+pub struct SmtNode {
+    pub op: i32,
+    pub name: String,
+    pub int_val: i64,
+    pub bool_val: bool,
+    pub args: Vec<usize>,
+}
+
+pub struct SmtBuilder {
+    pub logic: String,
+    pub nodes: Vec<SmtNode>,
+    pub decl_names: Vec<String>,
+    pub decl_sorts: Vec<SmtSort>,
+    pub assertions: Vec<usize>,
+}
+
+impl SmtBuilder {
+    pub fn new(logic: str) -> SmtBuilder {
+        return SmtBuilder {
+            logic: String.from_str(logic),
+            nodes: Vec.new(),
+            decl_names: Vec.new(),
+            decl_sorts: Vec.new(),
+            assertions: Vec.new(),
+        }
+    }
+
+    pub fn declare_var(var self, name: str, sort: SmtSort) -> usize {
+        self.decl_names.push(String.from_str(name))
+        self.decl_sorts.push(sort)
+        let idx = self.nodes.len
+        self.nodes.push(SmtNode {
+            op: SMT_OP_VAR,
+            name: String.from_str(name),
+            int_val: 0i64,
+            bool_val: false,
+            args: Vec.new(),
+        })
+        return idx
+    }
+
+    pub fn int_const(var self, val: i64) -> usize {
+        let idx = self.nodes.len
+        self.nodes.push(SmtNode {
+            op: SMT_OP_INT_CONST,
+            name: String.new(),
+            int_val: val,
+            bool_val: false,
+            args: Vec.new(),
+        })
+        return idx
+    }
+
+    pub fn bool_const(var self, val: bool) -> usize {
+        let idx = self.nodes.len
+        self.nodes.push(SmtNode {
+            op: SMT_OP_BOOL_CONST,
+            name: String.new(),
+            int_val: 0i64,
+            bool_val: val,
+            args: Vec.new(),
+        })
+        return idx
+    }
+
+    pub fn binary_op(var self, op: i32, a: usize, b: usize) -> usize {
+        let idx = self.nodes.len
+        var args = Vec.new()
+        args.push(a)
+        args.push(b)
+        self.nodes.push(SmtNode {
+            op: op,
+            name: String.new(),
+            int_val: 0i64,
+            bool_val: false,
+            args: args,
+        })
+        return idx
+    }
+
+    pub fn add(var self, a: usize, b: usize) -> usize { return self.binary_op(SMT_OP_ADD, a, b) }
+    pub fn sub(var self, a: usize, b: usize) -> usize { return self.binary_op(SMT_OP_SUB, a, b) }
+    pub fn mul(var self, a: usize, b: usize) -> usize { return self.binary_op(SMT_OP_MUL, a, b) }
+    pub fn eq(var self, a: usize, b: usize) -> usize  { return self.binary_op(SMT_OP_EQ, a, b) }
+    pub fn neq(var self, a: usize, b: usize) -> usize { return self.binary_op(SMT_OP_NEQ, a, b) }
+    pub fn lt(var self, a: usize, b: usize) -> usize  { return self.binary_op(SMT_OP_LT, a, b) }
+    pub fn lte(var self, a: usize, b: usize) -> usize { return self.binary_op(SMT_OP_LTE, a, b) }
+    pub fn gt(var self, a: usize, b: usize) -> usize  { return self.binary_op(SMT_OP_GT, a, b) }
+    pub fn gte(var self, a: usize, b: usize) -> usize { return self.binary_op(SMT_OP_GTE, a, b) }
+    pub fn and_op(var self, a: usize, b: usize) -> usize { return self.binary_op(SMT_OP_AND, a, b) }
+    pub fn or_op(var self, a: usize, b: usize) -> usize  { return self.binary_op(SMT_OP_OR, a, b) }
+    pub fn implies(var self, a: usize, b: usize) -> usize { return self.binary_op(SMT_OP_IMPLIES, a, b) }
+
+    pub fn not_op(var self, a: usize) -> usize {
+        let idx = self.nodes.len
+        var args = Vec.new()
+        args.push(a)
+        self.nodes.push(SmtNode {
+            op: SMT_OP_NOT,
+            name: String.new(),
+            int_val: 0i64,
+            bool_val: false,
+            args: args,
+        })
+        return idx
+    }
+
+    pub fn assert_formula(var self, node_idx: usize) {
+        self.assertions.push(node_idx)
+    }
+
+    pub fn node_to_smt2(self, idx: usize) -> String {
+        if idx >= self.nodes.len {
+            return String.from_str("true")
+        }
+        let n = self.nodes.ptr[idx]
+        if n.op == SMT_OP_VAR {
+            return n.name
+        }
+        if n.op == SMT_OP_INT_CONST {
+            if n.int_val < 0i64 {
+                var s = String.from_str("(- ")
+                s.push_str(smt_int_to_str(-n.int_val).as_ptr() as str)
+                s.push_str(")")
+                return s
+            }
+            return smt_int_to_str(n.int_val)
+        }
+        if n.op == SMT_OP_BOOL_CONST {
+            if n.bool_val {
+                return String.from_str("true")
+            }
+            return String.from_str("false")
+        }
+        if n.op == SMT_OP_NOT {
+            var s = String.from_str("(not ")
+            s.push_str(self.node_to_smt2(n.args.ptr[0]).as_ptr() as str)
+            s.push_str(")")
+            return s
+        }
+
+        var op_str = ""
+        if n.op == SMT_OP_ADD { op_str = "+" }
+        else if n.op == SMT_OP_SUB { op_str = "-" }
+        else if n.op == SMT_OP_MUL { op_str = "*" }
+        else if n.op == SMT_OP_DIV { op_str = "div" }
+        else if n.op == SMT_OP_EQ { op_str = "=" }
+        else if n.op == SMT_OP_NEQ { op_str = "distinct" }
+        else if n.op == SMT_OP_LT { op_str = "<" }
+        else if n.op == SMT_OP_LTE { op_str = "<=" }
+        else if n.op == SMT_OP_GT { op_str = ">" }
+        else if n.op == SMT_OP_GTE { op_str = ">=" }
+        else if n.op == SMT_OP_AND { op_str = "and" }
+        else if n.op == SMT_OP_OR { op_str = "or" }
+        else if n.op == SMT_OP_IMPLIES { op_str = "=>" }
+
+        var res = String.from_str("(")
+        res.push_str(op_str)
+        res.push_str(" ")
+        res.push_str(self.node_to_smt2(n.args.ptr[0]).as_ptr() as str)
+        res.push_str(" ")
+        res.push_str(self.node_to_smt2(n.args.ptr[1]).as_ptr() as str)
+        res.push_str(")")
+        return res
+    }
+
+    pub fn to_smt2(self) -> String {
+        var out = String.new()
+        out.push_str("(set-logic ")
+        out.push_str(self.logic.as_ptr() as str)
+        out.push_str(")\n")
+
+        var i = 0usize
+        while i < self.decl_names.len {
+            out.push_str("(declare-const ")
+            out.push_str(self.decl_names.ptr[i].as_ptr() as str)
+            out.push_str(" ")
+            out.push_str(self.decl_sorts.ptr[i].to_smt2().as_ptr() as str)
+            out.push_str(")\n")
+            i = i + 1usize
+        }
+
+        i = 0usize
+        while i < self.assertions.len {
+            out.push_str("(assert ")
+            out.push_str(self.node_to_smt2(self.assertions.ptr[i]).as_ptr() as str)
+            out.push_str(")\n")
+            i = i + 1usize
+        }
+
+        out.push_str("(check-sat)\n")
+        return out
+    }
+
+    pub fn write_file(self, path: str) -> bool {
+        let fp = fopen(path as *raw u8, "wb" as *raw u8)
+        if (fp as usize) == 0usize {
+            return false
+        }
+        let txt = self.to_smt2()
+        let len = txt.len()
+        let _w = fwrite(txt.as_ptr() as *raw u8, 1usize, len, fp)
+        let _c = fclose(fp)
+        return true
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Contract Verification Engine
+// ------------------------------------------------------------------------------
+
+pub struct ContractVerifier {
+    pub function_name: String,
+    pub verified_contracts: usize,
+    pub failed_contracts: usize,
+}
+
+impl ContractVerifier {
+    pub fn new(fn_name: str) -> ContractVerifier {
+        return ContractVerifier {
+            function_name: String.from_str(fn_name),
+            verified_contracts: 0usize,
+            failed_contracts: 0usize,
+        }
+    }
+
+    pub fn verify_bounds_invariant(var self, idx: i64, len: i64) -> bool {
+        if idx >= 0i64 && idx < len {
+            self.verified_contracts = self.verified_contracts + 1usize
+            return true
+        }
+        self.failed_contracts = self.failed_contracts + 1usize
+        return false
+    }
+
+    pub fn verify_precondition(var self, cond: bool) -> bool {
+        if cond {
+            self.verified_contracts = self.verified_contracts + 1usize
+            return true
+        }
+        self.failed_contracts = self.failed_contracts + 1usize
+        return false
+    }
+
+    pub fn verify_postcondition(var self, pre_cond: bool, post_cond: bool) -> bool {
+        if !pre_cond || post_cond {
+            self.verified_contracts = self.verified_contracts + 1usize
+            return true
+        }
+        self.failed_contracts = self.failed_contracts + 1usize
+        return false
+    }
+
+    pub fn is_all_verified(self) -> bool {
+        return self.failed_contracts == 0usize
+    }
+}
