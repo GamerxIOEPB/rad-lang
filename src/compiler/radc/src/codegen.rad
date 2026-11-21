@@ -1181,14 +1181,22 @@ impl Codegen {
         if str_eq(field_name, "filename") { return 10i64 }
         if str_eq(field_name, "error_count") { return 11i64 }
         if str_eq(field_name, "source") { return 12i64 }
-        if str_eq(field_name, "moved_vars") { return 13i64 }
-        if str_eq(field_name, "imported_modules") { return 14i64 }
-        if str_eq(field_name, "diagnostics") { return 15i64 }
-        if str_eq(field_name, "color_mode") { return 16i64 }
-        if str_eq(field_name, "json_format") { return 17i64 }
-        if str_eq(field_name, "test_mode") { return 18i64 }
-        if str_eq(field_name, "cur_is_test") { return 19i64 }
-        if str_eq(field_name, "cur_is_async") { return 20i64 }
+        if str_eq(field_name, "source_files") { return 13i64 }
+        if str_eq(field_name, "expr_source_ids") { return 14i64 }
+        if str_eq(field_name, "stmt_source_ids") { return 15i64 }
+        if str_eq(field_name, "current_source_id") { return 16i64 }
+        if str_eq(field_name, "moved_vars") { return 17i64 }
+        if str_eq(field_name, "imported_modules") { return 18i64 }
+        if str_eq(field_name, "diagnostics") { return 19i64 }
+        if str_eq(field_name, "color_mode") { return 20i64 }
+        if str_eq(field_name, "json_format") { return 21i64 }
+        if str_eq(field_name, "test_mode") { return 22i64 }
+        if str_eq(field_name, "cur_is_test") { return 23i64 }
+        if str_eq(field_name, "cur_is_async") { return 24i64 }
+
+        // SourceFile
+        if str_eq(field_name, "path") { return 0i64 }
+        if str_eq(field_name, "source") { return 1i64 }
 
         // StringEntry
         if str_eq(field_name, "content") { return 0i64 }
