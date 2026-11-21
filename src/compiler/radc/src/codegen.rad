@@ -1195,8 +1195,8 @@ impl Codegen {
         if str_eq(field_name, "cur_is_async") { return 24i64 }
 
         // SourceFile
-        if str_eq(field_name, "path") { return 0i64 }
-        if str_eq(field_name, "source") { return 1i64 }
+        if str_eq(field_name, "file_path") { return 0i64 }
+        if str_eq(field_name, "file_text") { return 1i64 }
 
         // StringEntry
         if str_eq(field_name, "content") { return 0i64 }
