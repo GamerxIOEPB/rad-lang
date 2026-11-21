@@ -1,4 +1,5 @@
 #include "crash_report.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Signals.h"
 #include <atomic>
 #include <unistd.h>
