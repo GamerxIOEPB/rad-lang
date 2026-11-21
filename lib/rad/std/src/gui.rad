@@ -9,6 +9,7 @@
 extern "C" {
     fn malloc(size: usize) -> *raw var u8;
     fn free(ptr: *raw var u8);
+    fn memcpy(dest: *raw var u8, src: *raw u8, n: usize) -> *raw var u8;
     fn getenv(name: str) -> *raw u8;
     fn open(path: str, flags: i32) -> i32;
     fn close(fd: i32) -> i32;
@@ -643,7 +644,6 @@ impl WaylandBackend {
                     p_ack32[0] = serial;
                     let _ = wayland_send_packet(self.sock_fd, 11u32, 4u16, p_ack, 4usize);
                     free(p_ack);
-                    self.commit();
                     self.configured = true;
                 }
                 if obj == 12u32 && opcode == 1u16 {
@@ -704,8 +704,11 @@ impl WaylandBackend {
         return self.is_open;
     }
 
-    pub fn commit(var self) {
-        if !self.is_open { return; }
+    pub fn commit(var self, pixels: *raw var u32) {
+        if !self.is_open || (self.pixels as usize) == 0usize || (pixels as usize) == 0usize { return; }
+        let count = (self.width as usize) * (self.height as usize);
+        let _ = memcpy(self.pixels as *raw var u8, pixels as *raw u8, count * 4usize);
+
         let p_att = malloc(12usize);
         let p_att32 = p_att as *raw var u32;
         p_att32[0] = 9u32; p_att32[1] = 0u32; p_att32[2] = 0u32;
@@ -948,28 +951,13 @@ impl X11Backend {
         let _ = syscall3(1i64, fd as i64, map_buf as i64, 8i64);
         free(map_buf);
 
-        // PutImage buffer
-        let pixel_count = (width as usize) * (height as usize);
-        let pixel_words = pixel_count;
-        let total_words = 6usize + pixel_words;
-        let put_buf_len = total_words * 4usize;
+        // PutImage chunk buffer (sized for 32 scanline chunk)
+        let chunk_h = 32usize;
+        let max_pixel_words = (width as usize) * chunk_h;
+        let put_buf_len = (6usize + max_pixel_words) * 4usize;
         let put_buf = malloc(put_buf_len);
         var pi = 0usize;
         while pi < 24usize { put_buf[pi] = 0u8; pi = pi + 1usize; }
-        put_buf[0] = 72u8; // PutImage
-        put_buf[1] = 2u8;  // ZPixmap
-        put_buf[2] = (total_words & 0xFFusize) as u8;
-        put_buf[3] = ((total_words >> 8) & 0xFFusize) as u8;
-        let put_32 = put_buf as *raw var u32;
-        put_32[1] = win_id;
-        put_32[2] = gc_id;
-        let put_16 = put_buf as *raw var u16;
-        put_16[6] = width as u16;
-        put_16[7] = height as u16;
-        put_16[8] = 0u16;
-        put_16[9] = 0u16;
-        put_buf[20] = 0u8;
-        put_buf[21] = 24u8; // depth
 
         return X11Backend {
             sock_fd: fd, win_id: win_id, gc_id: gc_id, width: width, height: height,
@@ -1017,10 +1005,16 @@ impl X11Backend {
                 });
             } else if ev_code == 4u8 {
                 let btn = ev_buf[1] as u32;
+                let mx = gui_read_u16(ev_buf, 24usize) as f32;
+                let my = gui_read_u16(ev_buf, 26usize) as f32;
+                self.mouse_x = mx; self.mouse_y = my;
                 if btn == 1u32 { self.mouse_down = true; }
                 events.push(WindowEvent::mouse_down(self.mouse_x, self.mouse_y));
             } else if ev_code == 5u8 {
                 let btn = ev_buf[1] as u32;
+                let mx = gui_read_u16(ev_buf, 24usize) as f32;
+                let my = gui_read_u16(ev_buf, 26usize) as f32;
+                self.mouse_x = mx; self.mouse_y = my;
                 if btn == 1u32 { self.mouse_down = false; }
                 events.push(WindowEvent {
                     event_type: WINDOW_EVENT_MOUSE_UP,
@@ -1046,15 +1040,48 @@ impl X11Backend {
     }
 
     pub fn commit(var self, pixels: *raw var u32) {
-        if !self.is_open || (self.put_buf as usize) == 0usize { return; }
-        let put_32 = self.put_buf as *raw var u32;
-        let count = (self.width as usize) * (self.height as usize);
-        var i = 0usize;
-        while i < count {
-            put_32[6usize + i] = pixels[i];
-            i = i + 1usize;
+        if !self.is_open || (self.put_buf as usize) == 0usize || (pixels as usize) == 0usize { return; }
+        let chunk_h = 32i32;
+        var y = 0i32;
+        while y < self.height {
+            var h = chunk_h;
+            if y + h > self.height {
+                h = self.height - y;
+            }
+            let pixel_words = (self.width as usize) * (h as usize);
+            let total_words = 6usize + pixel_words;
+
+            self.put_buf[0] = 72u8; // PutImage
+            self.put_buf[1] = 2u8;  // ZPixmap
+            self.put_buf[2] = (total_words & 0xFFusize) as u8;
+            self.put_buf[3] = ((total_words >> 8) & 0xFFusize) as u8;
+
+            let put_32 = self.put_buf as *raw var u32;
+            put_32[1] = self.win_id;
+            put_32[2] = self.gc_id;
+
+            let put_16 = self.put_buf as *raw var u16;
+            put_16[6] = self.width as u16;
+            put_16[7] = h as u16;
+            put_16[8] = 0u16; // dst-x
+            put_16[9] = y as u16; // dst-y
+
+            self.put_buf[20] = 0u8; // left-pad
+            self.put_buf[21] = 24u8; // depth
+            self.put_buf[22] = 0u8;
+            self.put_buf[23] = 0u8;
+
+            let src_offset = (y as usize) * (self.width as usize);
+            let dst_offset = 24usize;
+            let _ = memcpy((self.put_buf as usize + dst_offset) as *raw var u8,
+                           (pixels as usize + src_offset * 4usize) as *raw u8,
+                           pixel_words * 4usize);
+
+            let req_bytes = total_words * 4usize;
+            let _ = syscall3(1i64, self.sock_fd as i64, self.put_buf as i64, req_bytes as i64);
+
+            y = y + h;
         }
-        let _ = syscall3(1i64, self.sock_fd as i64, self.put_buf as i64, self.put_buf_len as i64);
     }
 
     pub fn destroy(var self) {
@@ -1106,6 +1133,8 @@ impl Window {
             ci = ci + 1usize;
         }
 
+        let back_px = malloc((width as usize) * (height as usize) * 4usize) as *raw var u32;
+
         // If backend is WAYLAND:
         if backend == WINDOW_BACKEND_WAYLAND {
             var wl = WaylandBackend::init(title, width, height);
@@ -1116,7 +1145,7 @@ impl Window {
                     height: height,
                     backend_type: WINDOW_BACKEND_WAYLAND,
                     is_open_flag: true,
-                    pixels: wl.pixels,
+                    pixels: back_px,
                     font_cache: f_cache,
                     event_queue: Vec.new(),
                     wayland: wl,
@@ -1133,14 +1162,13 @@ impl Window {
         if backend == WINDOW_BACKEND_X11 || backend == WINDOW_BACKEND_WAYLAND {
             var x_backend = X11Backend::init(title, width, height);
             if x_backend.is_open {
-                let px = malloc((width as usize) * (height as usize) * 4usize) as *raw var u32;
                 return Window {
                     title: String.from_str(title),
                     width: width,
                     height: height,
                     backend_type: WINDOW_BACKEND_X11,
                     is_open_flag: true,
-                    pixels: px,
+                    pixels: back_px,
                     font_cache: f_cache,
                     event_queue: Vec.new(),
                     wayland: WaylandBackend {
@@ -1156,14 +1184,13 @@ impl Window {
         }
 
         // Headless Fallback:
-        let headless_px = malloc((width as usize) * (height as usize) * 4usize) as *raw var u32;
         return Window {
             title: String.from_str(title),
             width: width,
             height: height,
             backend_type: WINDOW_BACKEND_HEADLESS,
             is_open_flag: true,
-            pixels: headless_px,
+            pixels: back_px,
             font_cache: f_cache,
             event_queue: Vec.new(),
             wayland: WaylandBackend {
@@ -1526,7 +1553,7 @@ impl Window {
 
     pub fn present(var self) {
         if self.backend_type == WINDOW_BACKEND_WAYLAND {
-            self.wayland.commit();
+            self.wayland.commit(self.pixels);
         } else if self.backend_type == WINDOW_BACKEND_X11 {
             self.x11.commit(self.pixels);
         }

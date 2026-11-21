@@ -512,6 +512,9 @@ fn main() -> i32 {
                 app.last_event = "WINDOW_EVENT_MOUSE_DOWN";
                 app.update_hover();
                 app.handle_click(win);
+                if app.hover_btn == 6i32 {
+                    win.close();
+                }
             } else if ev.event_type == WINDOW_EVENT_MOUSE_UP {
                 app.mouse_x = ev.x;
                 app.mouse_y = ev.y;
