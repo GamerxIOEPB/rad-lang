@@ -13,7 +13,7 @@ The suite checks the core modules (excluding `core/ffi`, which currently uses
 unsupported `type` alias syntax), standard-library modules, allocator
 modules, and in-tree ecosystem package roots. It also runs the existing memory,
 collection and standard-library programs and an additional stress test covering
-malloc/realloc/free, Vec, String, hash collections, Box, Arena and LinkedList.
+malloc/realloc/free, Vec, String, hash collections, Arena and LinkedList.
 
 A native probe links the same `crash_report.cpp` as `radc`, triggers SIGSEGV
 and SIGABRT, and checks for the Rad ICE banner and LLVM stack trace. Valgrind

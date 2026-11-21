@@ -3022,6 +3022,23 @@ impl Codegen {
                 if str_eq(type_s, "Vec") && str_eq(member, "from") {
                     callee_name = "vec_from"
                 }
+
+                // Give String.new and Vec.new distinct symbols.
+                if str_eq(member, "new") && (str_eq(type_s, "String") || str_eq(type_s, "Vec")) {
+                    var ctor_name = String.new()
+                    ctor_name.push_str(type_s)
+                    ctor_name.push_str("__new")
+                    ctor_name.push_byte(0u8)
+                    var fi = 0usize
+                    while fi < self.parser.functions.len {
+                        if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, ctor_name.as_ptr() as str) {
+                            callee_name = ctor_name.as_ptr() as str
+                            break
+                        }
+                        fi = fi + 1usize
+                    }
+                }
+
                 let clean_type_s = self.clean_type_name(type_s)
                 if !str_eq(clean_type_s, "String") && !str_eq(clean_type_s, "Vec") {
                     var mangled = String.new()

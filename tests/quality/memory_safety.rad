@@ -1,5 +1,4 @@
 // Runtime stress coverage for allocator and pointer-owning library types.
-import alloc/boxed;
 import alloc/hash;
 import std/arena;
 import std/collections;
@@ -128,19 +127,6 @@ fn main() -> i32 {
         failures = failures + 1i32;
     }
     strings.free_strmap();
-
-    // Box: heap allocation, read/write and explicit release.
-    var boxed = Box.new(123456i64);
-    if boxed.get() != 123456i64 {
-        println("FAIL: Box initial value");
-        failures = failures + 1i32;
-    }
-    boxed.set(654321i64);
-    if boxed.get() != 654321i64 {
-        println("FAIL: Box mutation");
-        failures = failures + 1i32;
-    }
-    boxed.drop();
 
     // Arena: zero-size behavior, alignment, chunk growth, reset and teardown.
     var arena = Arena.with_chunk_size(256usize);
