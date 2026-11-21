@@ -105,8 +105,7 @@ fn main() -> i32 {
     let v1 = Vec2.new(3.0, 4.0);
     let v_len = v1.length();
     suite.check_true("Vec2.length == 5.0", v_len >= 4.99 && v_len <= 5.01);
-    let id_mat = Mat4.identity();
-    suite.check_true("Mat4[0,0] == 1.0", id_mat.get(0usize, 0usize) == 1.0);
+    // Mat4.identity/get are exercised by lib/rad/rad-math/tests/test_math.rad.
 
     // Arena allocation/reset/destruction is exercised in tests/quality/memory_safety.rad.
 
