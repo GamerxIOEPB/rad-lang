@@ -732,8 +732,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         let source = read_file_string(fpath)
         let source_id = parser.source_files.len
         parser.source_files.push(SourceFile {
-            path: String.from_str(fpath),
-            source: source,
+            file_path: String.from_str(fpath),
+            file_text: source,
         })
         parser.current_source_id = source_id
         let tokens = lex_source(source)
