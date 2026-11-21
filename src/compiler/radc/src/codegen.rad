@@ -653,7 +653,7 @@ impl Codegen {
                 var fi = 0usize
                 while fi < self.parser.functions.len {
                     if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, m_name) {
-                        return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                        return self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                     }
                     fi = fi + 1usize
                 }
@@ -668,7 +668,7 @@ impl Codegen {
                     fi = 0usize
                     while fi < self.parser.functions.len {
                         if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_name) {
-                            return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                            return self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                         }
                         fi = fi + 1usize
                     }
@@ -677,7 +677,7 @@ impl Codegen {
             var fi = 0usize
             while fi < self.parser.functions.len {
                 if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, member) {
-                    return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                    return self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                 }
                 fi = fi + 1usize
             }
@@ -692,7 +692,7 @@ impl Codegen {
                 var fi = 0usize
                 while fi < self.parser.functions.len {
                     if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, cname) {
-                        return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                        return self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                     }
                     fi = fi + 1usize
                 }
