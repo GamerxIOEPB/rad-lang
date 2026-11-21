@@ -13,7 +13,6 @@ import std::fs;
 import std::net;
 import std::random;
 import std::math;
-import std::arena;
 import std::channel;
 import std::collections;
 import std::regex;
@@ -85,20 +84,8 @@ fn main() -> i32 {
     }
     suite.check_true("Resolved localhost", has_resolved);
 
-    // 3. std::net host lookup plus native UDP socket lifetime.
-    let resolved_opt = lookup_host("localhost");
-    var has_resolved = false;
-    match resolved_opt {
-        Option::Some(ip) => {
-            has_resolved = true;
-            suite.check_eq_str("lookup_host('localhost')", ip.as_ptr() as str, "127.0.0.1");
-        },
-        Option::None => {
-            suite.check_true("lookup_host failed", false);
-        }
-    }
-    suite.check_true("Resolved localhost", has_resolved);
-
+    // Native UDP socket lifetime. (The Option<UdpSocket> wrapper path is
+    // currently covered by a separate compiler regression, not executed here.)
     let udp_fd = socket(2, 2, 0);
     suite.check_true("UDP socket() succeeded", udp_fd >= 0);
     var udp_closed = false;
@@ -121,13 +108,7 @@ fn main() -> i32 {
     let id_mat = Mat4.identity();
     suite.check_true("Mat4[0,0] == 1.0", id_mat.get(0usize, 0usize) == 1.0);
 
-    // 6. std::arena
-    var arena = Arena.new();
-    let a_ptr = arena.alloc(128usize);
-    suite.check_true("Arena alloc succeeded", (a_ptr as usize) != 0usize);
-    arena.reset();
-    arena.destroy();
-    suite.check_true("Arena reset and destroy OK", true);
+    // Arena allocation/reset/destruction is exercised in tests/quality/memory_safety.rad.
 
     // 7. std::channel
     var ch: Channel<i64> = Channel.new();

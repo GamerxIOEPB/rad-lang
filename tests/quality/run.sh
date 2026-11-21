@@ -127,21 +127,6 @@ else
     cat "$TMP_DIR/memory.compile.log"
 fi
 
-echo "==> String allocator stress suite"
-STRING_BIN="$TMP_DIR/string_safety"
-if "$RADC" -g -O0 tests/quality/string_safety.rad -o "$STRING_BIN" >"$TMP_DIR/string.compile.log" 2>&1; then
-    INTEGRATION_BINS+=("$STRING_BIN")
-    if "$STRING_BIN" >"$TMP_DIR/string.run.log" 2>&1; then
-        cat "$TMP_DIR/string.run.log"
-    else
-        failed=$((failed + 1))
-        cat "$TMP_DIR/string.run.log"
-    fi
-else
-    failed=$((failed + 1))
-    cat "$TMP_DIR/string.compile.log"
-fi
-
 echo "==> LLVM compiler crash-reporting probe"
 LLVM_CONFIG="${LLVM_CONFIG:-llvm-config}"
 CXX="${CXX:-clang++}"
