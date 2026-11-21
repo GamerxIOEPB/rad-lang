@@ -11,7 +11,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILDER_IMAGE="rad-musl-builder:3.23"
 
 # 1. Ensure Builder Docker Image is Available
-if ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1; then
+if ! docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1 || ! docker run --rm "$BUILDER_IMAGE" test -f /usr/local/lib/lld/liblldWasm.a >/dev/null 2>&1; then
     echo "==> Building Docker image $BUILDER_IMAGE..."
     docker build --network host --platform linux/amd64 -t "$BUILDER_IMAGE" "$ROOT_DIR/tests/docker/builder"
 fi
