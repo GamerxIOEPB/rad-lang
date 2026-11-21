@@ -86,7 +86,7 @@ fn main() -> i32 {
         Option::Some(sock) => {
             bind_ok = true;
             suite.check_true("UdpSocket.bind succeeded", sock.fd >= 0);
-            var u_sock: UdpSocket = sock as UdpSocket;
+            var u_sock: UdpSocket = sock;
             u_sock.close();
         },
         Option::None => {

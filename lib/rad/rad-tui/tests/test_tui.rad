@@ -74,11 +74,11 @@ fn test_rect_and_layout() {
     println("--- Testing Rect & Layout Solver ---");
 
     let r = Rect.new(10, 20, 100, 50);
-    assert_eq_i32(r.area(), 5000, "Rect area 100x50 = 5000");
-    assert_eq_i32(r.left(), 10, "Rect left = 10");
-    assert_eq_i32(r.right(), 110, "Rect right = 110");
-    assert_eq_i32(r.top(), 20, "Rect top = 20");
-    assert_eq_i32(r.bottom(), 70, "Rect bottom = 70");
+    assert_eq_i32(r.area() as i32, 5000i32, "Rect area 100x50 = 5000");
+    assert_eq_i32(r.left() as i32, 10i32, "Rect left = 10");
+    assert_eq_i32(r.right() as i32, 110i32, "Rect right = 110");
+    assert_eq_i32(r.top() as i32, 20i32, "Rect top = 20");
+    assert_eq_i32(r.bottom() as i32, 70i32, "Rect bottom = 70");
 
     let inner: Rect = r.inner(2, 5);
     assert_eq_i32(inner.x, 12, "Inner x = 12");
