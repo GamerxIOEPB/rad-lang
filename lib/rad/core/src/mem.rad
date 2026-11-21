@@ -12,5 +12,5 @@ pub fn zero(dest: *raw var u8, count: usize) {
     set(dest, 0, count)
 }
 
-pub fn size_of_val<T>(val: T) -> usize
-pub fn size_of<T>() -> usize
+pub fn size_of_val<T>(val: T) -> usize;
+pub fn size_of<T>() -> usize;
