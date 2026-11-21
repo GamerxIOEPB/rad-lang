@@ -32,7 +32,7 @@ fn main() {
     var kbd = KeyboardReader.new()
     let _polled = kbd.poll(0)
     let polled_evt = kbd.read_key(0)
-    if polled_evt.code == KEY_NONE {
+    if polled_evt.code == KEY_NONE || polled_evt.code == KEY_EOF {
         println("kbd_nonblocking: true")
     } else {
         println("kbd_nonblocking: false")
