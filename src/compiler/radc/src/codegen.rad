@@ -1986,7 +1986,8 @@ impl Codegen {
                     err.push_str(sug)
                     err.push_str("'?)")
                 }
-                self.parser.report_error_span("E0020", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col, str_len(vname) as i64)
+                let diag_source_id_1 = self.parser.expr_source_ids.ptr[expr_id]
+                self.parser.report_error_span_for_source(diag_source_id_1, "E0020", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col, str_len(vname) as i64)
             }
 
             let llvm_ty = self.get_var_type(vname)
@@ -2336,7 +2337,8 @@ impl Codegen {
                     err.push_str(sug)
                     err.push_str("'?)")
                 }
-                self.parser.report_error_span("E0020", err.as_ptr() as str, ep[callee_id].expr_line, ep[callee_id].expr_col, str_len(callee_name) as i64)
+                let diag_source_id_2 = self.parser.expr_source_ids.ptr[callee_id]
+                self.parser.report_error_span_for_source(diag_source_id_2, "E0020", err.as_ptr() as str, ep[callee_id].expr_line, ep[callee_id].expr_col, str_len(callee_name) as i64)
             }
 
             if str_eq(callee_name, "swap") {
@@ -4343,7 +4345,8 @@ impl Codegen {
                     err.push_str(sug)
                     err.push_str("'?)")
                 }
-                self.parser.report_error_span("E0020", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, str_len(vname) as i64)
+                let diag_source_id_3 = self.parser.stmt_source_ids.ptr[stmt_id]
+                self.parser.report_error_span_for_source(diag_source_id_3, "E0020", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, str_len(vname) as i64)
                 let _r = self.emit_expr(init_expr)
                 return
             }
