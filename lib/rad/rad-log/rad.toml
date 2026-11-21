@@ -1,0 +1,8 @@
+[package]
+name = "rad-log"
+version = "0.1.0"
+authors = ["Rad Developers"]
+description = "Structured logging library for Rad with ANSI colors, timestamps, and log levels"
+license = "MIT"
+
+[dependencies]

@@ -2754,7 +2754,7 @@ impl Parser {
                     spec.push_str(self.peek_text())
                     self.advance()
                 } else {
-                    while self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_EOF && self.peek_kind() != TOK_FN && self.peek_kind() != TOK_STRUCT && self.peek_kind() != TOK_ENUM && !str_eq(self.peek_text(), "impl") && !str_eq(self.peek_text(), "const") && !str_eq(self.peek_text(), "import") {
+                    while self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_EOF && self.peek_kind() != TOK_FN && self.peek_kind() != TOK_STRUCT && self.peek_kind() != TOK_ENUM && !str_eq(self.peek_text(), "impl") && !str_eq(self.peek_text(), "const") && !str_eq(self.peek_text(), "import") && !str_eq(self.peek_text(), "pub") {
                         let k = self.peek_kind()
                         if k == TOK_DOT {
                             spec.push_byte(46u8) // '.'

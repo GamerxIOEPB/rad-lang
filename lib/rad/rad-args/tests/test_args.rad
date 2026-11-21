@@ -1,0 +1,82 @@
+// tests/test_args.rad — Validation of rad-args argument parsing
+
+import "../src/lib.rad";
+
+fn main() -> i32 {
+    var p = ArgParser.new("test_cli", "Test CLI Runner");
+    p.add_flag("v", "verbose", "Verbose logging");
+    p.add_flag("r", "release", "Release build mode");
+    p.add_opt("t", "target", "Target architecture", "x86_64-linux");
+    p.add_subcommand("build", "Build subcommand");
+
+    // Construct mock argv: ["test_cli", "build", "--release", "-t", "aarch64", "main.rad"]
+    let fake_argc = 6i32;
+    let fake_argv = malloc(8usize * 6usize) as *raw var usize;
+    fake_argv[0usize] = "test_cli" as usize;
+    fake_argv[1usize] = "build" as usize;
+    fake_argv[2usize] = "--release" as usize;
+    fake_argv[3usize] = "-t" as usize;
+    fake_argv[4usize] = "aarch64" as usize;
+    fake_argv[5usize] = "main.rad" as usize;
+
+    p.parse(fake_argc, fake_argv as *raw *raw u8);
+
+    // 1. Verify subcommand
+    let sub = p.get_subcommand();
+    match sub {
+        Option.Some(s) => {
+            if !str_eq(s.as_ptr() as str, "build") {
+                println("FAIL: subcommand mismatch");
+                return 1;
+            }
+        },
+        Option.None => {
+            println("FAIL: missing subcommand");
+            return 1;
+        }
+    }
+
+    // 2. Verify flag
+    if !p.get_flag("release") {
+        println("FAIL: release flag should be true");
+        return 1;
+    }
+    if p.get_flag("verbose") {
+        println("FAIL: verbose flag should be false");
+        return 1;
+    }
+
+    // 3. Verify option
+    let tgt = p.get_opt("target");
+    match tgt {
+        Option.Some(t) => {
+            if !str_eq(t.as_ptr() as str, "aarch64") {
+                println("FAIL: target option mismatch");
+                return 1;
+            }
+        },
+        Option.None => {
+            println("FAIL: missing target option");
+            return 1;
+        }
+    }
+
+    // 4. Verify positional
+    let pos0 = p.get_positional(0usize);
+    match pos0 {
+        Option.Some(f) => {
+            if !str_eq(f.as_ptr() as str, "main.rad") {
+                println("FAIL: positional 0 mismatch");
+                return 1;
+            }
+        },
+        Option.None => {
+            println("FAIL: missing positional 0");
+            return 1;
+        }
+    }
+
+    free(fake_argv as *raw u8);
+    println("[PASS] rad-args tests completed successfully!");
+    return 0;
+}

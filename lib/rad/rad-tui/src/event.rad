@@ -1,0 +1,181 @@
+// ==============================================================================
+// rad-tui — event.rad
+// Keyboard & Terminal Event handling, ANSI escape sequence parsing, and SYS_poll.
+// ==============================================================================
+
+pub const KEY_CHAR: i32      = 0;
+pub const KEY_UP: i32        = 1;
+pub const KEY_DOWN: i32      = 2;
+pub const KEY_LEFT: i32      = 3;
+pub const KEY_RIGHT: i32     = 4;
+pub const KEY_ENTER: i32     = 5;
+pub const KEY_ESC: i32       = 6;
+pub const KEY_BACKSPACE: i32 = 7;
+pub const KEY_TAB: i32       = 8;
+pub const KEY_BACKTAB: i32   = 9;
+pub const KEY_HOME: i32      = 10;
+pub const KEY_END: i32       = 11;
+pub const KEY_PAGEUP: i32    = 12;
+pub const KEY_PAGEDOWN: i32  = 13;
+pub const KEY_DELETE: i32    = 14;
+pub const KEY_INSERT: i32    = 15;
+pub const KEY_F: i32         = 16;
+
+pub struct Key {
+    pub code: i32,
+    pub ch: u32,
+}
+
+impl Key {
+    pub fn char(c: u8) -> Key {
+        return Key { code: KEY_CHAR, ch: c as u32 };
+    }
+
+    pub fn up() -> Key        { return Key { code: KEY_UP, ch: 0u32 }; }
+    pub fn down() -> Key      { return Key { code: KEY_DOWN, ch: 0u32 }; }
+    pub fn left() -> Key      { return Key { code: KEY_LEFT, ch: 0u32 }; }
+    pub fn right() -> Key     { return Key { code: KEY_RIGHT, ch: 0u32 }; }
+    pub fn enter() -> Key     { return Key { code: KEY_ENTER, ch: 0u32 }; }
+    pub fn esc() -> Key       { return Key { code: KEY_ESC, ch: 0u32 }; }
+    pub fn backspace() -> Key { return Key { code: KEY_BACKSPACE, ch: 0u32 }; }
+    pub fn tab() -> Key       { return Key { code: KEY_TAB, ch: 0u32 }; }
+    pub fn backtab() -> Key   { return Key { code: KEY_BACKTAB, ch: 0u32 }; }
+    pub fn home() -> Key      { return Key { code: KEY_HOME, ch: 0u32 }; }
+    pub fn end() -> Key       { return Key { code: KEY_END, ch: 0u32 }; }
+    pub fn page_up() -> Key   { return Key { code: KEY_PAGEUP, ch: 0u32 }; }
+    pub fn page_down() -> Key { return Key { code: KEY_PAGEDOWN, ch: 0u32 }; }
+    pub fn delete() -> Key    { return Key { code: KEY_DELETE, ch: 0u32 }; }
+
+    pub fn is_char(self, c: u8) -> bool {
+        return self.code == KEY_CHAR && self.ch == (c as u32);
+    }
+}
+
+pub const EVENT_NONE: i32   = 0;
+pub const EVENT_KEY: i32    = 1;
+pub const EVENT_RESIZE: i32 = 2;
+pub const EVENT_QUIT: i32   = 3;
+
+pub struct Event {
+    pub tag: i32,
+    pub key: Key,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl Event {
+    pub fn none() -> Event {
+        return Event { tag: EVENT_NONE, key: Key.char(0u8), width: 0, height: 0 };
+    }
+
+    pub fn key(k: Key) -> Event {
+        return Event { tag: EVENT_KEY, key: k, width: 0, height: 0 };
+    }
+
+    pub fn resize(w: i32, h: i32) -> Event {
+        return Event { tag: EVENT_RESIZE, key: Key.char(0u8), width: w, height: h };
+    }
+
+    pub fn quit() -> Event {
+        return Event { tag: EVENT_QUIT, key: Key.char(0u8), width: 0, height: 0 };
+    }
+
+    pub fn is_quit(self) -> bool {
+        return self.tag == EVENT_QUIT;
+    }
+
+    pub fn is_key(self) -> bool {
+        return self.tag == EVENT_KEY;
+    }
+}
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw u8);
+}
+
+pub fn poll_terminal_event(timeout_ms: i32) -> Event {
+    // SYS_poll = 7
+    // struct pollfd { int fd; short events; short revents; } = 8 bytes
+    let pfd = malloc(8usize) as *raw var u8;
+    // fd = 0 (stdin)
+    pfd[0usize] = 0u8; pfd[1usize] = 0u8; pfd[2usize] = 0u8; pfd[3usize] = 0u8;
+    // events = POLLIN (1)
+    pfd[4usize] = 1u8; pfd[5usize] = 0u8;
+    // revents = 0
+    pfd[6usize] = 0u8; pfd[7usize] = 0u8;
+
+    let pr = syscall3(7i64, pfd, 1i64, timeout_ms as i64);
+    if pr <= 0i64 {
+        free(pfd as *raw u8);
+        return Event.none();
+    }
+
+    let revents = (pfd[6usize] as i32) | ((pfd[7usize] as i32) << 8);
+    free(pfd as *raw u8);
+
+    if (revents & 1) == 0 {
+        return Event.none();
+    }
+
+    // Read bytes from stdin
+    let buf = malloc(32usize) as *raw var u8;
+    let nread = syscall3(0i64, 0i64, buf, 32i64);
+    if nread <= 0i64 {
+        free(buf as *raw u8);
+        return Event.none();
+    }
+
+    let b0 = buf[0usize];
+    if b0 == 3u8 { // Ctrl+C
+        free(buf as *raw u8);
+        return Event.quit();
+    }
+
+    if b0 == 27u8 { // ESC sequence
+        if nread == 1i64 {
+            free(buf as *raw u8);
+            return Event.key(Key.esc());
+        }
+
+        if nread >= 3i64 && buf[1usize] == 91u8 { // '['
+            let b2 = buf[2usize];
+            if b2 == 65u8 { free(buf as *raw u8); return Event.key(Key.up()); }
+            if b2 == 66u8 { free(buf as *raw u8); return Event.key(Key.down()); }
+            if b2 == 67u8 { free(buf as *raw u8); return Event.key(Key.right()); }
+            if b2 == 68u8 { free(buf as *raw u8); return Event.key(Key.left()); }
+            if b2 == 72u8 { free(buf as *raw u8); return Event.key(Key.home()); }
+            if b2 == 70u8 { free(buf as *raw u8); return Event.key(Key.end()); }
+            if b2 == 90u8 { free(buf as *raw u8); return Event.key(Key.backtab()); }
+
+            if nread >= 4i64 && buf[3usize] == 126u8 { // '~'
+                if b2 == 49u8 { free(buf as *raw u8); return Event.key(Key.home()); }
+                if b2 == 51u8 { free(buf as *raw u8); return Event.key(Key.delete()); }
+                if b2 == 52u8 { free(buf as *raw u8); return Event.key(Key.end()); }
+                if b2 == 53u8 { free(buf as *raw u8); return Event.key(Key.page_up()); }
+                if b2 == 54u8 { free(buf as *raw u8); return Event.key(Key.page_down()); }
+            }
+        }
+
+        free(buf as *raw u8);
+        return Event.key(Key.esc());
+    }
+
+    if b0 == 10u8 || b0 == 13u8 {
+        free(buf as *raw u8);
+        return Event.key(Key.enter());
+    }
+
+    if b0 == 127u8 || b0 == 8u8 {
+        free(buf as *raw u8);
+        return Event.key(Key.backspace());
+    }
+
+    if b0 == 9u8 {
+        free(buf as *raw u8);
+        return Event.key(Key.tab());
+    }
+
+    free(buf as *raw u8);
+    return Event.key(Key.char(b0));
+}

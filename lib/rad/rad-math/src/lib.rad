@@ -1,0 +1,316 @@
+// ==============================================================================
+// rad-math — 2D/3D Vectors, Matrices, and Geometry Math in Pure Rad
+// ==============================================================================
+
+extern "C" {
+    fn sin(x: f64) -> f64;
+    fn cos(x: f64) -> f64;
+    fn sqrt(x: f64) -> f64;
+    fn atan2(y: f64, x: f64) -> f64;
+}
+
+// -----------------------------------------------------------------------------
+// Constants & Utilities
+// -----------------------------------------------------------------------------
+
+pub fn pi() -> f64 {
+    3.14159265358979323846
+}
+
+pub fn tau() -> f64 {
+    6.28318530717958647692
+}
+
+pub fn deg_to_rad(deg: f64) -> f64 {
+    deg * (pi() / 180.0)
+}
+
+pub fn rad_to_deg(rad: f64) -> f64 {
+    rad * (180.0 / pi())
+}
+
+pub fn clamp(val: f64, min_v: f64, max_v: f64) -> f64 {
+    if val < min_v { return min_v; }
+    if val > max_v { return max_v; }
+    return val;
+}
+
+pub fn lerp_f64(a: f64, b: f64, t: f64) -> f64 {
+    a + (b - a) * t
+}
+
+pub fn math_abs(x: f64) -> f64 {
+    if x < 0.0 { return -x; }
+    return x;
+}
+
+pub fn math_min(a: f64, b: f64) -> f64 {
+    if a < b { return a; }
+    return b;
+}
+
+pub fn math_max(a: f64, b: f64) -> f64 {
+    if a > b { return a; }
+    return b;
+}
+
+// -----------------------------------------------------------------------------
+// Vec2 (2D Vector)
+// -----------------------------------------------------------------------------
+
+pub struct Vec2 {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Vec2 {
+    pub fn new(x: f64, y: f64) -> Vec2 {
+        Vec2 { x: x, y: y }
+    }
+
+    pub fn zero() -> Vec2 {
+        Vec2 { x: 0.0, y: 0.0 }
+    }
+
+    pub fn add2(self, o: Vec2) -> Vec2 {
+        Vec2 { x: self.x + o.x, y: self.y + o.y }
+    }
+
+    pub fn sub2(self, o: Vec2) -> Vec2 {
+        Vec2 { x: self.x - o.x, y: self.y - o.y }
+    }
+
+    pub fn scale2(self, s: f64) -> Vec2 {
+        Vec2 { x: self.x * s, y: self.y * s }
+    }
+
+    pub fn dot2(self, o: Vec2) -> f64 {
+        self.x * o.x + self.y * o.y
+    }
+
+    pub fn length_sq2(self) -> f64 {
+        self.x * self.x + self.y * self.y
+    }
+
+    pub fn length2(self) -> f64 {
+        sqrt(self.length_sq2())
+    }
+
+    pub fn normalize2(self) -> Vec2 {
+        let len = self.length2();
+        if len > 0.0000001 {
+            return Vec2 { x: self.x / len, y: self.y / len };
+        }
+        return Vec2 { x: 0.0, y: 0.0 };
+    }
+
+    pub fn dist2(self, o: Vec2) -> f64 {
+        self.sub2(o).length2()
+    }
+
+    pub fn lerp2(self, o: Vec2, t: f64) -> Vec2 {
+        Vec2 {
+            x: lerp_f64(self.x, o.x, t),
+            y: lerp_f64(self.y, o.y, t),
+        }
+    }
+
+    pub fn perp2(self) -> Vec2 {
+        Vec2 { x: -self.y, y: self.x }
+    }
+
+    pub fn rotate2(self, rad: f64) -> Vec2 {
+        let c = cos(rad);
+        let s = sin(rad);
+        Vec2 {
+            x: self.x * c - self.y * s,
+            y: self.x * s + self.y * c,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Vec3 (3D Vector)
+// -----------------------------------------------------------------------------
+
+pub struct Vec3 {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+impl Vec3 {
+    pub fn new(x: f64, y: f64, z: f64) -> Vec3 {
+        Vec3 { x: x, y: y, z: z }
+    }
+
+    pub fn zero() -> Vec3 {
+        Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    }
+
+    pub fn add3(self, o: Vec3) -> Vec3 {
+        Vec3 { x: self.x + o.x, y: self.y + o.y, z: self.z + o.z }
+    }
+
+    pub fn sub3(self, o: Vec3) -> Vec3 {
+        Vec3 { x: self.x - o.x, y: self.y - o.y, z: self.z - o.z }
+    }
+
+    pub fn scale3(self, s: f64) -> Vec3 {
+        Vec3 { x: self.x * s, y: self.y * s, z: self.z * s }
+    }
+
+    pub fn dot3(self, o: Vec3) -> f64 {
+        self.x * o.x + self.y * o.y + self.z * o.z
+    }
+
+    pub fn cross3(self, o: Vec3) -> Vec3 {
+        Vec3 {
+            x: self.y * o.z - self.z * o.y,
+            y: self.z * o.x - self.x * o.z,
+            z: self.x * o.y - self.y * o.x,
+        }
+    }
+
+    pub fn length_sq3(self) -> f64 {
+        self.x * self.x + self.y * self.y + self.z * self.z
+    }
+
+    pub fn length3(self) -> f64 {
+        sqrt(self.length_sq3())
+    }
+
+    pub fn normalize3(self) -> Vec3 {
+        let len = self.length3();
+        if len > 0.0000001 {
+            return Vec3 { x: self.x / len, y: self.y / len, z: self.z / len };
+        }
+        return Vec3 { x: 0.0, y: 0.0, z: 0.0 };
+    }
+
+    pub fn dist3(self, o: Vec3) -> f64 {
+        self.sub3(o).length3()
+    }
+
+    pub fn lerp3(self, o: Vec3, t: f64) -> Vec3 {
+        Vec3 {
+            x: lerp_f64(self.x, o.x, t),
+            y: lerp_f64(self.y, o.y, t),
+            z: lerp_f64(self.z, o.z, t),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Mat3 (3x3 Matrix for 2D Affine Transforms)
+// Row-major:
+// [ m00, m01, m02 ]
+// [ m10, m11, m12 ]
+// [ m20, m21, m22 ]
+// -----------------------------------------------------------------------------
+
+pub struct Mat3 {
+    pub m00: f64, pub m01: f64, pub m02: f64,
+    pub m10: f64, pub m11: f64, pub m12: f64,
+    pub m20: f64, pub m21: f64, pub m22: f64,
+}
+
+impl Mat3 {
+    pub fn identity() -> Mat3 {
+        Mat3 {
+            m00: 1.0, m01: 0.0, m02: 0.0,
+            m10: 0.0, m11: 1.0, m12: 0.0,
+            m20: 0.0, m21: 0.0, m22: 1.0,
+        }
+    }
+
+    pub fn translation(tx: f64, ty: f64) -> Mat3 {
+        Mat3 {
+            m00: 1.0, m01: 0.0, m02: tx,
+            m10: 0.0, m11: 1.0, m12: ty,
+            m20: 0.0, m21: 0.0, m22: 1.0,
+        }
+    }
+
+    pub fn rotation(rad: f64) -> Mat3 {
+        let c = cos(rad);
+        let s = sin(rad);
+        Mat3 {
+            m00: c,   m01: -s,  m02: 0.0,
+            m10: s,   m11: c,   m12: 0.0,
+            m20: 0.0, m21: 0.0, m22: 1.0,
+        }
+    }
+
+    pub fn scaling(sx: f64, sy: f64) -> Mat3 {
+        Mat3 {
+            m00: sx,  m01: 0.0, m02: 0.0,
+            m10: 0.0, m11: sy,  m12: 0.0,
+            m20: 0.0, m21: 0.0, m22: 1.0,
+        }
+    }
+
+    pub fn mul_mat3(self, o: Mat3) -> Mat3 {
+        Mat3 {
+            m00: self.m00 * o.m00 + self.m01 * o.m10 + self.m02 * o.m20,
+            m01: self.m00 * o.m01 + self.m01 * o.m11 + self.m02 * o.m21,
+            m02: self.m00 * o.m02 + self.m01 * o.m12 + self.m02 * o.m22,
+
+            m10: self.m10 * o.m00 + self.m11 * o.m10 + self.m12 * o.m20,
+            m11: self.m10 * o.m01 + self.m11 * o.m11 + self.m12 * o.m21,
+            m12: self.m10 * o.m02 + self.m11 * o.m12 + self.m12 * o.m22,
+
+            m20: self.m20 * o.m00 + self.m21 * o.m10 + self.m22 * o.m20,
+            m21: self.m20 * o.m01 + self.m21 * o.m11 + self.m22 * o.m21,
+            m22: self.m20 * o.m02 + self.m21 * o.m12 + self.m22 * o.m22,
+        }
+    }
+
+    pub fn transform_vec2(self, p: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.m00 * p.x + self.m01 * p.y + self.m02,
+            y: self.m10 * p.x + self.m11 * p.y + self.m12,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Rect (2D Axis-Aligned Bounding Box)
+// -----------------------------------------------------------------------------
+
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Rect {
+    pub fn new(x: f64, y: f64, w: f64, h: f64) -> Rect {
+        Rect { x: x, y: y, w: w, h: h }
+    }
+
+    pub fn intersects(self, o: Rect) -> bool {
+        !(self.x + self.w <= o.x ||
+          o.x + o.w <= self.x ||
+          self.y + self.h <= o.y ||
+          o.y + o.h <= self.y)
+    }
+
+    pub fn contains_point(self, px: f64, py: f64) -> bool {
+        px >= self.x && px <= (self.x + self.w) &&
+        py >= self.y && py <= (self.y + self.h)
+    }
+
+    pub fn center_x(self) -> f64 {
+        self.x + self.w * 0.5
+    }
+
+    pub fn center_y(self) -> f64 {
+        self.y + self.h * 0.5
+    }
+
+    pub fn area(self) -> f64 {
+        self.w * self.h
+    }
+}

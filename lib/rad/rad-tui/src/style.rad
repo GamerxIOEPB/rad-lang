@@ -1,0 +1,131 @@
+// ==============================================================================
+// rad-tui — style.rad
+// ANSI 16/256/RGB Color abstractions and text style modifiers.
+// ==============================================================================
+
+pub const COLOR_RESET: i32   = 0;
+pub const COLOR_ANSI: i32    = 1;
+pub const COLOR_INDEXED: i32 = 2;
+pub const COLOR_RGB: i32     = 3;
+
+pub struct Color {
+    pub tag: i32,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Color {
+    pub fn reset() -> Color {
+        return Color { tag: COLOR_RESET, r: 0u8, g: 0u8, b: 0u8 };
+    }
+
+    pub fn ansi(code: u8) -> Color {
+        return Color { tag: COLOR_ANSI, r: code, g: 0u8, b: 0u8 };
+    }
+
+    pub fn indexed(idx: u8) -> Color {
+        return Color { tag: COLOR_INDEXED, r: idx, g: 0u8, b: 0u8 };
+    }
+
+    pub fn rgb(r: u8, g: u8, b: u8) -> Color {
+        return Color { tag: COLOR_RGB, r: r, g: g, b: b };
+    }
+
+    // Standard 16 ANSI colors
+    pub fn black() -> Color          { return Color.ansi(0u8); }
+    pub fn red() -> Color            { return Color.ansi(1u8); }
+    pub fn green() -> Color          { return Color.ansi(2u8); }
+    pub fn yellow() -> Color         { return Color.ansi(3u8); }
+    pub fn blue() -> Color           { return Color.ansi(4u8); }
+    pub fn magenta() -> Color        { return Color.ansi(5u8); }
+    pub fn cyan() -> Color           { return Color.ansi(6u8); }
+    pub fn white() -> Color          { return Color.ansi(7u8); }
+    pub fn bright_black() -> Color   { return Color.ansi(8u8); }
+    pub fn gray() -> Color           { return Color.ansi(8u8); }
+    pub fn bright_red() -> Color     { return Color.ansi(9u8); }
+    pub fn bright_green() -> Color   { return Color.ansi(10u8); }
+    pub fn bright_yellow() -> Color  { return Color.ansi(11u8); }
+    pub fn bright_blue() -> Color    { return Color.ansi(12u8); }
+    pub fn bright_magenta() -> Color { return Color.ansi(13u8); }
+    pub fn bright_cyan() -> Color    { return Color.ansi(14u8); }
+    pub fn bright_white() -> Color   { return Color.ansi(15u8); }
+}
+
+pub const MOD_BOLD: i32      = 1;
+pub const MOD_DIM: i32       = 2;
+pub const MOD_ITALIC: i32    = 4;
+pub const MOD_UNDERLINE: i32 = 8;
+pub const MOD_REVERSE: i32   = 16;
+
+pub struct Style {
+    pub fg: Color,
+    pub bg: Color,
+    pub modifiers: i32,
+}
+
+impl Style {
+    pub fn default() -> Style {
+        return Style {
+            fg: Color.reset(),
+            bg: Color.reset(),
+            modifiers: 0,
+        };
+    }
+
+    pub fn fg(self, c: Color) -> Style {
+        return Style {
+            fg: c,
+            bg: self.bg,
+            modifiers: self.modifiers,
+        };
+    }
+
+    pub fn bg(self, c: Color) -> Style {
+        return Style {
+            fg: self.fg,
+            bg: c,
+            modifiers: self.modifiers,
+        };
+    }
+
+    pub fn bold(self) -> Style {
+        return Style {
+            fg: self.fg,
+            bg: self.bg,
+            modifiers: self.modifiers | MOD_BOLD,
+        };
+    }
+
+    pub fn dim(self) -> Style {
+        return Style {
+            fg: self.fg,
+            bg: self.bg,
+            modifiers: self.modifiers | MOD_DIM,
+        };
+    }
+
+    pub fn italic(self) -> Style {
+        return Style {
+            fg: self.fg,
+            bg: self.bg,
+            modifiers: self.modifiers | MOD_ITALIC,
+        };
+    }
+
+    pub fn underline(self) -> Style {
+        return Style {
+            fg: self.fg,
+            bg: self.bg,
+            modifiers: self.modifiers | MOD_UNDERLINE,
+        };
+    }
+
+    pub fn reverse(self) -> Style {
+        return Style {
+            fg: self.fg,
+            bg: self.bg,
+            modifiers: self.modifiers | MOD_REVERSE,
+        };
+    }
+}

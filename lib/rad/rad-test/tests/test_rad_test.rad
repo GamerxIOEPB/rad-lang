@@ -1,0 +1,36 @@
+// tests/test_rad_test.rad — Verification of rad-test unit testing suite
+
+import "../src/lib.rad";
+
+fn main() -> i32 {
+    println("Running rad-test verification tests...");
+
+    var suite = TestSuite.new("CoreUnitTests");
+
+    // 1. Basic booleans
+    suite.check_true("True condition", 10 > 5);
+    suite.check_false("False condition", 5 > 10);
+
+    // 2. Numbers
+    suite.check_eq_i64("Integer equality (2+2)", (2 + 2) as i64, 4i64);
+    suite.check_ne_i64("Integer inequality (2+2 != 5)", (2 + 2) as i64, 5i64);
+
+    // 3. Strings
+    suite.check_eq_str("String match", "hello", "hello");
+    suite.check_ne_str("String mismatch", "hello", "world");
+
+    // 4. Standalone assertions
+    let b1 = assert_true(42 == 42, "42 == 42");
+    let b2 = assert_eq_i64(100i64, 100i64, "100 == 100");
+    let b3 = assert_eq_str("rad", "rad", "rad == rad");
+
+    suite.check("Standalone assertions passed", b1 && b2 && b3, "standalone assert failure");
+
+    let exit_code = suite.print_summary();
+    if exit_code != 0 {
+        return exit_code;
+    }
+
+    println("[PASS] rad-test self-tests completed successfully!");
+    return 0;
+}

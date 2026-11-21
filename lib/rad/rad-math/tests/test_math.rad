@@ -1,0 +1,87 @@
+// tests/test_math.rad — Verification test suite for rad-math
+
+import "../src/lib.rad";
+
+fn main() -> i32 {
+    println("Running rad-math validation tests...");
+
+    // 1. Vec2 tests
+    let v2a = Vec2.new(3.0, 4.0);
+    let len = v2a.length2();
+    if len < 4.999 || len > 5.001 {
+        println("FAIL: Vec2 length != 5.0");
+        return 1;
+    }
+
+    let norm = v2a.normalize2();
+    let norm_len = norm.length2();
+    if norm_len < 0.999 || norm_len > 1.001 {
+        println("FAIL: normalized Vec2 length != 1.0");
+        return 1;
+    }
+
+    let v2b = Vec2.new(1.0, 2.0);
+    let sum2 = v2a.add2(v2b);
+    if sum2.x != 4.0 || sum2.y != 6.0 {
+        println("FAIL: Vec2 add2 incorrect");
+        return 1;
+    }
+
+    let dot2 = v2a.dot2(v2b); // 3*1 + 4*2 = 11
+    if dot2 != 11.0 {
+        println("FAIL: Vec2 dot2 incorrect");
+        return 1;
+    }
+
+    // 2. Vec3 tests
+    let v3x = Vec3.new(1.0, 0.0, 0.0);
+    let v3y = Vec3.new(0.0, 1.0, 0.0);
+    let v3z = v3x.cross3(v3y);
+    if v3z.x != 0.0 || v3z.y != 0.0 || v3z.z != 1.0 {
+        println("FAIL: Vec3 cross product incorrect");
+        return 1;
+    }
+
+    // 3. Mat3 transforms
+    let trans = Mat3.translation(10.0, 20.0);
+    let p = Vec2.new(5.0, 5.0);
+    let p_trans = trans.transform_vec2(p);
+    if p_trans.x != 15.0 || p_trans.y != 25.0 {
+        println("FAIL: Mat3 translation transform incorrect");
+        return 1;
+    }
+
+    // 4. Rect tests
+    let r1 = Rect.new(0.0, 0.0, 10.0, 10.0);
+    let r2 = Rect.new(5.0, 5.0, 10.0, 10.0);
+    let r3 = Rect.new(20.0, 20.0, 5.0, 5.0);
+
+    if !r1.intersects(r2) {
+        println("FAIL: r1 and r2 should intersect");
+        return 1;
+    }
+    if r1.intersects(r3) {
+        println("FAIL: r1 and r3 should not intersect");
+        return 1;
+    }
+    if !r1.contains_point(5.0, 5.0) {
+        println("FAIL: r1 should contain (5, 5)");
+        return 1;
+    }
+
+    // 5. Math helpers
+    let c = clamp(15.0, 0.0, 10.0);
+    if c != 10.0 {
+        println("FAIL: clamp failed");
+        return 1;
+    }
+
+    let d_rad = deg_to_rad(180.0);
+    if d_rad < 3.14 || d_rad > 3.15 {
+        println("FAIL: deg_to_rad failed");
+        return 1;
+    }
+
+    println("[PASS] rad-math tests completed successfully!");
+    return 0;
+}

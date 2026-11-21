@@ -1,0 +1,10 @@
+--- Rad Language Server Protocol Engine ---
+LSP initialize response generated: 299 bytes
+LSP synchronized documents tracked: 1
+LSP hover query for `fn`: FOUND
+LSP hover query for `defer`: FOUND
+LSP definition target line: 1
+LSP completion items returned: 4
+LSP rename edits generated: 1 (new identifier: compute_double)
+LSP remaining documents after close: 0
+LSP engine verified successfully.

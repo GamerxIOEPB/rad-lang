@@ -19,8 +19,9 @@ extensions/vscode-rad/dist/*.map
 .DS_Store
 /lib/llvm
 target/
-benches/bin/
+tests/benches/bin/
 data/
-demos/wayland_gui/*.o
-demos/wayland_gui/*.bmp
-demos/wayland_gui/rad_wayland_demo
+tests/demos/wayland_gui/*.o
+tests/demos/wayland_gui/*.ll
+tests/demos/wayland_gui/*.bmp
+tests/demos/wayland_gui/rad_wayland_demo

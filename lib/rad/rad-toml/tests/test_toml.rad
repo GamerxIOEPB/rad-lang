@@ -1,0 +1,83 @@
+import "../src/lib.rad"
+
+fn main() -> i32 {
+    printf("1. Testing TOML scalar parsing...\n")
+    let raw = "name = \"rad-app\"\nversion = \"1.2.3\"\nport = 8080\nenabled = true\npi = 3.1415\n"
+    let doc = TomlValue.parse(raw)
+
+    let name = doc.get_str("name")
+    if !str_eq(name, "rad-app") {
+        printf("Failed string match: %s\n", name)
+        return 1
+    }
+    printf("  name = %s\n", name)
+
+    let port = doc.get_int("port")
+    if port != 8080i64 {
+        printf("Failed int match: %lld\n", port)
+        return 1
+    }
+    printf("  port = %lld\n", port)
+
+    let enabled = doc.get_bool("enabled")
+    if !enabled {
+        printf("Failed bool match\n")
+        return 1
+    }
+    printf("  enabled = true\n")
+
+    printf("2. Testing Section table parsing...\n")
+    let sec_raw = "[package]\nname = \"my_pkg\"\nversion = \"0.4.0\"\n\n[dependencies]\nrad-tui = \"0.1.0\"\nrad-json = \"0.1.0\"\n"
+    let sec_doc = TomlValue.parse(sec_raw)
+
+    let pkg_name = sec_doc.get_str("package.name")
+    if !str_eq(pkg_name, "my_pkg") {
+        printf("Failed section str match: %s\n", pkg_name)
+        return 1
+    }
+    printf("  package.name = %s\n", pkg_name)
+
+    let tui_ver = sec_doc.get_str("dependencies.rad-tui")
+    if !str_eq(tui_ver, "0.1.0") {
+        printf("Failed dep match: %s\n", tui_ver)
+        return 1
+    }
+    printf("  dependencies.rad-tui = %s\n", tui_ver)
+
+    printf("3. Testing Array and Inline Table parsing...\n")
+    let arr_raw = "numbers = [10, 20, 30]\ntool = { role = \"compiler\", pass = true }\n"
+    let arr_doc = TomlValue.parse(arr_raw)
+
+    let opt_arr = arr_doc.get_array("numbers")
+    match opt_arr {
+        Option.Some(arr) => {
+            if arr.len != 3usize {
+                printf("Failed array len: %lu\n", arr.len)
+                return 1
+            }
+            printf("  numbers len = %lu, [0]=%lld\n", arr.len, arr.ptr[0].as_int())
+        },
+        _ => {
+            printf("Failed to find array\n")
+            return 1
+        }
+    }
+
+    let role = arr_doc.get_str("tool.role")
+    if !str_eq(role, "compiler") {
+        printf("Failed inline table match: %s\n", role)
+        return 1
+    }
+    printf("  tool.role = %s\n", role)
+
+    printf("4. Testing Serialization...\n")
+    let serialized = sec_doc.to_string()
+    if !str_contains(serialized.as_ptr() as str, "[package]") || !str_contains(serialized.as_ptr() as str, "name = \"my_pkg\"") {
+        printf("Serialization mismatch:\n%s\n", serialized.as_ptr() as str)
+        return 1
+    }
+    printf("  Serialized successfully:\n%s\n", serialized.as_ptr() as str)
+
+    printf("rad-toml tests PASSED successfully!\n")
+    return 0
+}

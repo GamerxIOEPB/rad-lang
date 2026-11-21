@@ -1,0 +1,11 @@
+// ==============================================================================
+// rad-tui — lib.rad
+// Public entry point for rad-tui framework.
+// ==============================================================================
+
+import style;
+import buffer;
+import layout;
+import event;
+import widgets;
+import app;

@@ -218,6 +218,10 @@ fn try_path_with_rad(cand: String) -> String {
 }
 
 fn resolve_import_raw(spec: str, current_file: str) -> String {
+    if str_eq(spec, "std") || str_eq(spec, "core") || str_eq(spec, "alloc") {
+        return String.new()
+    }
+
     let cur_dir = get_dirname(current_file)
 
     // 1. Explicit relative or absolute path (starts with "./", "../", "/")
@@ -321,7 +325,47 @@ fn resolve_import_raw(spec: str, current_file: str) -> String {
 
         if has_slash {
             let sm = sub_mod.as_ptr() as str
-            // Local ./packages/<pname>/src/<sub_mod>.rad
+
+            // 1. Primary: Local ./lib/rad/<pname>/...
+            var cl1 = String.from_str("lib/rad/")
+            cl1.push_str(pname)
+            cl1.push_str("/src/")
+            cl1.push_str(sm)
+            cl1.push_byte(0u8)
+            let fl1 = try_path_with_rad(cl1)
+            if fl1.len() > 0usize { return fl1 }
+
+            var cl2 = String.from_str("lib/rad/")
+            cl2.push_str(pname)
+            cl2.push_byte(47u8)
+            cl2.push_str(sm)
+            cl2.push_byte(0u8)
+            let fl2 = try_path_with_rad(cl2)
+            if fl2.len() > 0usize { return fl2 }
+
+            // 2. Primary: Global ~/.rad/lib/rad/<pname>/...
+            let home_val = getenv("HOME")
+            if (home_val as usize) != 0usize && str_len(home_val) > 0usize {
+                var cl3 = String.from_str(home_val)
+                cl3.push_str("/.rad/lib/rad/")
+                cl3.push_str(pname)
+                cl3.push_str("/src/")
+                cl3.push_str(sm)
+                cl3.push_byte(0u8)
+                let fl3 = try_path_with_rad(cl3)
+                if fl3.len() > 0usize { return fl3 }
+
+                var cl4 = String.from_str(home_val)
+                cl4.push_str("/.rad/lib/rad/")
+                cl4.push_str(pname)
+                cl4.push_byte(47u8)
+                cl4.push_str(sm)
+                cl4.push_byte(0u8)
+                let fl4 = try_path_with_rad(cl4)
+                if fl4.len() > 0usize { return fl4 }
+            }
+
+            // 3. Fallback: Local ./packages/<pname>/src/<sub_mod>.rad
             var c1 = String.from_str("packages/")
             c1.push_str(pname)
             c1.push_str("/src/")
@@ -340,7 +384,6 @@ fn resolve_import_raw(spec: str, current_file: str) -> String {
             if f2.len() > 0usize { return f2 }
 
             // Global ~/.rad/packages/<pname>/src/<sub_mod>.rad
-            let home_val = getenv("HOME")
             if (home_val as usize) != 0usize && str_len(home_val) > 0usize {
                 var c3 = String.from_str(home_val)
                 c3.push_str("/.rad/packages/")
@@ -361,15 +404,51 @@ fn resolve_import_raw(spec: str, current_file: str) -> String {
                 if f4.len() > 0usize { return f4 }
             }
         } else {
-            // Local ./packages/<pname>
+            // 1. Primary: Local ./lib/rad/<pname>
+            var cand_l1 = String.from_str("lib/rad/")
+            cand_l1.push_str(pname)
+            cand_l1.push_byte(0u8)
+            let found_l1 = try_path_with_rad(cand_l1)
+            if found_l1.len() > 0usize { return found_l1 }
+
+            // 2. Primary: Global ~/.rad/lib/rad/<pname>/...
+            let home_val = getenv("HOME")
+            if (home_val as usize) != 0usize && str_len(home_val) > 0usize {
+                var cand_gl = String.from_str(home_val)
+                cand_gl.push_str("/.rad/lib/rad/")
+                cand_gl.push_str(pname)
+                cand_gl.push_byte(0u8)
+                let found_gl = try_path_with_rad(cand_gl)
+                if found_gl.len() > 0usize { return found_gl }
+
+                var cand_glc = String.from_str(home_val)
+                cand_glc.push_str("/.rad/lib/rad/")
+                cand_glc.push_str(pname)
+                cand_glc.push_str("/current")
+                cand_glc.push_byte(0u8)
+                let found_glc = try_path_with_rad(cand_glc)
+                if found_glc.len() > 0usize { return found_glc }
+            }
+
+            // 3. Primary: RAD_HOME/lib/rad/<pname>/...
+            let rad_home_val = getenv("RAD_HOME")
+            if (rad_home_val as usize) != 0usize && str_len(rad_home_val) > 0usize {
+                var cand_rl = String.from_str(rad_home_val)
+                cand_rl.push_str("/lib/rad/")
+                cand_rl.push_str(pname)
+                cand_rl.push_byte(0u8)
+                let found_rl = try_path_with_rad(cand_rl)
+                if found_rl.len() > 0usize { return found_rl }
+            }
+
+            // 4. Fallback: Local ./packages/<pname>
             var cand_p1 = String.from_str("packages/")
             cand_p1.push_str(pname)
             cand_p1.push_byte(0u8)
             let found_p1 = try_path_with_rad(cand_p1)
             if found_p1.len() > 0usize { return found_p1 }
 
-            // Global ~/.rad/packages/<pname>/...
-            let home_val = getenv("HOME")
+            // Fallback: Global ~/.rad/packages/<pname>/...
             if (home_val as usize) != 0usize && str_len(home_val) > 0usize {
                 var cand_gp = String.from_str(home_val)
                 cand_gp.push_str("/.rad/packages/")
@@ -387,8 +466,7 @@ fn resolve_import_raw(spec: str, current_file: str) -> String {
                 if found_gpc.len() > 0usize { return found_gpc }
             }
 
-            // RAD_HOME/packages/<pname>/...
-            let rad_home_val = getenv("RAD_HOME")
+            // Fallback: RAD_HOME/packages/<pname>/...
             if (rad_home_val as usize) != 0usize && str_len(rad_home_val) > 0usize {
                 var cand_rp = String.from_str(rad_home_val)
                 cand_rp.push_str("/packages/")
@@ -561,20 +639,33 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         }
         if !already_has_test_lib {
             var rad_test_path = String.new()
-            let rad_home = getenv("RAD_HOME")
-            if (rad_home as usize) != 0usize && str_len(rad_home) > 0usize {
-                var p0 = String.new()
-                p0.push_str(rad_home)
-                p0.push_str("/packages/rad-test/src/lib.rad")
-                p0.push_byte(0u8)
-                let f0 = fopen(p0.as_ptr() as str, "rb")
-                if (f0 as usize) != 0usize {
-                    fclose(f0)
-                    rad_test_path = p0
+            let home = getenv("HOME")
+            if (home as usize) != 0usize && str_len(home) > 0usize {
+                var p1b = String.new()
+                p1b.push_str(home)
+                p1b.push_str("/.rad/lib/rad/rad-test/src/lib.rad")
+                p1b.push_byte(0u8)
+                let f1b = fopen(p1b.as_ptr() as str, "rb")
+                if (f1b as usize) != 0usize {
+                    fclose(f1b)
+                    rad_test_path = p1b
                 }
             }
             if rad_test_path.len() == 0usize {
-                let home = getenv("HOME")
+                let rad_home = getenv("RAD_HOME")
+                if (rad_home as usize) != 0usize && str_len(rad_home) > 0usize {
+                    var p0 = String.new()
+                    p0.push_str(rad_home)
+                    p0.push_str("/lib/rad/rad-test/src/lib.rad")
+                    p0.push_byte(0u8)
+                    let f0 = fopen(p0.as_ptr() as str, "rb")
+                    if (f0 as usize) != 0usize {
+                        fclose(f0)
+                        rad_test_path = p0
+                    }
+                }
+            }
+            if rad_test_path.len() == 0usize {
                 if (home as usize) != 0usize && str_len(home) > 0usize {
                     var p1 = String.new()
                     p1.push_str(home)
@@ -584,20 +675,6 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
                     if (f1 as usize) != 0usize {
                         fclose(f1)
                         rad_test_path = p1
-                    }
-                }
-            }
-            if rad_test_path.len() == 0usize {
-                let home = getenv("HOME")
-                if (home as usize) != 0usize && str_len(home) > 0usize {
-                    var p1b = String.new()
-                    p1b.push_str(home)
-                    p1b.push_str("/.rad/lib/rad/rad-test/src/lib.rad")
-                    p1b.push_byte(0u8)
-                    let f1b = fopen(p1b.as_ptr() as str, "rb")
-                    if (f1b as usize) != 0usize {
-                        fclose(f1b)
-                        rad_test_path = p1b
                     }
                 }
             }

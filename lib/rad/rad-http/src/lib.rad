@@ -1,0 +1,449 @@
+// ==============================================================================
+// rad-http — Lightweight HTTP/1.1 Client & Micro-Server in Pure Rad
+// Zero libc, zero external dependencies — pure native Linux socket syscalls.
+// ==============================================================================
+
+// ------------------------------------------------------------------------------
+// URL Representation & Parsing
+// ------------------------------------------------------------------------------
+
+pub struct ParsedUrl {
+    pub host: String,
+    pub port: i32,
+    pub path: String,
+}
+
+pub fn parse_url(url: str) -> Option<ParsedUrl> {
+    let p = url as *raw u8
+    var i = 0usize
+    
+    // Check http:// or https:// prefix
+    if p[0] == 104u8 && p[1] == 116u8 && p[2] == 116u8 && p[3] == 112u8 {
+        if p[4] == 115u8 && p[5] == 58u8 && p[6] == 47u8 && p[7] == 47u8 {
+            i = 8usize
+        } else if p[4] == 58u8 && p[5] == 47u8 && p[6] == 47u8 {
+            i = 7usize
+        }
+    }
+
+    var host = String.new()
+    var port = 80
+    var path = String.new()
+
+    // Parse host until ':' or '/' or end of string
+    while p[i] != 0u8 && p[i] != 58u8 && p[i] != 47u8 {
+        host.push_byte(p[i])
+        i = i + 1usize
+    }
+
+    if host.len() == 0usize {
+        return Option.None
+    }
+
+    // Optional port
+    if p[i] == 58u8 { // ':'
+        i = i + 1usize
+        var port_num = 0
+        while p[i] >= 48u8 && p[i] <= 57u8 {
+            port_num = port_num * 10 + ((p[i] - 48u8) as i32)
+            i = i + 1usize
+        }
+        if port_num > 0 {
+            port = port_num
+        }
+    }
+
+    // Path
+    if p[i] == 47u8 { // '/'
+        while p[i] != 0u8 {
+            path.push_byte(p[i])
+            i = i + 1usize
+        }
+    } else {
+        path.push_byte(47u8) // Default "/"
+    }
+
+    return Option.Some(ParsedUrl {
+        host: host,
+        port: port,
+        path: path,
+    })
+}
+
+// ------------------------------------------------------------------------------
+// HTTP Response
+// ------------------------------------------------------------------------------
+
+pub struct HttpResponse {
+    pub status_code: i32,
+    pub status_text: String,
+    pub headers: Vec<String>,
+    pub body: String,
+}
+
+impl HttpResponse {
+    pub fn get_header(self, name: str) -> Option<String> {
+        let n_ptr = name as *raw u8
+        var n_len = 0usize
+        while n_ptr[n_len] != 0u8 {
+            n_len = n_len + 1usize
+        }
+
+        var i = 0usize
+        while i < self.headers.len {
+            let h = self.headers.ptr[i]
+            let h_ptr = h.as_ptr()
+            if h.len() > n_len && h_ptr[n_len] == 58u8 { // Matches name + ':'
+                var match_prefix = true
+                var k = 0usize
+                while k < n_len {
+                    var c1 = n_ptr[k]
+                    var c2 = h_ptr[k]
+                    if c1 >= 65u8 && c1 <= 90u8 { c1 = c1 + 32u8 }
+                    if c2 >= 65u8 && c2 <= 90u8 { c2 = c2 + 32u8 }
+                    if c1 != c2 {
+                        match_prefix = false
+                        break
+                    }
+                    k = k + 1usize
+                }
+                if match_prefix {
+                    var val_idx = n_len + 1usize
+                    while val_idx < h.len() && (h_ptr[val_idx] == 32u8 || h_ptr[val_idx] == 9u8) {
+                        val_idx = val_idx + 1usize
+                    }
+                    var val = String.new()
+                    while val_idx < h.len() {
+                        val.push_byte(h_ptr[val_idx])
+                        val_idx = val_idx + 1usize
+                    }
+                    return Option.Some(val)
+                }
+            }
+            i = i + 1usize
+        }
+        return Option.None
+    }
+}
+
+// ------------------------------------------------------------------------------
+// HTTP Client
+// ------------------------------------------------------------------------------
+
+pub fn http_get(url: str) -> Option<HttpResponse> {
+    let parsed_opt = parse_url(url)
+    match parsed_opt {
+        Option.Some(u) => {
+            return http_request("GET", u.host.as_ptr() as str, u.port, u.path.as_ptr() as str, "", "text/plain")
+        },
+        Option.None => return Option.None,
+        _ => return Option.None,
+    }
+}
+
+pub fn http_post(url: str, body: str, content_type: str) -> Option<HttpResponse> {
+    let parsed_opt = parse_url(url)
+    match parsed_opt {
+        Option.Some(u) => {
+            return http_request("POST", u.host.as_ptr() as str, u.port, u.path.as_ptr() as str, body, content_type)
+        },
+        Option.None => return Option.None,
+        _ => return Option.None,
+    }
+}
+
+fn http_request(method: str, host: str, port: i32, path: str, body: str, content_type: str) -> Option<HttpResponse> {
+    // 1. Create TCP Socket (AF_INET = 2, SOCK_STREAM = 1, IPPROTO_TCP = 6)
+    // SYS_socket = 41
+    let fd = syscall3(41i64, 2i64, 1i64, 6i64) as i32
+    if fd < 0 {
+        return Option.None
+    }
+
+    // 2. Build sockaddr_in (16 bytes)
+    // For local testing & standard IP parsing (default 127.0.0.1 if localhost)
+    let sockaddr = malloc(16usize) as *raw var u8
+    var s_i = 0usize
+    while s_i < 16usize {
+        sockaddr[s_i] = 0u8
+        s_i = s_i + 1usize
+    }
+
+    // AF_INET = 2
+    sockaddr[0usize] = 2u8
+    sockaddr[1usize] = 0u8
+
+    // Port in network byte order (big endian)
+    sockaddr[2usize] = ((port >> 8) & 255) as u8
+    sockaddr[3usize] = (port & 255) as u8
+
+    // Default IP: 127.0.0.1
+    sockaddr[4usize] = 127u8
+    sockaddr[5usize] = 0u8
+    sockaddr[6usize] = 0u8
+    sockaddr[7usize] = 1u8
+
+    // SYS_connect = 42
+    let conn_r = syscall3(42i64, fd as i64, sockaddr, 16i64)
+    free(sockaddr)
+    if conn_r < 0i64 {
+        // SYS_close = 3
+        let _ = syscall1(3i64, fd as i64)
+        return Option.None
+    }
+
+    // 3. Construct HTTP/1.1 Request Payload
+    var req = String.new()
+    req.push_str(method)
+    req.push_byte(32u8) // ' '
+    req.push_str(path)
+    req.push_str(" HTTP/1.1\r\nHost: ")
+    req.push_str(host)
+    req.push_str("\r\nUser-Agent: Rad-HTTP/0.1.0\r\nConnection: close\r\n")
+
+    let body_len = str_len(body)
+    if body_len > 0usize {
+        req.push_str("Content-Type: ")
+        req.push_str(content_type)
+        req.push_str("\r\nContent-Length: ")
+        req.push_str(int_to_str(body_len as i64).as_ptr() as str)
+        req.push_str("\r\n\r\n")
+        req.push_str(body)
+    } else {
+        req.push_str("\r\n")
+    }
+
+    // 4. Send Request (SYS_write = 1)
+    let _ = syscall3(1i64, fd as i64, req.as_ptr() as *raw u8, req.len() as i64)
+
+    // 5. Read Response (SYS_read = 0)
+    var resp_raw = String.new()
+    let buf = malloc(4096usize) as *raw var u8
+    var n = syscall3(0i64, fd as i64, buf, 4096i64)
+    while n > 0i64 {
+        var b_i = 0usize
+        let count = n as usize
+        while b_i < count {
+            resp_raw.push_byte(buf[b_i])
+            b_i = b_i + 1usize
+        }
+        n = syscall3(0i64, fd as i64, buf, 4096i64)
+    }
+    free(buf)
+    // SYS_close = 3
+    let _ = syscall1(3i64, fd as i64)
+
+    if resp_raw.len() == 0usize {
+        return Option.None
+    }
+
+    // 6. Parse Response (status line, headers, body)
+    return Option.Some(parse_http_response(resp_raw))
+}
+
+pub fn parse_http_response(raw: String) -> HttpResponse {
+    let p = raw.as_ptr()
+    let total_len = raw.len()
+    var i = 0usize
+
+    // Parse status line: HTTP/1.1 <status> <text>
+    while i < total_len && p[i] != 32u8 { // skip HTTP/1.1
+        i = i + 1usize
+    }
+    if i < total_len && p[i] == 32u8 {
+        i = i + 1usize
+    }
+
+    var status_code = 0
+    while i < total_len && p[i] >= 48u8 && p[i] <= 57u8 {
+        status_code = status_code * 10 + ((p[i] - 48u8) as i32)
+        i = i + 1usize
+    }
+
+    if i < total_len && p[i] == 32u8 {
+        i = i + 1usize
+    }
+
+    var status_text = String.new()
+    while i < total_len && p[i] != 13u8 && p[i] != 10u8 {
+        status_text.push_byte(p[i])
+        i = i + 1usize
+    }
+
+    // Skip \r\n
+    if i < total_len && p[i] == 13u8 { i = i + 1usize }
+    if i < total_len && p[i] == 10u8 { i = i + 1usize }
+
+    // Parse headers
+    var headers = Vec.new()
+    while i < total_len {
+        if p[i] == 13u8 && (i + 1usize) < total_len && p[i + 1usize] == 10u8 {
+            i = i + 2usize
+            break // End of headers
+        }
+        if p[i] == 10u8 {
+            i = i + 1usize
+            break
+        }
+
+        var header_line = String.new()
+        while i < total_len && p[i] != 13u8 && p[i] != 10u8 {
+            header_line.push_byte(p[i])
+            i = i + 1usize
+        }
+        headers.push(header_line)
+        if i < total_len && p[i] == 13u8 { i = i + 1usize }
+        if i < total_len && p[i] == 10u8 { i = i + 1usize }
+    }
+
+    // Remaining is body
+    var body = String.new()
+    while i < total_len {
+        body.push_byte(p[i])
+        i = i + 1usize
+    }
+
+    HttpResponse {
+        status_code: status_code,
+        status_text: status_text,
+        headers: headers,
+        body: body,
+    }
+}
+
+// ------------------------------------------------------------------------------
+// HTTP Micro-Server
+// ------------------------------------------------------------------------------
+
+pub struct HttpRequest {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<String>,
+    pub body: String,
+}
+
+pub struct HttpServer {
+    pub port: i32,
+    pub server_fd: i32,
+}
+
+impl HttpServer {
+    pub fn bind(port: i32) -> Option<HttpServer> {
+        // SYS_socket = 41
+        let s_fd = syscall3(41i64, 2i64, 1i64, 6i64) as i32
+        if s_fd < 0 {
+            return Option.None
+        }
+
+        // SO_REUSEADDR = 2 (SOL_SOCKET = 1)
+        let optval = malloc(4usize) as *raw var u8
+        optval[0usize] = 1u8
+        optval[1usize] = 0u8
+        optval[2usize] = 0u8
+        optval[3usize] = 0u8
+        // SYS_setsockopt = 54
+        let _ = syscall5(54i64, s_fd as i64, 1i64, 2i64, optval, 4i64)
+        free(optval)
+
+        // sockaddr_in
+        let addr = malloc(16usize) as *raw var u8
+        var i = 0usize
+        while i < 16usize { addr[i] = 0u8; i = i + 1usize }
+        addr[0usize] = 2u8 // AF_INET
+        addr[2usize] = ((port >> 8) & 255) as u8
+        addr[3usize] = (port & 255) as u8
+
+        // SYS_bind = 49
+        let bind_r = syscall3(49i64, s_fd as i64, addr, 16i64)
+        free(addr)
+        if bind_r < 0i64 {
+            let _ = syscall1(3i64, s_fd as i64)
+            return Option.None
+        }
+
+        // SYS_listen = 50 (backlog = 128)
+        let listen_r = syscall2(50i64, s_fd as i64, 128i64)
+        if listen_r < 0i64 {
+            let _ = syscall1(3i64, s_fd as i64)
+            return Option.None
+        }
+
+        return Option.Some(HttpServer {
+            port: port,
+            server_fd: s_fd,
+        })
+    }
+
+    pub fn accept_client(self) -> Option<i32> {
+        let client_addr = malloc(16usize) as *raw var u8
+        let addrlen = malloc(4usize) as *raw var u8
+        addrlen[0usize] = 16u8
+        // SYS_accept = 43
+        let c_fd = syscall3(43i64, self.server_fd as i64, client_addr, addrlen) as i32
+        free(client_addr)
+        free(addrlen)
+        if c_fd < 0 {
+            return Option.None
+        }
+        return Option.Some(c_fd)
+    }
+
+    pub fn send_response(client_fd: i32, status_code: i32, status_text: str, content_type: str, body: str) {
+        var resp = String.new()
+        resp.push_str("HTTP/1.1 ")
+        resp.push_str(int_to_str(status_code as i64).as_ptr() as str)
+        resp.push_byte(32u8)
+        resp.push_str(status_text)
+        resp.push_str("\r\nServer: Rad-HttpServer/0.1.0\r\nContent-Type: ")
+        resp.push_str(content_type)
+        resp.push_str("\r\nContent-Length: ")
+        resp.push_str(int_to_str(str_len(body) as i64).as_ptr() as str)
+        resp.push_str("\r\nConnection: close\r\n\r\n")
+        resp.push_str(body)
+
+        let _ = syscall3(1i64, client_fd as i64, resp.as_ptr() as *raw u8, resp.len() as i64)
+        // SYS_close = 3
+        let _ = syscall1(3i64, client_fd as i64)
+    }
+
+    pub fn close_server(var self) {
+        if self.server_fd >= 0 {
+            let _ = syscall1(3i64, self.server_fd as i64)
+            self.server_fd = -1
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Internal Helpers
+// ------------------------------------------------------------------------------
+
+fn str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 { i = i + 1usize }
+    return i
+}
+
+fn int_to_str(val: i64) -> String {
+    if val == 0i64 { return String.from_str("0") }
+    var v = val
+    var is_neg = false
+    if v < 0i64 { is_neg = true; v = -v }
+    var rev = String.new()
+    while v > 0i64 {
+        let d = (v % 10i64) as u8
+        rev.push_byte(48u8 + d)
+        v = v / 10i64
+    }
+    if is_neg { rev.push_byte(45u8) }
+    var res = String.new()
+    var len = rev.len()
+    let p = rev.as_ptr()
+    while len > 0usize {
+        len = len - 1usize
+        res.push_byte(p[len])
+    }
+    return res
+}

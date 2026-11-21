@@ -1,0 +1,180 @@
+// ==============================================================================
+// rad-tui — tests/test_tui.rad
+// Unit tests for Style, Rect, Layout Solver, Buffer, Widgets, and Canvas.
+// ==============================================================================
+
+import "../src/style.rad";
+import "../src/buffer.rad";
+import "../src/layout.rad";
+import "../src/event.rad";
+import "../src/widgets.rad";
+
+fn print_num(val: i32) {
+    if val == 0 {
+        print("0");
+        return;
+    }
+    var v = val;
+    var digits = Vec.new();
+    while v > 0 {
+        let rem = (v % 10) as u8;
+        digits.push(rem + 48u8);
+        v = v / 10;
+    }
+    var i = digits.len;
+    while i > 0usize {
+        i = i - 1usize;
+        let c = digits.ptr[i] as u8;
+        let b = malloc(2usize) as *raw var u8;
+        b[0usize] = c;
+        b[1usize] = 0u8;
+        print(b as str);
+        free(b as *raw u8);
+    }
+}
+
+fn assert_true(cond: bool, msg: str) {
+    if !cond {
+        print("[FAIL] Assertion failed: ");
+        println(msg);
+        exit(1);
+    }
+}
+
+fn assert_eq_i32(actual: i32, expected: i32, msg: str) {
+    if actual != expected {
+        print("[FAIL] ");
+        println(msg);
+        exit(1);
+    }
+}
+
+fn test_style_and_colors() {
+    println("--- Testing Style & Colors ---");
+
+    let c_red = Color.red();
+    assert_eq_i32(c_red.tag, COLOR_ANSI, "Color.red tag is ANSI");
+    assert_eq_i32(c_red.r as i32, 1, "Color.red ANSI code is 1");
+
+    let c_rgb = Color.rgb(12u8, 34u8, 56u8);
+    assert_eq_i32(c_rgb.tag, COLOR_RGB, "Color.rgb tag is RGB");
+    assert_eq_i32(c_rgb.r as i32, 12, "Color.rgb r is 12");
+    assert_eq_i32(c_rgb.g as i32, 34, "Color.rgb g is 34");
+    assert_eq_i32(c_rgb.b as i32, 56, "Color.rgb b is 56");
+
+    let s = Style.default().fg(Color.cyan()).bg(Color.black()).bold().underline();
+    assert_eq_i32(s.fg.r as i32, 6, "Style fg is cyan");
+    assert_true((s.modifiers & MOD_BOLD) != 0, "Style has bold modifier");
+    assert_true((s.modifiers & MOD_UNDERLINE) != 0, "Style has underline modifier");
+
+    println("[PASS] Style & Colors tests succeeded!");
+}
+
+fn test_rect_and_layout() {
+    println("--- Testing Rect & Layout Solver ---");
+
+    let r = Rect.new(10, 20, 100, 50);
+    assert_eq_i32(r.area(), 5000, "Rect area 100x50 = 5000");
+    assert_eq_i32(r.left(), 10, "Rect left = 10");
+    assert_eq_i32(r.right(), 110, "Rect right = 110");
+    assert_eq_i32(r.top(), 20, "Rect top = 20");
+    assert_eq_i32(r.bottom(), 70, "Rect bottom = 70");
+
+    let inner: Rect = r.inner(2, 5);
+    assert_eq_i32(inner.x, 12, "Inner x = 12");
+    assert_eq_i32(inner.y, 25, "Inner y = 25");
+    assert_eq_i32(inner.width, 96, "Inner width = 96");
+    assert_eq_i32(inner.height, 40, "Inner height = 40");
+
+    // Layout split vertical: Fixed(10), Percentage(50), Fixed(10)
+    var layout = Layout.vertical();
+    layout.add_constraint(Constraint.fixed(10));
+    layout.add_constraint(Constraint.percentage(50));
+    layout.add_constraint(Constraint.fixed(10));
+
+    let splits = layout.split(Rect.new(0, 0, 80, 40));
+    assert_true(splits.len == 3usize, "Split produced 3 rects");
+
+    let r0: Rect = get_rect(splits, 0usize);
+    let r1: Rect = get_rect(splits, 1usize);
+    let r2: Rect = get_rect(splits, 2usize);
+
+    assert_eq_i32(r0.y, 0, "r0.y = 0");
+    assert_eq_i32(r0.height, 10, "r0.height = 10");
+
+    assert_eq_i32(r1.y, 10, "r1.y = 10");
+    assert_eq_i32(r1.height, 20, "r1.height = 20 (50% of 40)");
+
+    assert_eq_i32(r2.y, 30, "r2.y = 30");
+    assert_eq_i32(r2.height, 10, "r2.height = 10");
+
+    println("[PASS] Rect & Layout tests succeeded!");
+}
+
+fn test_buffer_and_widgets() {
+    println("--- Testing Buffer & Widgets Rendering ---");
+
+    var buf = Buffer.new(80, 24);
+    assert_eq_i32(buf.width, 80, "Buffer width 80");
+    assert_eq_i32(buf.height, 24, "Buffer height 24");
+
+    // Clear buffer
+    buf.clear(Style.default());
+
+    // Block widget
+    let block = Block.new()
+        .title(" RadTUI Test ")
+        .border(BORDER_TYPE_ROUNDED)
+        .border_style(Style.default().fg(Color.cyan()));
+
+    let area = Rect.new(0, 0, 80, 24);
+    block.render_block(buf, area);
+
+    // Inner area of block
+    let inner_area: Rect = block.inner_area(area);
+    assert_eq_i32(inner_area.x, 1, "inner_area.x = 1");
+    assert_eq_i32(inner_area.y, 1, "inner_area.y = 1");
+    assert_eq_i32(inner_area.width, 78, "inner_area.width = 78");
+    assert_eq_i32(inner_area.height, 22, "inner_area.height = 22");
+
+    // Paragraph widget
+    let p = Paragraph.new("Hello RadTUI!\nWelcome to pure Rad terminal interfaces.")
+        .paragraph_style(Style.default().fg(Color.green()).bold())
+        .align(ALIGN_CENTER);
+    p.render_paragraph(buf, Rect.new(inner_area.x, inner_area.y, inner_area.width, 4));
+
+    // ProgressBar widget
+    let pb = ProgressBar.new(65)
+        .label("65%")
+        .progress_color(Color.yellow());
+    pb.render_progress(buf, Rect.new(inner_area.x, inner_area.y + 5, 40, 1));
+
+    // List widget
+    var list = List.new();
+    list.add_item("Option 1: Start");
+    list.add_item("Option 2: Settings");
+    list.add_item("Option 3: Exit");
+    let sel_list = list.select(1usize);
+    sel_list.render_list(buf, Rect.new(inner_area.x, inner_area.y + 7, 30, 5));
+
+    // Canvas line
+    Canvas.draw_line(buf, 50, 10, 70, 20, 42u8, Style.default().fg(Color.magenta()));
+
+    buf.destroy();
+    println("[PASS] Buffer & Widgets tests succeeded!");
+}
+
+fn main() -> i32 {
+    println("==================================================");
+    println(" RadTUI v0.1.0 — Test Suite Execution");
+    println("==================================================");
+
+    test_style_and_colors();
+    test_rect_and_layout();
+    test_buffer_and_widgets();
+
+    println("==================================================");
+    println("[PASS] All RadTUI tests passed successfully!");
+    println("==================================================");
+    0
+}

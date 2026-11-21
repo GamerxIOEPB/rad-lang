@@ -1,0 +1,342 @@
+// ==============================================================================
+// rad-tui — app.rad
+// Terminal Lifecycle Management, Differential Double Buffering, and App Runner.
+// ==============================================================================
+
+import style;
+import buffer;
+import layout;
+import event;
+import widgets;
+import std/terminal;
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw u8);
+}
+
+fn tui_push_int(var out: String, val: i32) {
+    if val == 0 {
+        out.push_byte(48u8); // '0'
+        return;
+    }
+    var v = val;
+    if v < 0 {
+        out.push_byte(45u8); // '-'
+        v = 0 - v;
+    }
+    let digits = malloc(16usize) as *raw var u8;
+    var count = 0usize;
+    while v > 0 {
+        let rem = (v % 10) as u8;
+        digits[count] = rem + 48u8;
+        v = v / 10;
+        count = count + 1usize;
+    }
+    while count > 0usize {
+        count = count - 1usize;
+        out.push_byte(digits[count]);
+    }
+    free(digits as *raw u8);
+}
+
+pub struct Terminal {
+    pub session: TerminalSession,
+    pub width: i32,
+    pub height: i32,
+    pub front: Buffer,
+    pub back: Buffer,
+}
+
+impl Terminal {
+    pub fn new() -> Terminal {
+        let session = TerminalSession.new();
+        let sz = session.size();
+        let w = sz.cols as i32;
+        let h = sz.rows as i32;
+
+        return Terminal {
+            session: session,
+            width: w,
+            height: h,
+            front: Buffer.new(w, h),
+            back: Buffer.new(w, h),
+        };
+    }
+
+    pub fn term_init(var self) {
+        self.session.enable_raw_mode();
+        self.session.enter_alternate_screen();
+        self.session.hide_cursor();
+
+        // Mark front buffer with 255 so the initial frame always completely draws
+        let total_bytes = (self.width * self.height * 16) as usize;
+        let fb: *raw var u8 = self.front.cells;
+        var i = 0usize;
+        while i < total_bytes {
+            fb[i] = 255u8;
+            i = i + 1usize;
+        }
+    }
+
+    pub fn term_size(self) -> TerminalSize {
+        let sz = self.session.size();
+        return TerminalSize {
+            cols: sz.cols,
+            rows: sz.rows,
+        };
+    }
+
+    pub fn term_clear(var self) {
+        self.back.clear(Style.default());
+    }
+
+    pub fn term_present(var self) {
+        let w = self.width;
+        let h = self.height;
+        let total = (w * h) as usize;
+        let f: *raw var u8 = self.front.cells;
+        let b: *raw var u8 = self.back.cells;
+
+        var out = String.new();
+        var cur_x = -1;
+        var cur_y = -1;
+
+        var last_fg_tag = -1;
+        var last_fg_r = 0u8; var last_fg_g = 0u8; var last_fg_b = 0u8;
+        var last_bg_tag = -1;
+        var last_bg_r = 0u8; var last_bg_g = 0u8; var last_bg_b = 0u8;
+        var last_mods = -1;
+
+        var y = 0;
+        while y < h {
+            var x = 0;
+            while x < w {
+                let idx = (y * w + x) as usize;
+                let off = idx * 16usize;
+
+                // Compare 16 bytes between front and back
+                var diff = false;
+                var k = 0usize;
+                while k < 16usize {
+                    if f[off + k] != b[off + k] {
+                        diff = true;
+                        break;
+                    }
+                    k = k + 1usize;
+                }
+
+                if diff {
+                    // Reposition cursor if not directly following previous column
+                    if x != cur_x || y != cur_y {
+                        out.push_str("\x1b[");
+                        tui_push_int(out, y + 1);
+                        out.push_byte(59u8); // ';'
+                        tui_push_int(out, x + 1);
+                        out.push_byte(72u8); // 'H'
+                        cur_x = x;
+                        cur_y = y;
+                    }
+
+                    let ch = b[off];
+                    let clen = b[off + 4usize] as usize;
+                    let fg_tag = b[off + 5usize] as i32;
+                    let fg_r = b[off + 6usize];
+                    let fg_g = b[off + 7usize];
+                    let fg_b = b[off + 8usize];
+                    let bg_tag = b[off + 9usize] as i32;
+                    let bg_r = b[off + 10usize];
+                    let bg_g = b[off + 11usize];
+                    let bg_b = b[off + 12usize];
+                    let mods = b[off + 13usize] as i32;
+
+                    // Text modifiers
+                    if mods != last_mods {
+                        out.push_str("\x1b[0m"); // reset
+                        last_fg_tag = -1;
+                        last_bg_tag = -1;
+                        if (mods & MOD_BOLD) != 0 { out.push_str("\x1b[1m"); }
+                        if (mods & MOD_DIM) != 0 { out.push_str("\x1b[2m"); }
+                        if (mods & MOD_ITALIC) != 0 { out.push_str("\x1b[3m"); }
+                        if (mods & MOD_UNDERLINE) != 0 { out.push_str("\x1b[4m"); }
+                        if (mods & MOD_REVERSE) != 0 { out.push_str("\x1b[7m"); }
+                        last_mods = mods;
+                    }
+
+                    // Foreground color change
+                    if fg_tag != last_fg_tag || fg_r != last_fg_r || fg_g != last_fg_g || fg_b != last_fg_b {
+                        if fg_tag == COLOR_RESET {
+                            out.push_str("\x1b[39m");
+                        } else if fg_tag == COLOR_ANSI {
+                            if fg_r < 8u8 {
+                                out.push_str("\x1b[");
+                                tui_push_int(out, 30 + (fg_r as i32));
+                                out.push_byte(109u8); // 'm'
+                            } else {
+                                out.push_str("\x1b[");
+                                tui_push_int(out, 90 + ((fg_r - 8u8) as i32));
+                                out.push_byte(109u8);
+                            }
+                        } else if fg_tag == COLOR_INDEXED {
+                            out.push_str("\x1b[38;5;");
+                            tui_push_int(out, fg_r as i32);
+                            out.push_byte(109u8);
+                        } else if fg_tag == COLOR_RGB {
+                            out.push_str("\x1b[38;2;");
+                            tui_push_int(out, fg_r as i32);
+                            out.push_byte(59u8);
+                            tui_push_int(out, fg_g as i32);
+                            out.push_byte(59u8);
+                            tui_push_int(out, fg_b as i32);
+                            out.push_byte(109u8);
+                        }
+                        last_fg_tag = fg_tag;
+                        last_fg_r = fg_r;
+                        last_fg_g = fg_g;
+                        last_fg_b = fg_b;
+                    }
+
+                    // Background color change
+                    if bg_tag != last_bg_tag || bg_r != last_bg_r || bg_g != last_bg_g || bg_b != last_bg_b {
+                        if bg_tag == COLOR_RESET {
+                            out.push_str("\x1b[49m");
+                        } else if bg_tag == COLOR_ANSI {
+                            if bg_r < 8u8 {
+                                out.push_str("\x1b[");
+                                tui_push_int(out, 40 + (bg_r as i32));
+                                out.push_byte(109u8);
+                            } else {
+                                out.push_str("\x1b[");
+                                tui_push_int(out, 100 + ((bg_r - 8u8) as i32));
+                                out.push_byte(109u8);
+                            }
+                        } else if bg_tag == COLOR_INDEXED {
+                            out.push_str("\x1b[48;5;");
+                            tui_push_int(out, bg_r as i32);
+                            out.push_byte(109u8);
+                        } else if bg_tag == COLOR_RGB {
+                            out.push_str("\x1b[48;2;");
+                            tui_push_int(out, bg_r as i32);
+                            out.push_byte(59u8);
+                            tui_push_int(out, bg_g as i32);
+                            out.push_byte(59u8);
+                            tui_push_int(out, bg_b as i32);
+                            out.push_byte(109u8);
+                        }
+                        last_bg_tag = bg_tag;
+                        last_bg_r = bg_r;
+                        last_bg_g = bg_g;
+                        last_bg_b = bg_b;
+                    }
+
+                    // Emit glyph byte(s)
+                    var gi = 0usize;
+                    while gi < clen {
+                        out.push_byte(b[off + gi]);
+                        gi = gi + 1usize;
+                    }
+                    cur_x = cur_x + 1;
+                }
+
+                x = x + 1;
+            }
+            y = y + 1;
+        }
+
+        // Write batch buffer to stdout
+        if out.len() > 0usize {
+            let _ = syscall3(1i64, 1i64, out.as_ptr() as *raw u8, out.len() as i64);
+        }
+
+        // Synchronize back buffer to front buffer
+        let total_bytes = total * 16usize;
+        var cpy_i = 0usize;
+        while cpy_i < total_bytes {
+            f[cpy_i] = b[cpy_i];
+            cpy_i = cpy_i + 1usize;
+        }
+    }
+
+    pub fn term_close(var self) {
+        self.session.end_session();
+        self.front.destroy();
+        self.back.destroy();
+    }
+}
+
+// ------------------------------------------------------------------------------
+// App Runner
+// ------------------------------------------------------------------------------
+
+pub struct App {
+    pub term: Terminal,
+    pub is_running: bool,
+    pub app_title: str,
+}
+
+impl App {
+    pub fn new() -> App {
+        return App {
+            term: Terminal.new(),
+            is_running: false,
+            app_title: "Rad Application",
+        };
+    }
+
+    pub fn set_title(var self, t: str) {
+        self.app_title = t;
+    }
+
+    pub fn init(var self) {
+        self.term.term_init();
+        self.is_running = true;
+    }
+
+    pub fn running(self) -> bool {
+        return self.is_running;
+    }
+
+    pub fn quit(var self) {
+        self.is_running = false;
+    }
+
+    pub fn window_size(self) -> TerminalSize {
+        return self.term.term_size();
+    }
+
+    pub fn poll_event(self, timeout_ms: i32) -> Event {
+        return poll_terminal_event(timeout_ms);
+    }
+
+    pub fn app_clear(var self) {
+        self.term.term_clear();
+    }
+
+    pub fn draw_block(var self, b: Block, area: Rect) {
+        b.render_block(self.term.back, area);
+    }
+
+    pub fn draw_paragraph(var self, p: Paragraph, area: Rect) {
+        p.render_paragraph(self.term.back, area);
+    }
+
+    pub fn draw_button(var self, b: Button, area: Rect) {
+        b.render_button(self.term.back, area);
+    }
+
+    pub fn draw_progress(var self, p: ProgressBar, area: Rect) {
+        p.render_progress(self.term.back, area);
+    }
+
+    pub fn draw_list(var self, l: List, area: Rect) {
+        l.render_list(self.term.back, area);
+    }
+
+    pub fn render(var self) {
+        self.term.term_present();
+    }
+
+    pub fn finish(var self) {
+        self.term.term_close();
+    }
+}

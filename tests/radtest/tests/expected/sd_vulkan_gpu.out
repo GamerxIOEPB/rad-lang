@@ -1,0 +1,11 @@
+--- Rad Vulkan & GPGPU Compute Pipeline ---
+Vulkan physical devices enumerated: 2
+Primary GPU: Rad Hardware Vulkan Accelerator (Direct Native)
+Vulkan swapchain created: 1920x1080
+SPIR-V GEMM compute module compiled: 13 words (52 bytes)
+SPIR-V SHA-256 compute module compiled: 13 words
+SPIR-V curve raster vertex module compiled: 13 words
+GEMM Dispatch result: [[19, 22], [43, 50]]
+GPU SHA-256 hash digest generated: 16 bytes
+GPU curve tessellated: 5 points
+Vulkan & GPU compute pipeline verified successfully.

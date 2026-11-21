@@ -1,0 +1,585 @@
+// ==============================================================================
+// Rad Standard Library: JSON Parser and Serializer
+// Pure-Rad DOM representation, recursive descent parser, and formatter.
+// ==============================================================================
+
+pub const JSON_NULL: i32    = 0
+pub const JSON_BOOL: i32    = 1
+pub const JSON_NUMBER: i32  = 2
+pub const JSON_STRING: i32  = 3
+pub const JSON_ARRAY: i32   = 4
+pub const JSON_OBJECT: i32  = 5
+
+pub struct JsonMember {
+    pub key: String,
+    pub val: JsonValue,
+}
+
+pub struct JsonValue {
+    pub kind: i32,
+    pub bool_val: bool,
+    pub num_val: f64,
+    pub str_val: String,
+    pub arr_val: Vec<JsonValue>,
+    pub obj_val: Vec<JsonMember>,
+}
+
+impl JsonValue {
+    pub fn null() -> JsonValue {
+        JsonValue {
+            kind: JSON_NULL,
+            bool_val: false,
+            num_val: 0.0,
+            str_val: String.new(),
+            arr_val: Vec.new(),
+            obj_val: Vec.new(),
+        }
+    }
+
+    pub fn bool(b: bool) -> JsonValue {
+        JsonValue {
+            kind: JSON_BOOL,
+            bool_val: b,
+            num_val: 0.0,
+            str_val: String.new(),
+            arr_val: Vec.new(),
+            obj_val: Vec.new(),
+        }
+    }
+
+    pub fn number(n: f64) -> JsonValue {
+        JsonValue {
+            kind: JSON_NUMBER,
+            bool_val: false,
+            num_val: n,
+            str_val: String.new(),
+            arr_val: Vec.new(),
+            obj_val: Vec.new(),
+        }
+    }
+
+    pub fn string(s: str) -> JsonValue {
+        JsonValue {
+            kind: JSON_STRING,
+            bool_val: false,
+            num_val: 0.0,
+            str_val: String.from_str(s),
+            arr_val: Vec.new(),
+            obj_val: Vec.new(),
+        }
+    }
+
+    pub fn array() -> JsonValue {
+        JsonValue {
+            kind: JSON_ARRAY,
+            bool_val: false,
+            num_val: 0.0,
+            str_val: String.new(),
+            arr_val: Vec.new(),
+            obj_val: Vec.new(),
+        }
+    }
+
+    pub fn object() -> JsonValue {
+        JsonValue {
+            kind: JSON_OBJECT,
+            bool_val: false,
+            num_val: 0.0,
+            str_val: String.new(),
+            arr_val: Vec.new(),
+            obj_val: Vec.new(),
+        }
+    }
+
+    pub fn is_null(self) -> bool { self.kind == JSON_NULL }
+    pub fn is_bool(self) -> bool { self.kind == JSON_BOOL }
+    pub fn is_number(self) -> bool { self.kind == JSON_NUMBER }
+    pub fn is_string(self) -> bool { self.kind == JSON_STRING }
+    pub fn is_array(self) -> bool { self.kind == JSON_ARRAY }
+    pub fn is_object(self) -> bool { self.kind == JSON_OBJECT }
+
+    pub fn as_str(self) -> str {
+        if self.kind == JSON_STRING {
+            return (self.str_val.as_ptr() as str)
+        } else {
+            return ""
+        }
+    }
+
+    pub fn as_i64(self) -> i64 {
+        return (self.num_val as i64)
+    }
+
+    pub fn as_bool(self) -> bool {
+        return self.bool_val
+    }
+
+    pub fn add(var self, item: JsonValue) {
+        if self.kind == JSON_ARRAY {
+            self.arr_val.push(item)
+        }
+    }
+
+    pub fn set(var self, key: str, val: JsonValue) {
+        if self.kind == JSON_OBJECT {
+            var i = 0usize
+            while i < self.obj_val.len {
+                if str_json_eq(self.obj_val.ptr[i].key.as_ptr() as str, key) {
+                    self.obj_val.ptr[i].val = val
+                    return
+                }
+                i = i + 1usize
+            }
+            self.obj_val.push(JsonMember {
+                key: String.from_str(key),
+                val: val,
+            })
+        }
+    }
+
+    pub fn get(self, key: str) -> Option<JsonValue> {
+        if self.kind != JSON_OBJECT {
+            return Option.None
+        }
+        var i = 0usize
+        while i < self.obj_val.len {
+            if str_json_eq(self.obj_val.ptr[i].key.as_ptr() as str, key) {
+                return Option.Some(self.obj_val.ptr[i].val)
+            }
+            i = i + 1usize
+        }
+        return Option.None
+    }
+
+    pub fn get_idx(self, idx: usize) -> Option<JsonValue> {
+        if self.kind != JSON_ARRAY || idx >= self.arr_val.len {
+            return Option.None
+        }
+        return Option.Some(self.arr_val.ptr[idx])
+    }
+
+    pub fn item_count(self) -> usize {
+        if self.kind == JSON_ARRAY {
+            return self.arr_val.len
+        } else if self.kind == JSON_OBJECT {
+            return self.obj_val.len
+        } else if self.kind == JSON_STRING {
+            return self.str_val.len()
+        } else {
+            return 0usize
+        }
+    }
+
+    pub fn stringify(self) -> String {
+        var out = String.new()
+        json_serialize_val(self, out, false, 0usize)
+        return out
+    }
+
+    pub fn stringify_pretty(self, indent: usize) -> String {
+        var out = String.new()
+        json_serialize_val(self, out, true, indent)
+        return out
+    }
+}
+
+fn str_json_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize { return true }
+    if (a as usize) == 0usize || (b as usize) == 0usize { return false }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return (pa[i] == pb[i])
+}
+
+fn json_write_indent(var out: String, depth: usize, indent: usize) {
+    let spaces = depth * indent
+    var i = 0usize
+    while i < spaces {
+        out.push_byte(32u8) // ' '
+        i = i + 1usize
+    }
+}
+
+fn json_serialize_val(val: JsonValue, var out: String, pretty: bool, indent: usize) {
+    if val.kind == JSON_NULL {
+        out.push_str("null")
+    } else if val.kind == JSON_BOOL {
+        if val.bool_val {
+            out.push_str("true")
+        } else {
+            out.push_str("false")
+        }
+    } else if val.kind == JSON_NUMBER {
+        let i_val = val.num_val as i64
+        if (i_val as f64) == val.num_val {
+            // Integer formatting
+            var n = i_val
+            if n == 0i64 {
+                out.push_byte(48u8) // '0'
+            } else {
+                if n < 0i64 {
+                    out.push_byte(45u8) // '-'
+                    n = -n
+                }
+                var digits = malloc(32usize) as *raw var u8
+                var dlen = 0usize
+                while n > 0i64 {
+                    digits[dlen] = ((n % 10i64) as u8) + 48u8
+                    dlen = dlen + 1usize
+                    n = n / 10i64
+                }
+                while dlen > 0usize {
+                    dlen = dlen - 1usize
+                    out.push_byte(digits[dlen])
+                }
+                free(digits)
+            }
+        } else {
+            // General float fallback
+            var n = i_val
+            if n < 0i64 {
+                out.push_byte(45u8)
+                n = -n
+            }
+            var digits = malloc(32usize) as *raw var u8
+            var dlen = 0usize
+            while n > 0i64 {
+                digits[dlen] = ((n % 10i64) as u8) + 48u8
+                dlen = dlen + 1usize
+                n = n / 10i64
+            }
+            if dlen == 0usize {
+                out.push_byte(48u8)
+            }
+            while dlen > 0usize {
+                dlen = dlen - 1usize
+                out.push_byte(digits[dlen])
+            }
+            free(digits)
+        }
+    } else if val.kind == JSON_STRING {
+        out.push_byte(34u8) // '"'
+        let s = val.str_val.as_ptr() as str
+        let len = val.str_val.len()
+        let ptr = s as *raw u8
+        var i = 0usize
+        while i < len {
+            let b = ptr[i]
+            if b == 34u8 {
+                out.push_byte(92u8) // '\'
+                out.push_byte(34u8) // '"'
+            } else if b == 92u8 {
+                out.push_byte(92u8)
+                out.push_byte(92u8)
+            } else if b == 10u8 {
+                out.push_byte(92u8)
+                out.push_byte(110u8) // '\n'
+            } else if b == 13u8 {
+                out.push_byte(92u8)
+                out.push_byte(114u8) // '\r'
+            } else if b == 9u8 {
+                out.push_byte(92u8)
+                out.push_byte(116u8) // '\t'
+            } else {
+                out.push_byte(b)
+            }
+            i = i + 1usize
+        }
+        out.push_byte(34u8) // '"'
+    } else if val.kind == JSON_ARRAY {
+        out.push_byte(91u8) // '['
+        let count = val.arr_val.len
+        var i = 0usize
+        while i < count {
+            if i > 0usize {
+                out.push_byte(44u8) // ','
+                if pretty {
+                    out.push_byte(32u8)
+                }
+            }
+            json_serialize_val(val.arr_val.ptr[i], out, pretty, indent)
+            i = i + 1usize
+        }
+        out.push_byte(93u8) // ']'
+    } else if val.kind == JSON_OBJECT {
+        out.push_byte(123u8) // '{'
+        let count = val.obj_val.len
+        var i = 0usize
+        while i < count {
+            if i > 0usize {
+                out.push_byte(44u8) // ','
+            }
+            if pretty {
+                out.push_byte(10u8)
+                json_write_indent(out, 1usize, indent)
+            }
+            out.push_byte(34u8) // '"'
+            out.push_str(val.obj_val.ptr[i].key.as_ptr() as str)
+            out.push_byte(34u8) // '"'
+            out.push_byte(58u8) // ':'
+            if pretty {
+                out.push_byte(32u8)
+            }
+            json_serialize_val(val.obj_val.ptr[i].val, out, pretty, indent)
+            i = i + 1usize
+        }
+        if pretty && count > 0usize {
+            out.push_byte(10u8)
+        }
+        out.push_byte(125u8) // '}'
+    }
+}
+
+// ------------------------------------------------------------------------------
+// JSON Recursive Descent Parser
+// ------------------------------------------------------------------------------
+
+struct JsonParser {
+    src: *raw u8,
+    len: usize,
+    pos: usize,
+}
+
+impl JsonParser {
+    fn skip_whitespace(var self) {
+        while self.pos < self.len {
+            let b = self.src[self.pos]
+            if b == 32u8 || b == 9u8 || b == 10u8 || b == 13u8 {
+                self.pos = self.pos + 1usize
+            } else {
+                return
+            }
+        }
+    }
+
+    fn peek(self) -> u8 {
+        if self.pos < self.len {
+            return self.src[self.pos]
+        } else {
+            return 0u8
+        }
+    }
+
+    fn parse_value(var self) -> Option<JsonValue> {
+        self.skip_whitespace()
+        let b = self.peek()
+        if b == 0u8 {
+            return Option.None
+        }
+
+        if b == 123u8 { // '{'
+            return self.parse_object()
+        }
+        if b == 91u8 { // '['
+            return self.parse_array()
+        }
+        if b == 34u8 { // '"'
+            return self.parse_string()
+        }
+        if b == 116u8 || b == 102u8 { // 't' or 'f'
+            return self.parse_bool()
+        }
+        if b == 110u8 { // 'n' (null)
+            return self.parse_null()
+        }
+        if (b >= 48u8 && b <= 57u8) || b == 45u8 { // 0..9 or '-'
+            return self.parse_number()
+        }
+
+        Option.None
+    }
+
+    fn parse_null(var self) -> Option<JsonValue> {
+        if self.pos + 4usize <= self.len {
+            if self.src[self.pos] == 110u8 && self.src[self.pos + 1usize] == 117u8 && self.src[self.pos + 2usize] == 108u8 && self.src[self.pos + 3usize] == 108u8 {
+                self.pos = self.pos + 4usize
+                return Option.Some(JsonValue.null())
+            }
+        }
+        return Option.None
+    }
+
+    fn parse_bool(var self) -> Option<JsonValue> {
+        if self.pos + 4usize <= self.len && self.src[self.pos] == 116u8 && self.src[self.pos + 1usize] == 114u8 && self.src[self.pos + 2usize] == 117u8 && self.src[self.pos + 3usize] == 101u8 {
+            self.pos = self.pos + 4usize
+            return Option.Some(JsonValue.bool(true))
+        }
+        if self.pos + 5usize <= self.len && self.src[self.pos] == 102u8 && self.src[self.pos + 1usize] == 97u8 && self.src[self.pos + 2usize] == 108u8 && self.src[self.pos + 3usize] == 115u8 && self.src[self.pos + 4usize] == 101u8 {
+            self.pos = self.pos + 5usize
+            return Option.Some(JsonValue.bool(false))
+        }
+        return Option.None
+    }
+
+    fn parse_number(var self) -> Option<JsonValue> {
+        var sign = 1.0
+        if self.src[self.pos] == 45u8 {
+            sign = -1.0
+            self.pos = self.pos + 1usize
+        }
+        var int_val = 0i64
+        while self.pos < self.len && self.src[self.pos] >= 48u8 && self.src[self.pos] <= 57u8 {
+            int_val = (int_val * 10i64) + ((self.src[self.pos] - 48u8) as i64)
+            self.pos = self.pos + 1usize
+        }
+        var final_val = (int_val as f64) * sign
+        if self.pos < self.len && self.src[self.pos] == 46u8 { // '.'
+            self.pos = self.pos + 1usize
+            var frac = 0.0
+            var div = 10.0
+            while self.pos < self.len && self.src[self.pos] >= 48u8 && self.src[self.pos] <= 57u8 {
+                frac = frac + (((self.src[self.pos] - 48u8) as f64) / div)
+                div = div * 10.0
+                self.pos = self.pos + 1usize
+            }
+            if sign < 0.0 {
+                final_val = final_val - frac
+            } else {
+                final_val = final_val + frac
+            }
+        }
+        return Option.Some(JsonValue.number(final_val))
+    }
+
+    fn parse_string(var self) -> Option<JsonValue> {
+        if self.peek() != 34u8 {
+            return Option.None
+        }
+        self.pos = self.pos + 1usize // Skip opening quote
+        var s = String.new()
+        while self.pos < self.len {
+            let b = self.src[self.pos]
+            if b == 34u8 { // Closing quote
+                self.pos = self.pos + 1usize
+                s.push_byte(0u8)
+                return Option.Some(JsonValue.string(s.as_ptr() as str))
+            }
+            if b == 92u8 && self.pos + 1usize < self.len { // Escape '\'
+                self.pos = self.pos + 1usize
+                let esc = self.src[self.pos]
+                if esc == 34u8 { s.push_byte(34u8) }
+                else if esc == 92u8 { s.push_byte(92u8) }
+                else if esc == 110u8 { s.push_byte(10u8) }
+                else if esc == 114u8 { s.push_byte(13u8) }
+                else if esc == 116u8 { s.push_byte(9u8) }
+                else { s.push_byte(esc) }
+            } else {
+                s.push_byte(b)
+            }
+            self.pos = self.pos + 1usize
+        }
+        return Option.None
+    }
+
+    fn parse_array(var self) -> Option<JsonValue> {
+        if self.peek() != 91u8 {
+            return Option.None
+        }
+        self.pos = self.pos + 1usize // Skip '['
+        var arr = JsonValue.array()
+
+        self.skip_whitespace()
+        if self.peek() == 93u8 { // ']' empty array
+            self.pos = self.pos + 1usize
+            return Option.Some(arr)
+        }
+
+        while self.pos < self.len {
+            let elem_res = self.parse_value()
+            match elem_res {
+                Option.Some(val) => {
+                    arr.add(val)
+                    self.skip_whitespace()
+                    let b = self.peek()
+                    if b == 44u8 { // ','
+                        self.pos = self.pos + 1usize
+                    } else if b == 93u8 { // ']'
+                        self.pos = self.pos + 1usize
+                        return Option.Some(arr)
+                    } else {
+                        return Option.None
+                    }
+                },
+                Option.None => return Option.None,
+                _ => return Option.None,
+            }
+        }
+        return Option.None
+    }
+
+    fn parse_object(var self) -> Option<JsonValue> {
+        if self.peek() != 123u8 {
+            return Option.None
+        }
+        self.pos = self.pos + 1usize // Skip '{'
+        var obj = JsonValue.object()
+
+        self.skip_whitespace()
+        if self.peek() == 125u8 { // '}' empty object
+            self.pos = self.pos + 1usize
+            return Option.Some(obj)
+        }
+
+        while self.pos < self.len {
+            self.skip_whitespace()
+            if self.peek() != 34u8 {
+                return Option.None
+            }
+            var key_str = ""
+            let str_res = self.parse_string()
+            match str_res {
+                Option.Some(kv) => { key_str = kv.as_str() },
+                Option.None => { return Option.None },
+                _ => { return Option.None },
+            }
+
+            self.skip_whitespace()
+            if self.peek() != 58u8 { // ':'
+                return Option.None
+            }
+            self.pos = self.pos + 1usize // Skip ':'
+
+            let val_res = self.parse_value()
+            match val_res {
+                Option.Some(val) => {
+                    obj.set(key_str, val)
+                    self.skip_whitespace()
+                    let b = self.peek()
+                    if b == 44u8 { // ','
+                        self.pos = self.pos + 1usize
+                    } else if b == 125u8 { // '}'
+                        self.pos = self.pos + 1usize
+                        return Option.Some(obj)
+                    } else {
+                        return Option.None
+                    }
+                },
+                Option.None => return Option.None,
+                _ => return Option.None,
+            }
+        }
+        return Option.None
+    }
+}
+
+pub fn json_parse(input: str) -> Option<JsonValue> {
+    if (input as usize) == 0usize {
+        return Option.None
+    }
+    let p = input as *raw u8
+    var len = 0usize
+    while p[len] != 0u8 {
+        len = len + 1usize
+    }
+    var parser = JsonParser {
+        src: p,
+        len: len,
+        pos: 0usize,
+    }
+    return parser.parse_value()
+}

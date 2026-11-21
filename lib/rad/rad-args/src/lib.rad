@@ -1,0 +1,319 @@
+// ==============================================================================
+// rad-args — Declarative CLI Argument Parser in Pure Rad
+// Flags, options, subcommands, positional arguments, and auto-generated help.
+// ==============================================================================
+
+pub struct ArgParser {
+    pub program_name: String,
+    pub description: String,
+
+    // Flags: -f, --flag
+    pub flag_shorts: Vec<String>,
+    pub flag_longs: Vec<String>,
+    pub flag_descs: Vec<String>,
+    pub flag_vals: *raw var u8, // byte array: 1 = true, 0 = false
+
+    // Options: -o val, --opt val
+    pub opt_shorts: Vec<String>,
+    pub opt_longs: Vec<String>,
+    pub opt_descs: Vec<String>,
+    pub opt_defaults: Vec<String>,
+    pub opt_vals: Vec<String>,
+    pub opt_is_set: *raw var u8, // byte array: 1 = set, 0 = default
+
+    // Subcommands: build, run, test
+    pub sub_names: Vec<String>,
+    pub sub_descs: Vec<String>,
+    pub active_subcommand: String,
+
+    // Positionals
+    pub positionals: Vec<String>,
+}
+
+impl ArgParser {
+    pub fn new(prog: str, desc: str) -> ArgParser {
+        let f_vals = malloc(128usize) as *raw var u8
+        var i = 0usize
+        while i < 128usize { f_vals[i] = 0u8; i = i + 1usize }
+
+        let o_set = malloc(128usize) as *raw var u8
+        i = 0usize
+        while i < 128usize { o_set[i] = 0u8; i = i + 1usize }
+
+        var p = ArgParser {
+            program_name: String.from_str(prog),
+            description: String.from_str(desc),
+            flag_shorts: Vec.new(),
+            flag_longs: Vec.new(),
+            flag_descs: Vec.new(),
+            flag_vals: f_vals,
+            opt_shorts: Vec.new(),
+            opt_longs: Vec.new(),
+            opt_descs: Vec.new(),
+            opt_defaults: Vec.new(),
+            opt_vals: Vec.new(),
+            opt_is_set: o_set,
+            sub_names: Vec.new(),
+            sub_descs: Vec.new(),
+            active_subcommand: String.new(),
+            positionals: Vec.new(),
+        }
+        p.add_flag("h", "help", "Print command-line usage and help")
+        return p
+    }
+
+    pub fn add_flag(var self, short_n: str, long_n: str, desc: str) {
+        let idx = self.flag_shorts.len
+        if idx < 128usize {
+            self.flag_vals[idx] = 0u8
+        }
+        self.flag_shorts.push(String.from_str(short_n))
+        self.flag_longs.push(String.from_str(long_n))
+        self.flag_descs.push(String.from_str(desc))
+    }
+
+    pub fn add_opt(var self, short_n: str, long_n: str, desc: str, def_val: str) {
+        let idx = self.opt_shorts.len
+        if idx < 128usize {
+            self.opt_is_set[idx] = 0u8
+        }
+        self.opt_shorts.push(String.from_str(short_n))
+        self.opt_longs.push(String.from_str(long_n))
+        self.opt_descs.push(String.from_str(desc))
+        self.opt_defaults.push(String.from_str(def_val))
+        self.opt_vals.push(String.from_str(def_val))
+    }
+
+    pub fn add_subcommand(var self, name: str, desc: str) {
+        self.sub_names.push(String.from_str(name))
+        self.sub_descs.push(String.from_str(desc))
+    }
+
+    pub fn parse(var self, argc: i32, argv: *raw *raw u8) -> bool {
+        if argc <= 1 {
+            return true
+        }
+
+        var i = 1usize
+        let count = argc as usize
+
+        while i < count {
+            let arg_str = argv[i] as str
+            let p = arg_str as *raw u8
+
+            // 1. Subcommand check
+            if self.active_subcommand.len() == 0usize && self.positionals.len() == 0usize && p[0] != 45u8 {
+                var s_i = 0usize
+                var matched = false
+                while s_i < self.sub_names.len {
+                    if str_eq(self.sub_names.ptr[s_i].as_ptr() as str, arg_str) {
+                        self.active_subcommand = String.from_str(arg_str)
+                        matched = true
+                        break
+                    }
+                    s_i = s_i + 1usize
+                }
+                if matched {
+                    i = i + 1usize
+                    continue
+                }
+            }
+
+            // 2. Flags and Options
+            if p[0] == 45u8 { // '-'
+                if p[1] == 45u8 { // '--'
+                    let flag_long = (arg_str as usize + 2usize) as str
+
+                    // Check options
+                    var opt_found = false
+                    var o_i = 0usize
+                    while o_i < self.opt_longs.len {
+                        if str_eq(self.opt_longs.ptr[o_i].as_ptr() as str, flag_long) {
+                            if (i + 1usize) < count {
+                                i = i + 1usize
+                                let val = argv[i] as str
+                                self.opt_vals.ptr[o_i] = String.from_str(val)
+                                self.opt_is_set[o_i] = 1u8
+                                opt_found = true
+                                break
+                            }
+                        }
+                        o_i = o_i + 1usize
+                    }
+
+                    if !opt_found {
+                        // Check flags
+                        var f_i = 0usize
+                        while f_i < self.flag_longs.len {
+                            if str_eq(self.flag_longs.ptr[f_i].as_ptr() as str, flag_long) {
+                                self.flag_vals[f_i] = 1u8
+                                break
+                            }
+                            f_i = f_i + 1usize
+                        }
+                    }
+                } else {
+                    // Short '-f'
+                    let flag_short = (arg_str as usize + 1usize) as str
+
+                    var opt_found = false
+                    var o_i = 0usize
+                    while o_i < self.opt_shorts.len {
+                        if str_eq(self.opt_shorts.ptr[o_i].as_ptr() as str, flag_short) {
+                            if (i + 1usize) < count {
+                                i = i + 1usize
+                                let val = argv[i] as str
+                                self.opt_vals.ptr[o_i] = String.from_str(val)
+                                self.opt_is_set[o_i] = 1u8
+                                opt_found = true
+                                break
+                            }
+                        }
+                        o_i = o_i + 1usize
+                    }
+
+                    if !opt_found {
+                        var f_i = 0usize
+                        while f_i < self.flag_shorts.len {
+                            if str_eq(self.flag_shorts.ptr[f_i].as_ptr() as str, flag_short) {
+                                self.flag_vals[f_i] = 1u8
+                                break
+                            }
+                            f_i = f_i + 1usize
+                        }
+                    }
+                }
+            } else {
+                // Positional
+                self.positionals.push(String.from_str(arg_str))
+            }
+
+            i = i + 1usize
+        }
+
+        return true
+    }
+
+    pub fn get_flag(self, name: str) -> bool {
+        var i = 0usize
+        while i < self.flag_shorts.len {
+            if str_eq(self.flag_shorts.ptr[i].as_ptr() as str, name) || str_eq(self.flag_longs.ptr[i].as_ptr() as str, name) {
+                return self.flag_vals[i] == 1u8
+            }
+            i = i + 1usize
+        }
+        return false
+    }
+
+    pub fn get_opt(self, name: str) -> Option<String> {
+        var i = 0usize
+        while i < self.opt_shorts.len {
+            if str_eq(self.opt_shorts.ptr[i].as_ptr() as str, name) || str_eq(self.opt_longs.ptr[i].as_ptr() as str, name) {
+                if self.opt_is_set[i] == 1u8 || self.opt_defaults.ptr[i].len() > 0usize {
+                    return Option.Some(String.from_str(self.opt_vals.ptr[i].as_ptr() as str))
+                }
+            }
+            i = i + 1usize
+        }
+        return Option.None
+    }
+
+    pub fn get_subcommand(self) -> Option<String> {
+        if self.active_subcommand.len() > 0usize {
+            return Option.Some(String.from_str(self.active_subcommand.as_ptr() as str))
+        } else {
+            return Option.None
+        }
+    }
+
+    pub fn get_positional(self, idx: usize) -> Option<String> {
+        if idx < self.positionals.len {
+            return Option.Some(String.from_str(self.positionals.ptr[idx].as_ptr() as str))
+        } else {
+            return Option.None
+        }
+    }
+
+    pub fn print_help(self) {
+        print(self.program_name.as_ptr() as str);
+        print(" — ");
+        println(self.description.as_ptr() as str);
+        println("");
+        print("Usage: ");
+        print(self.program_name.as_ptr() as str);
+        if self.sub_names.len > 0usize {
+            print(" <command>");
+        }
+        println(" [options]");
+        println("");
+
+        if self.sub_names.len > 0usize {
+            println("Commands:");
+            var s_i = 0usize
+            while s_i < self.sub_names.len {
+                print("  ");
+                print(self.sub_names.ptr[s_i].as_ptr() as str);
+                print("    ");
+                println(self.sub_descs.ptr[s_i].as_ptr() as str);
+                s_i = s_i + 1usize
+            }
+            println("");
+        }
+
+        if self.opt_shorts.len > 0usize {
+            println("Options:");
+            var o_i = 0usize
+            while o_i < self.opt_shorts.len {
+                print("  -");
+                print(self.opt_shorts.ptr[o_i].as_ptr() as str);
+                print(", --");
+                print(self.opt_longs.ptr[o_i].as_ptr() as str);
+                print(" <val>    ");
+                print(self.opt_descs.ptr[o_i].as_ptr() as str);
+                let def = self.opt_defaults.ptr[o_i].as_ptr() as str
+                if str_len(def) > 0usize {
+                    print(" (default: ");
+                    print(def);
+                    print(")");
+                }
+                println("");
+                o_i = o_i + 1usize
+            }
+            println("");
+        }
+
+        println("Flags:");
+        var f_i = 0usize
+        while f_i < self.flag_shorts.len {
+            print("  -");
+            print(self.flag_shorts.ptr[f_i].as_ptr() as str);
+            print(", --");
+            print(self.flag_longs.ptr[f_i].as_ptr() as str);
+            print("        ");
+            println(self.flag_descs.ptr[f_i].as_ptr() as str);
+            f_i = f_i + 1usize
+        }
+    }
+}
+
+fn str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize }
+    let p = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 { i = i + 1usize }
+    return i
+}
+
+fn str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize || (b as usize) == 0usize {
+        return (a as usize) == (b as usize)
+    }
+    let pa = a as *raw u8
+    let pb = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] { return false }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}

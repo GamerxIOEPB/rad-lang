@@ -487,7 +487,47 @@ impl MirOptimizer {
         return devirtualized
     }
 
-    // 5. Stack Promotion via Escape Analysis: replace heap allocs with alloca when non-escaping
+    // 5a. Flow-Sensitive Escape Analysis: tracks whether heap allocations escape the current function
+    pub fn pass_escape_analysis(target: var MirFunction) -> usize {
+        var non_escaping = 0usize
+        var bi = 0usize
+        while bi < target.blocks.len {
+            var ii = 0usize
+            while ii < target.blocks.ptr[bi].instructions.len {
+                if target.blocks.ptr[bi].instructions.ptr[ii].opcode == MIR_HEAP_ALLOC {
+                    let alloc_reg = target.blocks.ptr[bi].instructions.ptr[ii].dest_vreg
+                    var does_escape = false
+
+                    // Scan function instructions for escape uses (return or global store)
+                    var b_scan = 0usize
+                    while b_scan < target.blocks.len {
+                        var i_scan = 0usize
+                        while i_scan < target.blocks.ptr[b_scan].instructions.len {
+                            let check = target.blocks.ptr[b_scan].instructions.ptr[i_scan]
+                            if check.opcode == MIR_RETURN && check.op1.kind == MIR_OP_VREG && check.op1.vreg_id == alloc_reg {
+                                does_escape = true
+                            }
+                            if check.opcode == MIR_STORE && check.op2.kind == MIR_OP_GLOBAL && check.op1.kind == MIR_OP_VREG && check.op1.vreg_id == alloc_reg {
+                                does_escape = true
+                            }
+                            i_scan = i_scan + 1usize
+                        }
+                        b_scan = b_scan + 1usize
+                    }
+
+                    target.blocks.ptr[bi].instructions.ptr[ii].escapes = does_escape
+                    if !does_escape {
+                        non_escaping = non_escaping + 1usize
+                    }
+                }
+                ii = ii + 1usize
+            }
+            bi = bi + 1usize
+        }
+        return non_escaping
+    }
+
+    // 5b. Stack Promotion via Escape Analysis: replace heap allocs with alloca when non-escaping
     pub fn pass_stack_promotion(target: var MirFunction) -> usize {
         var promoted = 0usize
         var bi = 0usize
@@ -512,6 +552,7 @@ impl MirOptimizer {
         let cse = MirOptimizer::pass_cse(target)
         let dce = MirOptimizer::pass_dce(target)
         let devirt = MirOptimizer::pass_devirtualize(target, devirt_concrete)
+        let _esc = MirOptimizer::pass_escape_analysis(target)
         let stack = MirOptimizer::pass_stack_promotion(target)
         return MirOptStats {
             dce_eliminated: dce,

@@ -1,0 +1,12 @@
+[package]
+name = "rad-test"
+version = "0.1.0"
+description = "Ergonomic unit testing harness with assertions and colored reporting"
+authors = ["Rad Authors"]
+license = "MIT"
+repository = "https://github.com/GamerxIOEPB/rad-lib"
+keywords = ["test", "testing", "assertions", "harness", "unit-test"]
+categories = ["development-tools::testing"]
+
+[lib]
+path = "src/lib.rad"

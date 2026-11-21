@@ -1,0 +1,12 @@
+[package]
+name = "rad-math"
+version = "0.1.0"
+description = "2D/3D vectors, matrices, and geometry math in pure Rad"
+authors = ["Rad Authors"]
+license = "MIT"
+repository = "https://github.com/GamerxIOEPB/rad-lib"
+keywords = ["math", "vector", "matrix", "geometry", "gamedev", "linear-algebra"]
+categories = ["mathematics", "game-development"]
+
+[lib]
+path = "src/lib.rad"

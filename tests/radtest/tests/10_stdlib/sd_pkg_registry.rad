@@ -1,0 +1,60 @@
+import std/pkg;
+
+fn main() -> i32 {
+    println("--- Rad Package Registry & SAT SemVer Solver ---");
+
+    // 1. SemVer 2.0 parsing and compatibility checks
+    let v1 = SemVer::parse("1.2.3");
+    let v2 = SemVer::parse("1.3.0");
+    let v3 = SemVer::parse("2.0.0");
+    let v1_maj = v1.major;
+    let v1_min = v1.minor;
+    let v1_pat = v1.patch;
+    println(f"Parsed v1: {v1_maj}.{v1_min}.{v1_pat}");
+    let v2_maj = v2.major;
+    let v2_min = v2.minor;
+    let v2_pat = v2.patch;
+    println(f"Parsed v2: {v2_maj}.{v2_min}.{v2_pat}");
+    let comp = v2.compare(v1);
+    println(f"v2 compared to v1: {comp}");
+    let compat = v2.is_compatible(v1);
+    var compat_str = "false";
+    if compat { compat_str = "true"; }
+    println(f"v2 compatible with ^v1: {compat_str}");
+
+    // 2. SAT-Based SemVer Dependency Solver
+    var solver = SatSemVerSolver::new();
+    let id_a1 = solver.add_candidate("rad-net", "0.1.0");
+    let id_a2 = solver.add_candidate("rad-net", "0.2.0");
+    let id_b1 = solver.add_candidate("rad-crypto", "1.0.0");
+    let id_b2 = solver.add_candidate("rad-crypto", "1.1.0");
+
+    let solution = solver.solve();
+    let solved_count = solution.len;
+    println(f"SAT solver resolved dependencies: {solved_count} packages");
+
+    // 3. Content-Addressable Registry & Ed25519 Signatures
+    var reg = PackageRegistry::new();
+    var manifest_data = Vec.new();
+    manifest_data.push(91u8); manifest_data.push(112u8); manifest_data.push(93u8); // "[p]"
+    let rel = reg.publish_package("rad-simd", "1.0.0", manifest_data);
+    let sha_len = rel.content_sha256.len();
+    println(f"Package content-addressable SHA-256 digest: {sha_len} hex chars");
+    let is_verified = reg.verify_release(rel);
+    var ver_str = "invalid";
+    if is_verified { ver_str = "valid"; }
+    println(f"Ed25519 cryptographic signature verification: {ver_str}");
+
+    // 4. Distributed Build Cache
+    var cache = DistributedBuildCache::new();
+    let cache_key = DistributedBuildCache::compute_cache_key("src_sha256_abcdef", "radc_0.2.4", "-O3 --release");
+    cache.put_artifact(cache_key.as_ptr() as str, "/var/cache/rad/objects/rad_simd.o", 48120usize);
+    let hit_path = cache.get_artifact(cache_key.as_ptr() as str);
+    let is_hit = hit_path.len() > 0usize;
+    var hit_str = "MISS";
+    if is_hit { hit_str = "HIT"; }
+    println(f"Distributed build cache lookup: {hit_str}");
+
+    println("Package registry and solver verified successfully.");
+    return 0;
+}

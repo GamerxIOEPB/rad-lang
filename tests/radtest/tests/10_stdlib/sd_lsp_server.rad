@@ -1,0 +1,55 @@
+import std/lsp;
+
+fn main() -> i32 {
+    println("--- Rad Language Server Protocol Engine ---");
+
+    // 1. Initialize LSP Engine
+    var lsp = LspEngine::new();
+    let init_res = lsp.initialize();
+    let init_len = init_res.len();
+    println(f"LSP initialize response generated: {init_len} bytes");
+
+    // 2. Incremental Document Synchronization
+    let doc_uri = "file:///home/user/project/src/main.rad";
+    let code_v1 = "fn calculate(x: i64) -> i64 { return x * 2; }\nfn main() { let r = calculate(21); }";
+    lsp.sync_document(doc_uri, 1, code_v1);
+    let doc_count = lsp.documents.len;
+    println(f"LSP synchronized documents tracked: {doc_count}");
+
+    // 3. Hover Type Documentation
+    let hover_fn = lsp.query_hover("fn");
+    let has_fn_doc = hover_fn.contents.len() > 0usize;
+    var h_str = "MISSING";
+    if has_fn_doc { h_str = "FOUND"; }
+    println(f"LSP hover query for `fn`: {h_str}");
+
+    let hover_defer = lsp.query_hover("defer");
+    let has_defer_doc = hover_defer.contents.len() > 0usize;
+    var d_str = "MISSING";
+    if has_defer_doc { d_str = "FOUND"; }
+    println(f"LSP hover query for `defer`: {d_str}");
+
+    // 4. Go-To-Definition Across Modules
+    let def_loc = lsp.query_definition(doc_uri, "calculate");
+    let def_line = def_loc.range.start.line;
+    println(f"LSP definition target line: {def_line}");
+
+    // 5. Code Auto-Completion
+    let completions = lsp.query_completion("pri");
+    let comp_count = completions.len;
+    println(f"LSP completion items returned: {comp_count}");
+
+    // 6. Rename Refactoring (WorkspaceEdit)
+    let rename_edit = lsp.rename_symbol(doc_uri, "calculate", "compute_double");
+    let edit_count = rename_edit.edits.len;
+    let new_ident = rename_edit.edits.ptr[0].new_text.as_ptr() as str;
+    println(f"LSP rename edits generated: {edit_count} (new identifier: {new_ident})");
+
+    // 7. Close document
+    lsp.close_document(doc_uri);
+    let remaining = lsp.documents.len;
+    println(f"LSP remaining documents after close: {remaining}");
+
+    println("LSP engine verified successfully.");
+    return 0;
+}

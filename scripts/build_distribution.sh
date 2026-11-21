@@ -158,33 +158,35 @@ cp -r "$SYSROOT_DIR/lib"/* "$DIST_ROOT/lib/targets/$TARGET_TRIPLE/lib/"
 mkdir -p "$DIST_ROOT/lib/rad"
 cp -r "$ROOT_DIR/lib/rad"/* "$DIST_ROOT/lib/rad/"
 
-# Ecosystem packages
-mkdir -p "$DIST_ROOT/packages"
-RAD_LIB_DIR=""
+# Ecosystem packages into lib/rad
 if [ -d "$ROOT_DIR/../rad-lib/packages" ]; then
     RAD_LIB_DIR="$ROOT_DIR/../rad-lib/packages"
 elif [ -d "$HOME/Projects/rad-lib/packages" ]; then
     RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
 fi
 if [ -n "$RAD_LIB_DIR" ]; then
-    for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml; do
+    for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml rad-gui rad-sound; do
         if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
-            cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$DIST_ROOT/packages/$pkg"
+            cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$DIST_ROOT/lib/rad/$pkg"
         fi
     done
-    ln -sfn rad-tui "$DIST_ROOT/packages/tui" 2>/dev/null || true
-    ln -sfn rad-json "$DIST_ROOT/packages/json" 2>/dev/null || true
-    ln -sfn rad-http "$DIST_ROOT/packages/http" 2>/dev/null || true
-    ln -sfn rad-args "$DIST_ROOT/packages/args" 2>/dev/null || true
-    ln -sfn rad-test "$DIST_ROOT/packages/test" 2>/dev/null || true
-    ln -sfn rad-math "$DIST_ROOT/packages/math" 2>/dev/null || true
-    ln -sfn rad-log "$DIST_ROOT/packages/log" 2>/dev/null || true
-    ln -sfn rad-kv "$DIST_ROOT/packages/kv" 2>/dev/null || true
-    ln -sfn rad-sqlite "$DIST_ROOT/packages/sqlite" 2>/dev/null || true
-    ln -sfn rad-gfx "$DIST_ROOT/packages/gfx" 2>/dev/null || true
-    ln -sfn rad-toml "$DIST_ROOT/packages/toml" 2>/dev/null || true
-    ln -sfn rad-yaml "$DIST_ROOT/packages/yaml" 2>/dev/null || true
+    ln -sfn rad-tui "$DIST_ROOT/lib/rad/tui" 2>/dev/null || true
+    ln -sfn rad-json "$DIST_ROOT/lib/rad/json" 2>/dev/null || true
+    ln -sfn rad-http "$DIST_ROOT/lib/rad/http" 2>/dev/null || true
+    ln -sfn rad-args "$DIST_ROOT/lib/rad/args" 2>/dev/null || true
+    ln -sfn rad-test "$DIST_ROOT/lib/rad/test" 2>/dev/null || true
+    ln -sfn rad-math "$DIST_ROOT/lib/rad/math" 2>/dev/null || true
+    ln -sfn rad-log "$DIST_ROOT/lib/rad/log" 2>/dev/null || true
+    ln -sfn rad-kv "$DIST_ROOT/lib/rad/kv" 2>/dev/null || true
+    ln -sfn rad-sqlite "$DIST_ROOT/lib/rad/sqlite" 2>/dev/null || true
+    ln -sfn rad-gfx "$DIST_ROOT/lib/rad/gfx" 2>/dev/null || true
+    ln -sfn rad-gui "$DIST_ROOT/lib/rad/gui" 2>/dev/null || true
+    ln -sfn rad-sound "$DIST_ROOT/lib/rad/sound" 2>/dev/null || true
+    ln -sfn rad-toml "$DIST_ROOT/lib/rad/toml" 2>/dev/null || true
+    ln -sfn rad-yaml "$DIST_ROOT/lib/rad/yaml" 2>/dev/null || true
 fi
+# Compatibility symlink: packages -> lib/rad
+ln -sfn lib/rad "$DIST_ROOT/packages" 2>/dev/null || true
 
 # Documentation & top-level files
 cp -f "$ROOT_DIR/README.md" "$DIST_ROOT/" 2>/dev/null || true

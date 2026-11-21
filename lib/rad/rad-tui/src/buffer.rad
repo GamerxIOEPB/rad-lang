@@ -1,0 +1,240 @@
+// ==============================================================================
+// rad-tui — buffer.rad
+// 2D Character and Style Grid with UTF-8 and Differential Cell Matrices.
+// ==============================================================================
+
+import style;
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw u8);
+}
+
+pub struct Cell {
+    pub b0: u8,
+    pub b1: u8,
+    pub b2: u8,
+    pub b3: u8,
+    pub char_len: u8,
+    pub style: Style,
+}
+
+impl Cell {
+    pub fn empty() -> Cell {
+        return Cell {
+            b0: 32u8, // ' '
+            b1: 0u8,
+            b2: 0u8,
+            b3: 0u8,
+            char_len: 1u8,
+            style: Style.default(),
+        };
+    }
+}
+
+pub struct Buffer {
+    pub width: i32,
+    pub height: i32,
+    pub cells: *raw var u8,
+}
+
+impl Buffer {
+    pub fn new(w: i32, h: i32) -> Buffer {
+        var width = w;
+        var height = h;
+        if width <= 0 { width = 80; }
+        if height <= 0 { height = 24; }
+
+        let total = (width * height) as usize;
+        let bytes = total * 16usize;
+        let buf: *raw var u8 = malloc(bytes);
+
+        var i = 0usize;
+        while i < total {
+            let off = i * 16usize;
+            buf[off] = 32u8; // space
+            buf[off + 1usize] = 0u8;
+            buf[off + 2usize] = 0u8;
+            buf[off + 3usize] = 0u8;
+            buf[off + 4usize] = 1u8; // len = 1
+            // style
+            buf[off + 5usize] = COLOR_RESET as u8;
+            buf[off + 6usize] = 0u8;
+            buf[off + 7usize] = 0u8;
+            buf[off + 8usize] = 0u8;
+            buf[off + 9usize] = COLOR_RESET as u8;
+            buf[off + 10usize] = 0u8;
+            buf[off + 11usize] = 0u8;
+            buf[off + 12usize] = 0u8;
+            buf[off + 13usize] = 0u8;
+            buf[off + 14usize] = 0u8;
+            buf[off + 15usize] = 0u8;
+            i = i + 1usize;
+        }
+
+        return Buffer {
+            width: width,
+            height: height,
+            cells: buf,
+        };
+    }
+
+    pub fn set_char(var self, x: i32, y: i32, ch: u8, s: Style) {
+        if x < 0 || x >= self.width || y < 0 || y >= self.height {
+            return;
+        }
+        let idx = (y * self.width + x) as usize;
+        let off = idx * 16usize;
+        let buf: *raw var u8 = self.cells;
+
+        buf[off] = ch;
+        buf[off + 1usize] = 0u8;
+        buf[off + 2usize] = 0u8;
+        buf[off + 3usize] = 0u8;
+        buf[off + 4usize] = 1u8;
+
+        buf[off + 5usize] = s.fg.tag as u8;
+        buf[off + 6usize] = s.fg.r;
+        buf[off + 7usize] = s.fg.g;
+        buf[off + 8usize] = s.fg.b;
+
+        buf[off + 9usize] = s.bg.tag as u8;
+        buf[off + 10usize] = s.bg.r;
+        buf[off + 11usize] = s.bg.g;
+        buf[off + 12usize] = s.bg.b;
+
+        buf[off + 13usize] = s.modifiers as u8;
+    }
+
+    pub fn set_glyph(var self, x: i32, y: i32, glyph: str, s: Style) {
+        if x < 0 || x >= self.width || y < 0 || y >= self.height {
+            return;
+        }
+        let gp = glyph as *raw u8;
+        if gp[0usize] == 0u8 {
+            return;
+        }
+
+        var clen = 1u8;
+        let b0 = gp[0usize];
+        if (b0 & 240u8) == 240u8 { clen = 4u8; }
+        else if (b0 & 224u8) == 224u8 { clen = 3u8; }
+        else if (b0 & 192u8) == 192u8 { clen = 2u8; }
+
+        let idx = (y * self.width + x) as usize;
+        let off = idx * 16usize;
+        let buf: *raw var u8 = self.cells;
+
+        buf[off] = b0;
+        if clen > 1u8 { buf[off + 1usize] = gp[1usize]; } else { buf[off + 1usize] = 0u8; }
+        if clen > 2u8 { buf[off + 2usize] = gp[2usize]; } else { buf[off + 2usize] = 0u8; }
+        if clen > 3u8 { buf[off + 3usize] = gp[3usize]; } else { buf[off + 3usize] = 0u8; }
+        buf[off + 4usize] = clen;
+
+        buf[off + 5usize] = s.fg.tag as u8;
+        buf[off + 6usize] = s.fg.r;
+        buf[off + 7usize] = s.fg.g;
+        buf[off + 8usize] = s.fg.b;
+
+        buf[off + 9usize] = s.bg.tag as u8;
+        buf[off + 10usize] = s.bg.r;
+        buf[off + 11usize] = s.bg.g;
+        buf[off + 12usize] = s.bg.b;
+
+        buf[off + 13usize] = s.modifiers as u8;
+    }
+
+    pub fn set_string(var self, start_x: i32, y: i32, text: str, s: Style) {
+        if y < 0 || y >= self.height {
+            return;
+        }
+        let p = text as *raw u8;
+        var i = 0usize;
+        var cur_x = start_x;
+
+        while p[i] != 0u8 && cur_x < self.width {
+            let b0 = p[i];
+            var clen = 1usize;
+            if (b0 & 240u8) == 240u8 { clen = 4usize; }
+            else if (b0 & 224u8) == 224u8 { clen = 3usize; }
+            else if (b0 & 192u8) == 192u8 { clen = 2usize; }
+
+            if cur_x >= 0 {
+                let idx = (y * self.width + cur_x) as usize;
+                let off = idx * 16usize;
+                let buf: *raw var u8 = self.cells;
+
+                buf[off] = b0;
+                if clen > 1usize { buf[off + 1usize] = p[i + 1usize]; } else { buf[off + 1usize] = 0u8; }
+                if clen > 2usize { buf[off + 2usize] = p[i + 2usize]; } else { buf[off + 2usize] = 0u8; }
+                if clen > 3usize { buf[off + 3usize] = p[i + 3usize]; } else { buf[off + 3usize] = 0u8; }
+                buf[off + 4usize] = clen as u8;
+
+                buf[off + 5usize] = s.fg.tag as u8;
+                buf[off + 6usize] = s.fg.r;
+                buf[off + 7usize] = s.fg.g;
+                buf[off + 8usize] = s.fg.b;
+
+                buf[off + 9usize] = s.bg.tag as u8;
+                buf[off + 10usize] = s.bg.r;
+                buf[off + 11usize] = s.bg.g;
+                buf[off + 12usize] = s.bg.b;
+
+                buf[off + 13usize] = s.modifiers as u8;
+            }
+
+            cur_x = cur_x + 1;
+            i = i + clen;
+        }
+    }
+
+    pub fn clear(var self, s: Style) {
+        let total = (self.width * self.height) as usize;
+        let buf: *raw var u8 = self.cells;
+        var i = 0usize;
+        while i < total {
+            let off = i * 16usize;
+            buf[off] = 32u8; // space
+            buf[off + 1usize] = 0u8;
+            buf[off + 2usize] = 0u8;
+            buf[off + 3usize] = 0u8;
+            buf[off + 4usize] = 1u8;
+
+            buf[off + 5usize] = s.fg.tag as u8;
+            buf[off + 6usize] = s.fg.r;
+            buf[off + 7usize] = s.fg.g;
+            buf[off + 8usize] = s.fg.b;
+
+            buf[off + 9usize] = s.bg.tag as u8;
+            buf[off + 10usize] = s.bg.r;
+            buf[off + 11usize] = s.bg.g;
+            buf[off + 12usize] = s.bg.b;
+
+            buf[off + 13usize] = s.modifiers as u8;
+            i = i + 1usize;
+        }
+    }
+
+    pub fn fill_rect(var self, rx: i32, ry: i32, rw: i32, rh: i32, ch: u8, s: Style) {
+        var cy = ry;
+        while cy < ry + rh {
+            if cy >= 0 && cy < self.height {
+                var cx = rx;
+                while cx < rx + rw {
+                    if cx >= 0 && cx < self.width {
+                        self.set_char(cx, cy, ch, s);
+                    }
+                    cx = cx + 1;
+                }
+            }
+            cy = cy + 1;
+        }
+    }
+
+    pub fn destroy(var self) {
+        if (self.cells as usize) != 0usize {
+            free(self.cells as *raw u8);
+            self.cells = 0usize as *raw var u8;
+        }
+    }
+}

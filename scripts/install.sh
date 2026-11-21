@@ -310,8 +310,8 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         cp -r "$LOCAL_REPO/lib/targets"/* "$STAGE_DIR/lib/targets/"
     fi
 
-    log_step "Staging Rad ecosystem packages..."
-    mkdir -p "$STAGE_DIR/packages"
+    log_step "Staging Rad ecosystem packages into lib/rad..."
+    mkdir -p "$STAGE_DIR/lib/rad"
     RAD_LIB_DIR=""
     if [ -d "$LOCAL_REPO/../rad-lib/packages" ]; then
         RAD_LIB_DIR="$LOCAL_REPO/../rad-lib/packages"
@@ -319,24 +319,28 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
     fi
     if [ -n "$RAD_LIB_DIR" ]; then
-        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml; do
+        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-gui rad-sound rad-toml rad-yaml; do
             if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
-                cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$STAGE_DIR/packages/$pkg"
+                cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$STAGE_DIR/lib/rad/$pkg"
             fi
         done
-        ln -sfn rad-tui "$STAGE_DIR/packages/tui" 2>/dev/null || true
-        ln -sfn rad-json "$STAGE_DIR/packages/json" 2>/dev/null || true
-        ln -sfn rad-http "$STAGE_DIR/packages/http" 2>/dev/null || true
-        ln -sfn rad-args "$STAGE_DIR/packages/args" 2>/dev/null || true
-        ln -sfn rad-test "$STAGE_DIR/packages/test" 2>/dev/null || true
-        ln -sfn rad-math "$STAGE_DIR/packages/math" 2>/dev/null || true
-        ln -sfn rad-log "$STAGE_DIR/packages/log" 2>/dev/null || true
-        ln -sfn rad-kv "$STAGE_DIR/packages/kv" 2>/dev/null || true
-        ln -sfn rad-sqlite "$STAGE_DIR/packages/sqlite" 2>/dev/null || true
-        ln -sfn rad-gfx "$STAGE_DIR/packages/gfx" 2>/dev/null || true
-        ln -sfn rad-toml "$STAGE_DIR/packages/toml" 2>/dev/null || true
-        ln -sfn rad-yaml "$STAGE_DIR/packages/yaml" 2>/dev/null || true
+        ln -sfn rad-tui "$STAGE_DIR/lib/rad/tui" 2>/dev/null || true
+        ln -sfn rad-json "$STAGE_DIR/lib/rad/json" 2>/dev/null || true
+        ln -sfn rad-http "$STAGE_DIR/lib/rad/http" 2>/dev/null || true
+        ln -sfn rad-args "$STAGE_DIR/lib/rad/args" 2>/dev/null || true
+        ln -sfn rad-test "$STAGE_DIR/lib/rad/test" 2>/dev/null || true
+        ln -sfn rad-math "$STAGE_DIR/lib/rad/math" 2>/dev/null || true
+        ln -sfn rad-log "$STAGE_DIR/lib/rad/log" 2>/dev/null || true
+        ln -sfn rad-kv "$STAGE_DIR/lib/rad/kv" 2>/dev/null || true
+        ln -sfn rad-sqlite "$STAGE_DIR/lib/rad/sqlite" 2>/dev/null || true
+        ln -sfn rad-gfx "$STAGE_DIR/lib/rad/gfx" 2>/dev/null || true
+        ln -sfn rad-gui "$STAGE_DIR/lib/rad/gui" 2>/dev/null || true
+        ln -sfn rad-sound "$STAGE_DIR/lib/rad/sound" 2>/dev/null || true
+        ln -sfn rad-toml "$STAGE_DIR/lib/rad/toml" 2>/dev/null || true
+        ln -sfn rad-yaml "$STAGE_DIR/lib/rad/yaml" 2>/dev/null || true
     fi
+    # Maintain full backwards compatibility: packages -> lib/rad symlink
+    ln -sfn lib/rad "$STAGE_DIR/packages" 2>/dev/null || true
 
     # Preserve metadata & licenses
     if [ -d "$LOCAL_REPO/share/rad" ]; then
@@ -499,17 +503,17 @@ fi
 
 if mv "$STAGE_DIR" "$RAD_HOME"; then
     if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
-        if [ -d "$BACKUP_DIR/packages" ]; then
-            mkdir -p "$RAD_HOME/packages"
+        if [ -d "$BACKUP_DIR/packages" ] && [ ! -L "$BACKUP_DIR/packages" ]; then
             for item in "$BACKUP_DIR/packages"/*; do
                 if [ -e "$item" ] || [ -L "$item" ]; then
                     bname="$(basename "$item")"
-                    if [ ! -e "$RAD_HOME/packages/$bname" ] && [ ! -L "$RAD_HOME/packages/$bname" ]; then
-                        cp -rf "$item" "$RAD_HOME/packages/" 2>/dev/null || true
+                    if [ ! -e "$RAD_HOME/lib/rad/$bname" ] && [ ! -L "$RAD_HOME/lib/rad/$bname" ]; then
+                        cp -rf "$item" "$RAD_HOME/lib/rad/" 2>/dev/null || true
                     fi
                 fi
             done
         fi
+        ln -sfn lib/rad "$RAD_HOME/packages" 2>/dev/null || true
         rm -rf "$BACKUP_DIR"
     fi
     log_success "Installed Rad toolchain to $RAD_HOME"

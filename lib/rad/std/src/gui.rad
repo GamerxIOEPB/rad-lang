@@ -127,6 +127,17 @@ impl WindowEvent {
         };
     }
 
+    pub fn mouse_up(x: f32, y: f32) -> WindowEvent {
+        return WindowEvent {
+            event_type: WINDOW_EVENT_MOUSE_UP,
+            x: x,
+            y: y,
+            key_code: 0u32,
+            width: 0.0,
+            height: 0.0,
+        };
+    }
+
     pub fn resize(w: f32, h: f32) -> WindowEvent {
         return WindowEvent {
             event_type: WINDOW_EVENT_RESIZE,
@@ -135,6 +146,105 @@ impl WindowEvent {
             key_code: 0u32,
             width: w,
             height: h,
+        };
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Built-in Unified UI Themes (Cyberpunk, Slate Modern, Matrix Emerald, Light)
+// ------------------------------------------------------------------------------
+
+pub struct UiTheme {
+    pub name: str,
+    pub bg: u32,
+    pub panel_bg: u32,
+    pub card_bg: u32,
+    pub card_border: u32,
+    pub text_primary: u32,
+    pub text_secondary: u32,
+    pub text_accent: u32,
+    pub btn_bg: u32,
+    pub btn_hover: u32,
+    pub btn_active: u32,
+    pub accent_glow: u32,
+    pub success: u32,
+    pub danger: u32,
+}
+
+impl UiTheme {
+    pub fn dark() -> UiTheme {
+        return UiTheme {
+            name: "Slate Modern",
+            bg: 0x121418u32,
+            panel_bg: 0x1B1E24u32,
+            card_bg: 0x242832u32,
+            card_border: 0x363D4Du32,
+            text_primary: 0xF0F3F8u32,
+            text_secondary: 0x8C96A8u32,
+            text_accent: 0x4D96FFu32,
+            btn_bg: 0x2F3543u32,
+            btn_hover: 0x414A5Du32,
+            btn_active: 0x4D96FFu32,
+            accent_glow: 0x6BCB77u32,
+            success: 0x2ECC71u32,
+            danger: 0xE74C3Cu32,
+        };
+    }
+
+    pub fn cyberpunk() -> UiTheme {
+        return UiTheme {
+            name: "Cyberpunk Neon",
+            bg: 0x0C0D14u32,
+            panel_bg: 0x141724u32,
+            card_bg: 0x1C2033u32,
+            card_border: 0x2E3554u32,
+            text_primary: 0xFFFFFFu32,
+            text_secondary: 0x8291B0u32,
+            text_accent: 0x00E5FFu32,
+            btn_bg: 0x252C48u32,
+            btn_hover: 0x364068u32,
+            btn_active: 0x00E5FFu32,
+            accent_glow: 0xFF007Fu32,
+            success: 0x00FF88u32,
+            danger: 0xFF0055u32,
+        };
+    }
+
+    pub fn emerald() -> UiTheme {
+        return UiTheme {
+            name: "Matrix Emerald",
+            bg: 0x040D07u32,
+            panel_bg: 0x091C10u32,
+            card_bg: 0x0E2B18u32,
+            card_border: 0x174929u32,
+            text_primary: 0xE2FFE9u32,
+            text_secondary: 0x57A36Eu32,
+            text_accent: 0x00FF66u32,
+            btn_bg: 0x123B20u32,
+            btn_hover: 0x1C5C33u32,
+            btn_active: 0x00FF66u32,
+            accent_glow: 0x00FF66u32,
+            success: 0x00FF66u32,
+            danger: 0xFF4444u32,
+        };
+    }
+
+    pub fn light() -> UiTheme {
+        return UiTheme {
+            name: "Pure Light",
+            bg: 0xF5F7FAu32,
+            panel_bg: 0xFFFFFFu32,
+            card_bg: 0xEDF1F7u32,
+            card_border: 0xD0D7DEu32,
+            text_primary: 0x1F2328u32,
+            text_secondary: 0x656D76u32,
+            text_accent: 0x0969DAu32,
+            btn_bg: 0xEAEFF5u32,
+            btn_hover: 0xD8E2ECu32,
+            btn_active: 0x0969DAu32,
+            accent_glow: 0x1A7F37u32,
+            success: 0x1A7F37u32,
+            danger: 0xCF222Eu32,
         };
     }
 }
@@ -207,6 +317,9 @@ pub struct WaylandBackend {
     pub mouse_y: f32,
     pub mouse_down: bool,
     pub pointer_bound: bool,
+    pub keyboard_bound: bool,
+    pub last_key: u32,
+    pub key_down: bool,
     pub read_buf: *raw var u8,
     pub read_buf_cap: usize,
 }
@@ -397,6 +510,7 @@ impl WaylandBackend {
                 stride: width * 4i32, buf_size: 0, pixels: 0usize as *raw var u32,
                 configured: false, is_open: false, mouse_x: 0.0, mouse_y: 0.0,
                 mouse_down: false, pointer_bound: false,
+                keyboard_bound: false, last_key: 0u32, key_down: false,
                 read_buf: 0usize as *raw var u8, read_buf_cap: 0usize,
             };
         }
@@ -466,6 +580,7 @@ impl WaylandBackend {
                 stride: width * 4i32, buf_size: 0, pixels: 0usize as *raw var u32,
                 configured: false, is_open: false, mouse_x: 0.0, mouse_y: 0.0,
                 mouse_down: false, pointer_bound: false,
+                keyboard_bound: false, last_key: 0u32, key_down: false,
                 read_buf: 0usize as *raw var u8, read_buf_cap: 0usize,
             };
         }
@@ -473,6 +588,8 @@ impl WaylandBackend {
         // Bind globals: 4=compositor, 5=shm, 6=seat, 7=wm_base
         wayland_send_bind(fd, compositor_id, "wl_compositor", 4u32, 4u32);
         wayland_send_bind(fd, shm_id, "wl_shm", 1u32, 5u32);
+        var pointer_bound = false;
+        var keyboard_bound = false;
         if seat_id != 0u32 {
             wayland_send_bind(fd, seat_id, "wl_seat", 7u32, 6u32);
         }
@@ -551,6 +668,25 @@ impl WaylandBackend {
                     let size = gui_read_u16(read_buf, offset + 6usize) as usize;
                     if size < 8usize || offset + size > n as usize { break; }
 
+                    if obj == 6u32 && opcode == 0u16 {
+                        let caps = gui_read_u32(read_buf, offset + 8usize);
+                        if (caps & 1u32) != 0u32 && !pointer_bound {
+                            let p_ptr = malloc(4usize);
+                            let p_ptr32 = p_ptr as *raw var u32;
+                            p_ptr32[0] = 13u32; // pointer id 13
+                            let _ = wayland_send_packet(fd, 6u32, 0u16, p_ptr, 4usize);
+                            free(p_ptr);
+                            pointer_bound = true;
+                        }
+                        if (caps & 2u32) != 0u32 && !keyboard_bound {
+                            let p_kbd = malloc(4usize);
+                            let p_kbd32 = p_kbd as *raw var u32;
+                            p_kbd32[0] = 14u32; // keyboard id 14
+                            let _ = wayland_send_packet(fd, 6u32, 1u16, p_kbd, 4usize);
+                            free(p_kbd);
+                            keyboard_bound = true;
+                        }
+                    }
                     if obj == 7u32 && opcode == 0u16 {
                         let serial = gui_read_u32(read_buf, offset + 8usize);
                         let p_pong = malloc(4usize);
@@ -593,7 +729,8 @@ impl WaylandBackend {
             sock_fd: fd, shm_fd: shm_fd, width: width, height: height,
             stride: stride, buf_size: buf_size, pixels: pixels,
             configured: configured, is_open: true, mouse_x: 0.0, mouse_y: 0.0,
-            mouse_down: false, pointer_bound: false,
+            mouse_down: false, pointer_bound: pointer_bound,
+            keyboard_bound: keyboard_bound, last_key: 0u32, key_down: false,
             read_buf: read_buf, read_buf_cap: read_buf_cap,
         };
     }
@@ -663,6 +800,14 @@ impl WaylandBackend {
                         free(p_ptr);
                         self.pointer_bound = true;
                     }
+                    if (caps & 2u32) != 0u32 && !self.keyboard_bound {
+                        let p_kbd = malloc(4usize);
+                        let p_kbd32 = p_kbd as *raw var u32;
+                        p_kbd32[0] = 14u32; // keyboard id 14
+                        let _ = wayland_send_packet(self.sock_fd, 6u32, 1u16, p_kbd, 4usize);
+                        free(p_kbd);
+                        self.keyboard_bound = true;
+                    }
                 }
                 if obj == 13u32 {
                     if opcode == 0u16 {
@@ -678,20 +823,46 @@ impl WaylandBackend {
                         self.mouse_x = sx; self.mouse_y = sy;
                         events.push(WindowEvent::mouse_move(sx, sy));
                     } else if opcode == 3u16 {
-                        // pointer button
+                        // pointer button: [serial: u32, time: u32, button: u32, state: u32]
                         let btn = gui_read_u32(self.read_buf, offset + 16usize);
                         let state = gui_read_u32(self.read_buf, offset + 20usize);
-                        if btn == 272u32 {
-                            if state == 1u32 {
-                                self.mouse_down = true;
-                                events.push(WindowEvent::mouse_down(self.mouse_x, self.mouse_y));
-                            } else {
-                                self.mouse_down = false;
-                                events.push(WindowEvent {
-                                    event_type: WINDOW_EVENT_MOUSE_UP,
-                                    x: self.mouse_x, y: self.mouse_y, key_code: btn, width: 0.0, height: 0.0,
-                                });
-                            }
+                        if state == 1u32 {
+                            self.mouse_down = true;
+                            events.push(WindowEvent {
+                                event_type: WINDOW_EVENT_MOUSE_DOWN,
+                                x: self.mouse_x, y: self.mouse_y, key_code: btn, width: 0.0, height: 0.0,
+                            });
+                        } else {
+                            self.mouse_down = false;
+                            events.push(WindowEvent {
+                                event_type: WINDOW_EVENT_MOUSE_UP,
+                                x: self.mouse_x, y: self.mouse_y, key_code: btn, width: 0.0, height: 0.0,
+                            });
+                        }
+                    }
+                }
+                if obj == 14u32 {
+                    if opcode == 3u16 {
+                        // key: [serial: u32, time: u32, key: u32, state: u32]
+                        let key = gui_read_u32(self.read_buf, offset + 16usize);
+                        let state = gui_read_u32(self.read_buf, offset + 20usize);
+                        self.last_key = key;
+                        if state == 1u32 {
+                            self.key_down = true;
+                            events.push(WindowEvent {
+                                event_type: WINDOW_EVENT_KEY_DOWN,
+                                x: self.mouse_x, y: self.mouse_y,
+                                key_code: key,
+                                width: 0.0, height: 0.0,
+                            });
+                        } else {
+                            self.key_down = false;
+                            events.push(WindowEvent {
+                                event_type: WINDOW_EVENT_KEY_UP,
+                                x: self.mouse_x, y: self.mouse_y,
+                                key_code: key,
+                                width: 0.0, height: 0.0,
+                            });
                         }
                     }
                 }
@@ -726,7 +897,7 @@ impl WaylandBackend {
 
     pub fn destroy(var self) {
         if self.sock_fd >= 0 {
-            let _ = syscall1(11i64, self.pixels as i64); // munmap
+            let _ = syscall2(11i64, self.pixels as i64, self.buf_size as i64); // munmap(addr, len)
             let _ = syscall1(3i64, self.shm_fd as i64);
             let _ = syscall1(3i64, self.sock_fd as i64);
             self.sock_fd = -1;
@@ -1176,6 +1347,7 @@ impl Window {
                         stride: width * 4i32, buf_size: 0, pixels: 0usize as *raw var u32,
                         configured: false, is_open: false, mouse_x: 0.0, mouse_y: 0.0,
                         mouse_down: false, pointer_bound: false,
+                        keyboard_bound: false, last_key: 0u32, key_down: false,
                         read_buf: 0usize as *raw var u8, read_buf_cap: 0usize,
                     },
                     x11: x_backend,
@@ -1198,6 +1370,7 @@ impl Window {
                 stride: width * 4i32, buf_size: 0, pixels: 0usize as *raw var u32,
                 configured: false, is_open: false, mouse_x: 0.0, mouse_y: 0.0,
                 mouse_down: false, pointer_bound: false,
+                keyboard_bound: false, last_key: 0u32, key_down: false,
                 read_buf: 0usize as *raw var u8, read_buf_cap: 0usize,
             },
             x11: X11Backend {
@@ -1267,6 +1440,20 @@ impl Window {
             return self.wayland.mouse_down;
         } else if self.backend_type == WINDOW_BACKEND_X11 {
             return self.x11.mouse_down;
+        }
+        return false;
+    }
+
+    pub fn last_key(self) -> u32 {
+        if self.backend_type == WINDOW_BACKEND_WAYLAND {
+            return self.wayland.last_key;
+        }
+        return 0u32;
+    }
+
+    pub fn key_down(self) -> bool {
+        if self.backend_type == WINDOW_BACKEND_WAYLAND {
+            return self.wayland.key_down;
         }
         return false;
     }
@@ -1616,6 +1803,227 @@ impl Window {
         return true;
     }
 
+    // --------------------------------------------------------------------------
+    // Flexible & Resizable Immediate UI Elements
+    // --------------------------------------------------------------------------
+
+    pub fn is_mouse_in(self, x: i32, y: i32, w: i32, h: i32) -> bool {
+        let mx = self.mouse_x();
+        let my = self.mouse_y();
+        let x0 = x as f32;
+        let y0 = y as f32;
+        let x1 = (x + w) as f32;
+        let y1 = (y + h) as f32;
+        return mx >= x0 && mx <= x1 && my >= y0 && my <= y1;
+    }
+
+    pub fn is_clicked_in(self, ev: WindowEvent, x: i32, y: i32, w: i32, h: i32) -> bool {
+        if ev.event_type != WINDOW_EVENT_MOUSE_DOWN { return false; }
+        let mx = ev.x;
+        let my = ev.y;
+        let x0 = x as f32;
+        let y0 = y as f32;
+        let x1 = (x + w) as f32;
+        let y1 = (y + h) as f32;
+        return mx >= x0 && mx <= x1 && my >= y0 && my <= y1;
+    }
+
+    pub fn ui_panel(var self, x: i32, y: i32, w: i32, h: i32, title: str, theme: UiTheme) {
+        self.draw_rect_rounded(x, y, w, h, 8, theme.panel_bg);
+        self.draw_rect_outline(x, y, w, h, 1, theme.card_border);
+        if (title as usize) != 0usize && (title as *raw u8)[0] != 0u8 {
+            self.draw_text(x + 16, y + 16, title, theme.text_accent, 1);
+            self.draw_rect(x + 16, y + 38, w - 32, 1, theme.card_border);
+        }
+    }
+
+    pub fn ui_card(var self, x: i32, y: i32, w: i32, h: i32, theme: UiTheme) {
+        self.draw_rect_rounded(x, y, w, h, 6, theme.card_bg);
+        self.draw_rect_outline(x, y, w, h, 1, theme.card_border);
+    }
+
+    pub fn ui_button(var self, x: i32, y: i32, w: i32, h: i32, label: str, theme: UiTheme) -> bool {
+        let is_hover = self.is_mouse_in(x, y, w, h);
+        let is_down = is_hover && self.mouse_down();
+
+        var bg = theme.btn_bg;
+        var border = theme.card_border;
+        var text_col = theme.text_primary;
+
+        if is_down {
+            bg = theme.btn_active;
+            border = theme.accent_glow;
+            text_col = 0x000000u32;
+        } else if is_hover {
+            bg = theme.btn_hover;
+            border = theme.text_accent;
+        }
+
+        self.draw_rect_rounded(x, y, w, h, 6, bg);
+        self.draw_rect_outline(x, y, w, h, 1, border);
+
+        let tw = self.text_width(label, 1);
+        let tx = x + (w - tw) / 2;
+        let ty = y + (h - 16) / 2;
+        self.draw_text(tx, ty, label, text_col, 1);
+
+        return is_down;
+    }
+
+    pub fn ui_button_styled(var self, x: i32, y: i32, w: i32, h: i32, label: str, is_hover: bool, is_down: bool, theme: UiTheme) {
+        var bg = theme.btn_bg;
+        var border = theme.card_border;
+        var text_col = theme.text_primary;
+
+        if is_down {
+            bg = theme.btn_active;
+            border = theme.accent_glow;
+            text_col = 0x000000u32;
+        } else if is_hover {
+            bg = theme.btn_hover;
+            border = theme.text_accent;
+        }
+
+        self.draw_rect_rounded(x, y, w, h, 6, bg);
+        self.draw_rect_outline(x, y, w, h, 1, border);
+
+        let tw = self.text_width(label, 1);
+        let tx = x + (w - tw) / 2;
+        let ty = y + (h - 16) / 2;
+        self.draw_text(tx, ty, label, text_col, 1);
+    }
+
+    pub fn ui_slider(var self, x: i32, y: i32, w: i32, h: i32, value: f32, min_val: f32, max_val: f32, theme: UiTheme) -> f32 {
+        var cur_val = value;
+        if cur_val < min_val { cur_val = min_val; }
+        if cur_val > max_val { cur_val = max_val; }
+
+        let track_h = 6i32;
+        let track_y = y + (h - track_h) / 2;
+        let radius = 9i32;
+
+        let is_over = self.is_mouse_in(x - 6, y - 6, w + 12, h + 12);
+        if self.mouse_down() && is_over {
+            let mx = self.mouse_x();
+            var ratio = (mx - (x as f32)) / (w as f32);
+            if ratio < 0.0 { ratio = 0.0; }
+            if ratio > 1.0 { ratio = 1.0; }
+            cur_val = min_val + ratio * (max_val - min_val);
+        }
+
+        var progress = 0.0;
+        if max_val > min_val {
+            progress = (cur_val - min_val) / (max_val - min_val);
+        }
+        if progress < 0.0 { progress = 0.0; }
+        if progress > 1.0 { progress = 1.0; }
+
+        let fill_w = (progress * (w as f32)) as i32;
+
+        // Draw background track
+        self.draw_rect_rounded(x, track_y, w, track_h, 3, theme.card_bg);
+        self.draw_rect_outline(x, track_y, w, track_h, 1, theme.card_border);
+
+        // Draw filled progress
+        if fill_w > 0 {
+            self.draw_rect_rounded(x, track_y, fill_w, track_h, 3, theme.text_accent);
+        }
+
+        // Draw circular thumb handle
+        let thumb_cx = x + fill_w;
+        let thumb_cy = y + h / 2;
+        var thumb_col = theme.text_primary;
+        if is_over { thumb_col = theme.accent_glow; }
+        self.draw_circle(thumb_cx, thumb_cy, radius, thumb_col);
+        self.draw_circle(thumb_cx, thumb_cy, radius - 3, theme.panel_bg);
+
+        return cur_val;
+    }
+
+    pub fn ui_checkbox(var self, x: i32, y: i32, size: i32, label: str, checked: bool, theme: UiTheme) {
+        let is_hover = self.is_mouse_in(x, y, size + 10 + self.text_width(label, 1), size);
+
+        let box_bg = theme.card_bg;
+        var border = theme.card_border;
+        if is_hover {
+            border = theme.text_accent;
+        }
+
+        self.draw_rect_rounded(x, y, size, size, 4, box_bg);
+        self.draw_rect_outline(x, y, size, size, 1, border);
+
+        if checked {
+            let pad = 4i32;
+            self.draw_rect_rounded(x + pad, y + pad, size - pad * 2, size - pad * 2, 2, theme.text_accent);
+        }
+
+        let label_x = x + size + 10;
+        let label_y = y + (size - 16) / 2;
+        var label_col = theme.text_primary;
+        if is_hover { label_col = theme.text_accent; }
+        self.draw_text(label_x, label_y, label, label_col, 1);
+    }
+
+    pub fn ui_toggle(var self, x: i32, y: i32, w: i32, h: i32, active: bool, theme: UiTheme) {
+        let is_hover = self.is_mouse_in(x, y, w, h);
+
+        var track_bg = theme.card_bg;
+        var border_col = theme.card_border;
+        if active {
+            track_bg = theme.text_accent;
+            border_col = theme.accent_glow;
+        } else if is_hover {
+            border_col = theme.text_secondary;
+        }
+
+        let radius = h / 2;
+        self.draw_rect_rounded(x, y, w, h, radius, track_bg);
+        self.draw_rect_outline(x, y, w, h, 1, border_col);
+
+        let knob_r = radius - 3;
+        var knob_cx = x + radius;
+        if active {
+            knob_cx = x + w - radius;
+        }
+        let knob_cy = y + radius;
+        var knob_col = theme.text_primary;
+        if active { knob_col = 0x000000u32; }
+        self.draw_circle(knob_cx, knob_cy, knob_r, knob_col);
+    }
+
+    pub fn ui_progress_bar(var self, x: i32, y: i32, w: i32, h: i32, progress: f32, theme: UiTheme) {
+        var p = progress;
+        if p < 0.0 { p = 0.0; }
+        if p > 1.0 { p = 1.0; }
+
+        let r = h / 2;
+        self.draw_rect_rounded(x, y, w, h, r, theme.card_bg);
+        self.draw_rect_outline(x, y, w, h, 1, theme.card_border);
+
+        let fill_w = (p * (w as f32)) as i32;
+        if fill_w > 0 {
+            self.draw_rect_rounded(x, y, fill_w, h, r, theme.text_accent);
+        }
+    }
+
+    pub fn ui_badge(var self, x: i32, y: i32, text: str, bg_color: u32, text_color: u32) {
+        let tw = self.text_width(text, 1);
+        let bw = tw + 20;
+        let bh = 24i32;
+        self.draw_rect_rounded(x, y, bw, bh, 4, bg_color);
+        self.draw_text(x + 10, y + 4, text, text_color, 1);
+    }
+
+    pub fn ui_stat_box(var self, x: i32, y: i32, w: i32, h: i32, label: str, val: i64, unit: str, theme: UiTheme) {
+        self.ui_card(x, y, w, h, theme);
+        self.draw_text(x + 14, y + 12, label, theme.text_secondary, 1);
+        let val_w = self.i64_width(val, 2);
+        self.draw_i64(x + 14, y + 36, val, theme.text_accent, 2);
+        if (unit as usize) != 0usize && (unit as *raw u8)[0] != 0u8 {
+            self.draw_text(x + 14 + val_w + 6, y + 42, unit, theme.text_primary, 1);
+        }
+    }
+
     pub fn close(var self) {
         self.is_open_flag = false;
         if self.backend_type == WINDOW_BACKEND_WAYLAND {
@@ -1873,6 +2281,60 @@ impl LayoutBox {
         };
     }
 
+    pub fn row(w: f32, h: f32) -> LayoutBox {
+        return LayoutBox {
+            x: 0.0,
+            y: 0.0,
+            width: w,
+            height: h,
+            direction: FLEX_DIRECTION_ROW,
+            align_items: ALIGN_START,
+            justify_content: JUSTIFY_START,
+            padding_left: 0.0,
+            padding_top: 0.0,
+            padding_right: 0.0,
+            padding_bottom: 0.0,
+            flex_grow: 0.0,
+            children: Vec.new(),
+        };
+    }
+
+    pub fn column(w: f32, h: f32) -> LayoutBox {
+        return LayoutBox {
+            x: 0.0,
+            y: 0.0,
+            width: w,
+            height: h,
+            direction: FLEX_DIRECTION_COLUMN,
+            align_items: ALIGN_START,
+            justify_content: JUSTIFY_START,
+            padding_left: 0.0,
+            padding_top: 0.0,
+            padding_right: 0.0,
+            padding_bottom: 0.0,
+            flex_grow: 0.0,
+            children: Vec.new(),
+        };
+    }
+
+    pub fn flex_item(grow: f32) -> LayoutBox {
+        return LayoutBox {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            direction: FLEX_DIRECTION_ROW,
+            align_items: ALIGN_START,
+            justify_content: JUSTIFY_START,
+            padding_left: 0.0,
+            padding_top: 0.0,
+            padding_right: 0.0,
+            padding_bottom: 0.0,
+            flex_grow: grow,
+            children: Vec.new(),
+        };
+    }
+
     pub fn add_child(var self, child: LayoutBox) {
         self.children.push(child);
     }
@@ -1887,11 +2349,36 @@ impl LayoutBox {
         var cur_x = self.x + self.padding_left;
         var cur_y = self.y + self.padding_top;
 
+        // Calculate flexible sizing for responsive containers
+        var total_flex = 0.0;
+        var used_fixed_w = 0.0;
+        var used_fixed_h = 0.0;
+        var ci = 0usize;
+        while ci < self.children.len {
+            total_flex = total_flex + self.children.ptr[ci].flex_grow;
+            if self.children.ptr[ci].flex_grow <= 0.0 {
+                used_fixed_w = used_fixed_w + self.children.ptr[ci].width;
+                used_fixed_h = used_fixed_h + self.children.ptr[ci].height;
+            }
+            ci = ci + 1usize;
+        }
+
+        let remaining_w = avail_w - used_fixed_w;
+        let remaining_h = avail_h - used_fixed_h;
+
         if self.direction == FLEX_DIRECTION_ROW {
-            var ci = 0usize;
+            ci = 0usize;
             while ci < self.children.len {
-                let ch_w = self.children.ptr[ci].width;
-                let ch_h = self.children.ptr[ci].height;
+                var ch_w = self.children.ptr[ci].width;
+                if self.children.ptr[ci].flex_grow > 0.0 && total_flex > 0.0 && remaining_w > 0.0 {
+                    ch_w = remaining_w * (self.children.ptr[ci].flex_grow / total_flex);
+                    self.children.ptr[ci].width = ch_w;
+                }
+                var ch_h = self.children.ptr[ci].height;
+                if ch_h <= 0.0 {
+                    ch_h = avail_h;
+                    self.children.ptr[ci].height = ch_h;
+                }
 
                 var child_y = cur_y;
                 if self.align_items == ALIGN_CENTER {
@@ -1908,10 +2395,18 @@ impl LayoutBox {
                 ci = ci + 1usize;
             }
         } else {
-            var ci = 0usize;
+            ci = 0usize;
             while ci < self.children.len {
-                let ch_w = self.children.ptr[ci].width;
-                let ch_h = self.children.ptr[ci].height;
+                var ch_h = self.children.ptr[ci].height;
+                if self.children.ptr[ci].flex_grow > 0.0 && total_flex > 0.0 && remaining_h > 0.0 {
+                    ch_h = remaining_h * (self.children.ptr[ci].flex_grow / total_flex);
+                    self.children.ptr[ci].height = ch_h;
+                }
+                var ch_w = self.children.ptr[ci].width;
+                if ch_w <= 0.0 {
+                    ch_w = avail_w;
+                    self.children.ptr[ci].width = ch_w;
+                }
 
                 var child_x = cur_x;
                 if self.align_items == ALIGN_CENTER {
@@ -1938,6 +2433,10 @@ impl LayoutBox {
 pub const WIDGET_CONTAINER: u32 = 0u32;
 pub const WIDGET_BUTTON: u32    = 1u32;
 pub const WIDGET_LABEL: u32     = 2u32;
+pub const WIDGET_SLIDER: u32    = 3u32;
+pub const WIDGET_CHECKBOX: u32  = 4u32;
+pub const WIDGET_PROGRESS: u32  = 5u32;
+pub const WIDGET_TOGGLE: u32    = 6u32;
 
 pub struct UiWidget {
     pub id: usize,
@@ -1988,6 +2487,62 @@ impl UiWidget {
             layout: LayoutBox::new(w, h),
             bg_color: 0u32,
             text_color: 0x222222u32,
+            is_hovered: false,
+            is_pressed: false,
+            children: Vec.new(),
+        };
+    }
+
+    pub fn new_slider(id: usize, w: f32, h: f32) -> UiWidget {
+        return UiWidget {
+            id: id,
+            widget_type: WIDGET_SLIDER,
+            label: String.new(),
+            layout: LayoutBox::new(w, h),
+            bg_color: 0x222630u32,
+            text_color: 0x00E5FFu32,
+            is_hovered: false,
+            is_pressed: false,
+            children: Vec.new(),
+        };
+    }
+
+    pub fn new_checkbox(id: usize, text: str, w: f32, h: f32) -> UiWidget {
+        return UiWidget {
+            id: id,
+            widget_type: WIDGET_CHECKBOX,
+            label: String.from_str(text),
+            layout: LayoutBox::new(w, h),
+            bg_color: 0x222630u32,
+            text_color: 0xFFFFFFu32,
+            is_hovered: false,
+            is_pressed: false,
+            children: Vec.new(),
+        };
+    }
+
+    pub fn new_toggle(id: usize, w: f32, h: f32) -> UiWidget {
+        return UiWidget {
+            id: id,
+            widget_type: WIDGET_TOGGLE,
+            label: String.new(),
+            layout: LayoutBox::new(w, h),
+            bg_color: 0x222630u32,
+            text_color: 0x00E5FFu32,
+            is_hovered: false,
+            is_pressed: false,
+            children: Vec.new(),
+        };
+    }
+
+    pub fn new_progress_bar(id: usize, w: f32, h: f32) -> UiWidget {
+        return UiWidget {
+            id: id,
+            widget_type: WIDGET_PROGRESS,
+            label: String.new(),
+            layout: LayoutBox::new(w, h),
+            bg_color: 0x222630u32,
+            text_color: 0x00E5FFu32,
             is_hovered: false,
             is_pressed: false,
             children: Vec.new(),

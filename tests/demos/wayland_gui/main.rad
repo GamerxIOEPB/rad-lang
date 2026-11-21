@@ -3,85 +3,30 @@
 // 100% Pure Rad implementation with zero external C bridge files, zero
 // wayland-scanner, zero libwayland-client, zero libX11.
 // Automatically detects and supports Wayland and X11 display servers natively.
-// Features dynamic themes, flexbox layout, interactive widgets, pointer telemetry,
+// Features dynamic themes, flexbox layout, interactive widgets (buttons,
+// sliders, checkboxes, toggle switches, progress bars), pointer telemetry,
 // and hardware-independent software rasterizer.
 // ==============================================================================
 
 extern "C" {
     fn usleep(usec: u32) -> i32;
     fn getenv(name: str) -> *raw u8;
+    fn signal(sig: i32, handler: usize) -> usize;
 }
 
 import std/gui;
 
 // ------------------------------------------------------------------------------
-// Visual Themes
+// Visual Themes Helper
 // ------------------------------------------------------------------------------
 
-pub struct GuiTheme {
-    pub name: str,
-    pub bg: u32,
-    pub panel_bg: u32,
-    pub card_bg: u32,
-    pub card_border: u32,
-    pub text_primary: u32,
-    pub text_secondary: u32,
-    pub text_accent: u32,
-    pub btn_bg: u32,
-    pub btn_hover: u32,
-    pub btn_active: u32,
-    pub accent_glow: u32,
-}
-
-fn get_theme(idx: i32) -> GuiTheme {
+fn get_theme(idx: i32) -> UiTheme {
     if idx == 0 {
-        // Theme 0: Dark Cyberpunk
-        return GuiTheme {
-            name: "Cyberpunk Neon",
-            bg: 0x0C0D14u32,
-            panel_bg: 0x141724u32,
-            card_bg: 0x1C2033u32,
-            card_border: 0x2E3554u32,
-            text_primary: 0xFFFFFFu32,
-            text_secondary: 0x8291B0u32,
-            text_accent: 0x00E5FFu32,    // Neon Cyan
-            btn_bg: 0x252C48u32,
-            btn_hover: 0x364068u32,
-            btn_active: 0x00E5FFu32,
-            accent_glow: 0xFF007Fu32,   // Neon Magenta
-        };
+        return UiTheme::cyberpunk();
     } else if idx == 1 {
-        // Theme 1: Slate Modern Minimal
-        return GuiTheme {
-            name: "Slate Modern",
-            bg: 0x121418u32,
-            panel_bg: 0x1B1E24u32,
-            card_bg: 0x242832u32,
-            card_border: 0x363D4Du32,
-            text_primary: 0xF0F3F8u32,
-            text_secondary: 0x8C96A8u32,
-            text_accent: 0x4D96FFu32,    // Electric Blue
-            btn_bg: 0x2F3543u32,
-            btn_hover: 0x414A5Du32,
-            btn_active: 0x4D96FFu32,
-            accent_glow: 0x6BCB77u32,   // Emerald Glow
-        };
+        return UiTheme::dark();
     } else {
-        // Theme 2: Matrix Emerald Terminal
-        return GuiTheme {
-            name: "Matrix Emerald",
-            bg: 0x040D07u32,
-            panel_bg: 0x091C10u32,
-            card_bg: 0x0E2B18u32,
-            card_border: 0x174929u32,
-            text_primary: 0xE2FFE9u32,
-            text_secondary: 0x57A36Eu32,
-            text_accent: 0x00FF66u32,    // Matrix Green
-            btn_bg: 0x123B20u32,
-            btn_hover: 0x1C5C33u32,
-            btn_active: 0x00FF66u32,
-            accent_glow: 0x00FF66u32,   // Matrix Glow
-        };
+        return UiTheme::emerald();
     }
 }
 
@@ -112,6 +57,8 @@ pub struct AppState {
     pub height: i32,
     pub counter: i64,
     pub auto_tick: bool,
+    pub turbo_mode: bool,
+    pub slider_speed: f32,
     pub theme_idx: i32,
     pub frame_count: i64,
     pub click_count: i64,
@@ -130,6 +77,8 @@ impl AppState {
             height: h,
             counter: 42i64,
             auto_tick: false,
+            turbo_mode: false,
+            slider_speed: 40.0,
             theme_idx: 0i32,
             frame_count: 0i64,
             click_count: 0i64,
@@ -146,24 +95,27 @@ impl AppState {
         let mx = self.mouse_x;
         let my = self.mouse_y;
 
-        // Button 1: Increment (+ Inc) [x=44, y=290, w=115, h=36]
-        // Button 2: Decrement (- Dec) [x=169, y=290, w=115, h=36]
-        // Button 3: Reset (0)         [x=44, y=336, w=240, h=36]
-        // Button 4: Auto-Tick         [x=44, y=382, w=240, h=36]
-        // Button 5: Theme Cycle       [x=44, y=124, w=240, h=36]
+        // Button 1: Increment (+ Inc) [x=44, y=260, w=115, h=34]
+        // Button 2: Decrement (- Dec) [x=169, y=260, w=115, h=34]
+        // Button 3: Reset (0)         [x=44, y=300, w=240, h=32]
+        // Button 4: Auto-Tick Toggle  [x=214, y=340, w=70, h=24]
+        // Button 5: Theme Cycle       [x=44, y=104, w=240, h=34]
         // Button 6: Close Window [X]  [x=870, y=12, w=36, h=32]
-        if point_in_rect(mx, my, 44, 290, 115, 36) {
+        // Button 7: Turbo Checkbox    [x=44, y=372, w=240, h=22]
+        if point_in_rect(mx, my, 44, 260, 115, 34) {
             self.hover_btn = 1i32;
-        } else if point_in_rect(mx, my, 169, 290, 115, 36) {
+        } else if point_in_rect(mx, my, 169, 260, 115, 34) {
             self.hover_btn = 2i32;
-        } else if point_in_rect(mx, my, 44, 336, 240, 36) {
+        } else if point_in_rect(mx, my, 44, 300, 240, 32) {
             self.hover_btn = 3i32;
-        } else if point_in_rect(mx, my, 44, 382, 240, 36) {
+        } else if point_in_rect(mx, my, 214, 340, 70, 24) {
             self.hover_btn = 4i32;
-        } else if point_in_rect(mx, my, 44, 124, 240, 36) {
+        } else if point_in_rect(mx, my, 44, 104, 240, 34) {
             self.hover_btn = 5i32;
         } else if point_in_rect(mx, my, 870, 12, 36, 32) {
             self.hover_btn = 6i32;
+        } else if point_in_rect(mx, my, 44, 372, 240, 22) {
+            self.hover_btn = 7i32;
         } else {
             self.hover_btn = 0i32;
         }
@@ -172,11 +124,15 @@ impl AppState {
     pub fn handle_click(var self, var win: Window) {
         self.click_count = self.click_count + 1i64;
         let btn = self.hover_btn;
+        var step = 1i64;
+        if self.turbo_mode {
+            step = 5i64;
+        }
 
         if btn == 1i32 {
-            self.counter = self.counter + 1i64;
+            self.counter = self.counter + step;
         } else if btn == 2i32 {
-            self.counter = self.counter - 1i64;
+            self.counter = self.counter - step;
         } else if btn == 3i32 {
             self.counter = 0i64;
         } else if btn == 4i32 {
@@ -185,40 +141,9 @@ impl AppState {
             self.theme_idx = (self.theme_idx + 1i32) % 3i32;
         } else if btn == 6i32 {
             win.close();
+        } else if btn == 7i32 {
+            self.turbo_mode = !self.turbo_mode;
         }
-    }
-
-    pub fn render_button(self, var win: Window, x: i32, y: i32, w: i32, h: i32, label: str, btn_id: i32, theme: GuiTheme) {
-        let is_hover = self.hover_btn == btn_id;
-        let is_down = is_hover && self.mouse_down;
-
-        var bg_col = theme.btn_bg;
-        if is_down {
-            bg_col = theme.btn_active;
-        } else if is_hover {
-            bg_col = theme.btn_hover;
-        }
-
-        // Draw rounded button base
-        win.draw_rect_rounded(x, y, w, h, 6, bg_col);
-
-        // Draw outline border
-        var border_col = theme.card_border;
-        if is_hover {
-            border_col = theme.text_accent;
-        }
-        win.draw_rect_outline(x, y, w, h, 1, border_col);
-
-        // Draw text label centered horizontally & vertically
-        let text_w = win.text_width(label, 1);
-        let text_x = x + (w - text_w) / 2;
-        let text_y = y + (h - 16) / 2;
-
-        var text_col = theme.text_primary;
-        if is_down {
-            text_col = 0x000000u32; // dark text when active highlighted
-        }
-        win.draw_text(text_x, text_y, label, text_col, 1);
     }
 
     pub fn render_frame(var self, var win: Window) {
@@ -248,17 +173,9 @@ impl AppState {
         if detected == WINDOW_BACKEND_X11 {
             badge_text = "X11-NATIVE";
         }
-        win.draw_rect_rounded(500, 14, 120, 28, 4, theme.card_bg);
-        win.draw_rect_outline(500, 14, 120, 28, 1, theme.card_border);
-        win.draw_text(510, 20, badge_text, theme.text_primary, 1);
-
-        win.draw_rect_rounded(630, 14, 110, 28, 4, theme.card_bg);
-        win.draw_rect_outline(630, 14, 110, 28, 1, theme.card_border);
-        win.draw_text(642, 20, "XRGB8888", theme.text_primary, 1);
-
-        win.draw_rect_rounded(750, 14, 100, 28, 4, theme.card_bg);
-        win.draw_rect_outline(750, 14, 100, 28, 1, theme.card_border);
-        win.draw_text(762, 20, "60 FPS", theme.text_accent, 1);
+        win.ui_badge(500, 14, badge_text, theme.card_bg, theme.text_primary);
+        win.ui_badge(630, 14, "XRGB8888", theme.card_bg, theme.text_primary);
+        win.ui_badge(750, 14, "60 FPS", theme.card_bg, theme.text_accent);
 
         // Close button [X]
         var close_bg = theme.btn_bg;
@@ -269,62 +186,73 @@ impl AppState {
         win.draw_text(882, 20, "X", 0xFFFFFFu32, 1);
 
         // 3. Left Control Panel (24, 76, 280, 550)
-        win.draw_rect_rounded(24, 76, 280, 550, 8, theme.panel_bg);
-        win.draw_rect_outline(24, 76, 280, 550, 1, theme.card_border);
-
-        win.draw_text(44, 96, "CONTROL PANEL", theme.text_accent, 1);
+        win.ui_panel(24, 76, 280, 550, "CONTROL PANEL", theme);
 
         // Theme Switcher Button
         let theme_label = theme_button_label(self.theme_idx);
-        self.render_button(win, 44, 124, 240, 36, theme_label, 5i32, theme);
+        let is_hover5 = self.hover_btn == 5i32;
+        let is_down5 = is_hover5 && self.mouse_down;
+        win.ui_button_styled(44, 104, 240, 34, theme_label, is_hover5, is_down5, theme);
 
-        // Section: Interactive Counter
-        win.draw_text(44, 184, "REACTIVE COUNTER", theme.text_secondary, 1);
-
-        // Counter Display Box
-        win.draw_rect_rounded(44, 208, 240, 68, 6, theme.card_bg);
-        win.draw_rect_outline(44, 208, 240, 68, 1, theme.card_border);
-
+        // Section: Reactive Counter
+        win.draw_text(44, 150, "REACTIVE COUNTER", theme.text_secondary, 1);
+        win.ui_card(44, 170, 240, 78, theme);
         let cnt_w = win.i64_width(self.counter, 3);
         let cnt_x = 44 + (240 - cnt_w) / 2;
-        win.draw_i64(cnt_x, 218, self.counter, theme.text_accent, 3);
+        win.draw_i64(cnt_x, 186, self.counter, theme.text_accent, 3);
 
         // Counter Buttons
-        self.render_button(win, 44, 290, 115, 36, "+ Inc", 1i32, theme);
-        self.render_button(win, 169, 290, 115, 36, "- Dec", 2i32, theme);
-        self.render_button(win, 44, 336, 240, 36, "Reset (0)", 3i32, theme);
+        let is_hover1 = self.hover_btn == 1i32;
+        let is_down1 = is_hover1 && self.mouse_down;
+        win.ui_button_styled(44, 260, 115, 34, "+ Inc", is_hover1, is_down1, theme);
 
-        var auto_label = "Auto-Tick: OFF";
-        if self.auto_tick {
-            auto_label = "Auto-Tick: ACTIVE [ON]";
-        }
-        self.render_button(win, 44, 382, 240, 36, auto_label, 4i32, theme);
+        let is_hover2 = self.hover_btn == 2i32;
+        let is_down2 = is_hover2 && self.mouse_down;
+        win.ui_button_styled(169, 260, 115, 34, "- Dec", is_hover2, is_down2, theme);
+
+        let is_hover3 = self.hover_btn == 3i32;
+        let is_down3 = is_hover3 && self.mouse_down;
+        win.ui_button_styled(44, 300, 240, 32, "Reset (0)", is_hover3, is_down3, theme);
+
+        // Toggle Switch for Auto-Tick
+        win.draw_text(44, 344, "Auto-Tick Loop", theme.text_primary, 1);
+        win.ui_toggle(214, 340, 70, 24, self.auto_tick, theme);
+
+        // Checkbox for Turbo Mode
+        var check_label = "Turbo Step (+1)";
+        if self.turbo_mode { check_label = "Turbo Step (+5)"; }
+        win.ui_checkbox(44, 372, 20, check_label, self.turbo_mode, theme);
+
+        // Interactive Slider for Wave Speed
+        win.draw_text(44, 404, "WAVE SPEED SLIDER", theme.text_secondary, 1);
+        self.slider_speed = win.ui_slider(44, 424, 240, 24, self.slider_speed, 10.0, 100.0, theme);
+
+        // Dynamic Progress Bar based on counter
+        var mut_progress = ((self.counter % 100i64) as f32) / 100.0;
+        if mut_progress < 0.0 { mut_progress = -mut_progress; }
+        win.ui_progress_bar(44, 456, 240, 10, mut_progress, theme);
 
         // Telemetry Stats in Left Panel
-        win.draw_text(44, 444, "SYSTEM TELEMETRY", theme.text_secondary, 1);
-        win.draw_rect(44, 464, 240, 1, theme.card_border);
+        win.draw_text(44, 478, "SYSTEM TELEMETRY", theme.text_secondary, 1);
+        win.draw_rect(44, 496, 240, 1, theme.card_border);
 
-        win.draw_formatted(44, 476, "Frame: ", self.frame_count, "", theme.text_primary, 1);
-        win.draw_formatted(44, 498, "Total Clicks: ", self.click_count, "", theme.text_primary, 1);
+        win.draw_formatted(44, 506, "Frame: ", self.frame_count, "", theme.text_primary, 1);
+        win.draw_formatted(44, 526, "Clicks: ", self.click_count, "", theme.text_primary, 1);
+        win.draw_formatted(44, 546, "Speed: ", self.slider_speed as i64, " %", theme.text_accent, 1);
 
         if detected == WINDOW_BACKEND_WAYLAND {
-            win.draw_text(44, 520, "Compositor: KDE Wayland", theme.text_primary, 1);
-            win.draw_text(44, 542, "Protocol: xdg_shell_v1", theme.text_primary, 1);
-            win.draw_text(44, 564, "Memory: Linux memfd SHM", theme.text_primary, 1);
+            win.draw_text(44, 566, "Compositor: KDE Wayland", theme.text_primary, 1);
+            win.draw_text(44, 586, "Memory: Linux memfd SHM", theme.text_primary, 1);
         } else if detected == WINDOW_BACKEND_X11 {
-            win.draw_text(44, 520, "Server: X.Org X11 Unix", theme.text_primary, 1);
-            win.draw_text(44, 542, "Protocol: X11 Core Wire", theme.text_primary, 1);
-            win.draw_text(44, 564, "Auth: MIT-MAGIC-COOKIE", theme.text_primary, 1);
+            win.draw_text(44, 566, "Server: X.Org X11 Unix", theme.text_primary, 1);
+            win.draw_text(44, 586, "Protocol: X11 Core Wire", theme.text_primary, 1);
         } else {
-            win.draw_text(44, 520, "Server: Headless Fallback", theme.text_primary, 1);
-            win.draw_text(44, 542, "Protocol: In-Memory Bitmap", theme.text_primary, 1);
-            win.draw_text(44, 564, "Memory: Heap Framebuffer", theme.text_primary, 1);
+            win.draw_text(44, 566, "Server: Headless Fallback", theme.text_primary, 1);
+            win.draw_text(44, 586, "Memory: Heap Framebuffer", theme.text_primary, 1);
         }
 
         // 4. Right Panel Showcase: Card 1 - Real-time Telemetry (324, 76, 572, 160)
-        win.draw_rect_rounded(324, 76, 572, 160, 8, theme.panel_bg);
-        win.draw_rect_outline(324, 76, 572, 160, 1, theme.card_border);
-        win.draw_text(344, 96, "DESKTOP EVENT & POINTER TELEMETRY", theme.text_accent, 1);
+        win.ui_panel(324, 76, 572, 160, "DESKTOP EVENT & POINTER TELEMETRY", theme);
 
         let mx_val = self.mouse_x as i64;
         let my_val = self.mouse_y as i64;
@@ -333,7 +261,7 @@ impl AppState {
         var mouse_btn_str = "Mouse Button: RELEASED (IDLE)";
         var mouse_btn_col = theme.text_secondary;
         if self.mouse_down {
-            mouse_btn_str = "Mouse Button: PRESSED [BTN_LEFT]";
+            mouse_btn_str = "Mouse Button: PRESSED [ACTIVE]";
             mouse_btn_col = theme.text_accent;
         }
         win.draw_text(344, 146, mouse_btn_str, mouse_btn_col, 1);
@@ -342,8 +270,7 @@ impl AppState {
         win.draw_formatted(344, 190, "Last Key Code: ", self.last_key as i64, " (ESC/Q to exit)", theme.text_secondary, 1);
 
         // Visual radar crosshair on the right of Card 1
-        win.draw_rect_rounded(770, 92, 110, 128, 6, theme.card_bg);
-        win.draw_rect_outline(770, 92, 110, 128, 1, theme.card_border);
+        win.ui_card(770, 92, 110, 128, theme);
         win.draw_circle(825, 156, 40, theme.card_border);
         win.draw_circle(825, 156, 20, theme.card_border);
 
@@ -353,63 +280,54 @@ impl AppState {
         win.draw_circle(radar_x, radar_y, 4, theme.accent_glow);
 
         // 5. Right Panel Showcase: Card 2 - std/gui Flexbox Layout Engine (324, 252, 572, 170)
-        win.draw_rect_rounded(324, 252, 572, 170, 8, theme.panel_bg);
-        win.draw_rect_outline(324, 252, 572, 170, 1, theme.card_border);
-        win.draw_text(344, 272, "FLEXBOX ENGINE (std::gui::LayoutBox)", theme.text_accent, 1);
+        win.ui_panel(324, 252, 572, 170, "FLEXBOX ENGINE (std::gui::LayoutBox)", theme);
 
-        // Compute layout using Rad std::gui LayoutBox
-        var root_box = LayoutBox::new(532.0, 100.0);
+        // Compute layout using Rad std::gui LayoutBox with flexible sizing
+        var root_box = LayoutBox::row(532.0, 96.0);
         root_box.x = 344.0;
         root_box.y = 302.0;
-        root_box.direction = FLEX_DIRECTION_ROW;
-        root_box.justify_content = JUSTIFY_SPACE_BETWEEN;
 
-        let box_a = LayoutBox::new(168.0, 96.0);
-        let box_b = LayoutBox::new(168.0, 96.0);
-        let box_c = LayoutBox::new(168.0, 96.0);
+        let box_a = LayoutBox::flex_item(1.0);
+        let box_b = LayoutBox::flex_item(1.0);
+        let box_c = LayoutBox::flex_item(1.0);
         root_box.add_child(box_a);
         root_box.add_child(box_b);
         root_box.add_child(box_c);
-        root_box.compute_layout(532.0, 100.0);
+        root_box.compute_layout(532.0, 96.0);
 
-        // Render Sub-card 1
-        let x1 = root_box.children.ptr[0].x as i32;
-        let y1 = root_box.children.ptr[0].y as i32;
-        win.draw_rect_rounded(x1, y1, 168, 96, 6, theme.card_bg);
-        win.draw_rect_outline(x1, y1, 168, 96, 1, theme.card_border);
+        let pad_gap = 12i32;
+        let item_w = (532i32 - pad_gap * 2) / 3i32;
+
+        let x1 = 344;
+        let y1 = 302;
+        win.ui_card(x1, y1, item_w, 96, theme);
         win.draw_text(x1 + 12, y1 + 14, "ACTOR MODEL", theme.text_accent, 1);
         win.draw_text(x1 + 12, y1 + 38, "Lock-free Mailbox", theme.text_primary, 1);
         win.draw_text(x1 + 12, y1 + 60, "1M+ Concurrency", theme.text_secondary, 1);
 
-        // Render Sub-card 2
-        let x2 = root_box.children.ptr[1].x as i32 + 14i32;
-        let y2 = root_box.children.ptr[1].y as i32;
-        win.draw_rect_rounded(x2, y2, 168, 96, 6, theme.card_bg);
-        win.draw_rect_outline(x2, y2, 168, 96, 1, theme.card_border);
+        let x2 = x1 + item_w + pad_gap;
+        let y2 = 302;
+        win.ui_card(x2, y2, item_w, 96, theme);
         win.draw_text(x2 + 12, y2 + 14, "DETERMINISTIC ARC", theme.text_accent, 1);
         win.draw_text(x2 + 12, y2 + 38, "Zero GC Latency", theme.text_primary, 1);
         win.draw_text(x2 + 12, y2 + 60, "Static Elision", theme.text_secondary, 1);
 
-        // Render Sub-card 3
-        let x3 = root_box.children.ptr[2].x as i32 + 28i32;
-        let y3 = root_box.children.ptr[2].y as i32;
-        win.draw_rect_rounded(x3, y3, 168, 96, 6, theme.card_bg);
-        win.draw_rect_outline(x3, y3, 168, 96, 1, theme.card_border);
+        let x3 = x2 + item_w + pad_gap;
+        let y3 = 302;
+        win.ui_card(x3, y3, item_w, 96, theme);
         win.draw_text(x3 + 12, y3 + 14, "NATIVE LINKER", theme.text_accent, 1);
         win.draw_text(x3 + 12, y3 + 38, "ELF & Mach-O & PE", theme.text_primary, 1);
         win.draw_text(x3 + 12, y3 + 60, "Zero C++ Bridge", theme.text_secondary, 1);
 
         // 6. Right Panel Showcase: Card 3 - Dynamic Vector Graphics & Visualizer (324, 438, 572, 188)
-        win.draw_rect_rounded(324, 438, 572, 188, 8, theme.panel_bg);
-        win.draw_rect_outline(324, 438, 572, 188, 1, theme.card_border);
-        win.draw_text(344, 456, "HARDWARE-ACCELERATED VECTOR GRAPHICS ENGINE", theme.text_accent, 1);
+        win.ui_panel(324, 438, 572, 188, "HARDWARE-ACCELERATED VECTOR GRAPHICS ENGINE", theme);
 
-        // Animated Equalizer Bars
+        // Animated Equalizer Bars - controlled by interactive slider speed!
         var bar_i = 0usize;
+        let speed_factor = ((self.slider_speed as i64) / 10i64) + 1i64;
         while bar_i < 24usize {
             let bi = bar_i as i64;
-            // Integer wave calculation
-            let wave_phase = (self.frame_count * 4i64 + bi * 14i64) % 100i64;
+            let wave_phase = (self.frame_count * speed_factor + bi * 14i64) % 100i64;
             var bar_h = 15i32 + (wave_phase as i32);
             if bar_h > 100i32 {
                 bar_h = 200i32 - bar_h;
@@ -452,6 +370,8 @@ impl AppState {
 // ------------------------------------------------------------------------------
 
 fn main() -> i32 {
+    let _ = signal(13i32, 1usize); // SIGPIPE -> SIG_IGN
+
     let win_w = 920i32;
     let win_h = 680i32;
     let win_title = "Rad Desktop GUI - Pure Rad Universal Window";
@@ -486,7 +406,23 @@ fn main() -> i32 {
     var max_frames = 0i64;
     let env_frames = getenv("RAD_DEMO_FRAMES");
     if (env_frames as usize) != 0usize {
-        max_frames = 60i64; // default 60 frames in automated test mode
+        var parsed_frames = 0i64;
+        let p = env_frames;
+        var pi = 0usize;
+        while p[pi] >= 48u8 && p[pi] <= 57u8 {
+            parsed_frames = parsed_frames * 10i64 + ((p[pi] - 48u8) as i64);
+            pi = pi + 1usize;
+        }
+        if parsed_frames > 0i64 {
+            max_frames = parsed_frames;
+            print("Automated test mode: limiting to ");
+            print(max_frames);
+            println(" frames.");
+        }
+    }
+    if max_frames == 0i64 {
+        println("Interactive mode active: window will remain open indefinitely.");
+        println("Press ESC or click the Close button [x] to exit.");
     }
 
     while win.is_open() {
@@ -524,12 +460,14 @@ fn main() -> i32 {
             } else if ev.event_type == WINDOW_EVENT_KEY_DOWN {
                 app.last_key = ev.key_code;
                 app.last_event = "WINDOW_EVENT_KEY_DOWN";
-                if ev.key_code == 1u32 || ev.key_code == 24u32 || ev.key_code == 9u32 {
-                    // ESC / Q
+                if ev.key_code == 1u32 || ev.key_code == 16u32 || ev.key_code == 24u32 || ev.key_code == 9u32 {
+                    // ESC / Q (evdev 1 & 16 on Wayland; 9 & 24 on X11)
                     win.close();
                 } else if ev.key_code == 57u32 || ev.key_code == 65u32 {
                     // KEY_SPACE: Increment counter
-                    app.counter = app.counter + 1i64;
+                    var step = 1i64;
+                    if app.turbo_mode { step = 5i64; }
+                    app.counter = app.counter + step;
                 } else if ev.key_code == 20u32 || ev.key_code == 28u32 {
                     // KEY_T: Cycle theme
                     app.theme_idx = (app.theme_idx + 1i32) % 3i32;
@@ -538,8 +476,8 @@ fn main() -> i32 {
                     app.auto_tick = !app.auto_tick;
                 } else if ev.key_code == 31u32 || ev.key_code == 39u32 {
                     // KEY_S: Capture screenshot
-                    let _ = win.save_bmp("demos/wayland_gui/screenshot.bmp");
-                    println("Screenshot captured: demos/wayland_gui/screenshot.bmp");
+                    let _ = win.save_bmp("tests/demos/wayland_gui/screenshot.bmp");
+                    println("Screenshot captured: tests/demos/wayland_gui/screenshot.bmp");
                 }
             }
         }
@@ -547,7 +485,9 @@ fn main() -> i32 {
         // 2. Update application state
         app.frame_count = app.frame_count + 1i64;
         if app.auto_tick && (app.frame_count % 10i64) == 0i64 {
-            app.counter = app.counter + 1i64;
+            var step = 1i64;
+            if app.turbo_mode { step = 5i64; }
+            app.counter = app.counter + step;
         }
 
         // 3. Render current frame
@@ -566,8 +506,8 @@ fn main() -> i32 {
         let _ = usleep(16000u32);
     }
 
-    println("Saving final frame screenshot to demos/wayland_gui/screenshot.bmp...");
-    let _ = win.save_bmp("demos/wayland_gui/screenshot.bmp");
+    println("Saving final frame screenshot to tests/demos/wayland_gui/screenshot.bmp...");
+    let _ = win.save_bmp("tests/demos/wayland_gui/screenshot.bmp");
 
     println("Cleaning up window resources...");
     win.destroy();

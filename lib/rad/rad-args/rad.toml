@@ -1,0 +1,11 @@
+[package]
+name = "rad-args"
+version = "0.1.0"
+edition = "2026"
+description = "Declarative CLI argument parsing library with flags, options, subcommands, and auto-generated help"
+license = "MIT"
+authors = ["GamerxIOEPB"]
+repository = "https://github.com/GamerxIOEPB/rad-lib"
+min_rad_version = "0.2.4"
+
+[dependencies]

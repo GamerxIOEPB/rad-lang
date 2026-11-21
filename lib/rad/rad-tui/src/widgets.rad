@@ -1,0 +1,534 @@
+// ==============================================================================
+// rad-tui — widgets.rad
+// High-level declarative Widgets (Block, Text, Button, ProgressBar, List, Table)
+// and low-level 2D Canvas rendering primitives.
+// ==============================================================================
+
+import style;
+import buffer;
+import layout;
+
+fn w_str_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize;
+    }
+    let p = s as *raw u8;
+    var i = 0usize;
+    while p[i] != 0u8 {
+        i = i + 1usize;
+    }
+    return i;
+}
+
+pub const BORDER_TYPE_PLAIN: i32   = 0;
+pub const BORDER_TYPE_ROUNDED: i32 = 1;
+pub const BORDER_TYPE_DOUBLE: i32  = 2;
+pub const BORDER_TYPE_THICK: i32   = 3;
+
+// ------------------------------------------------------------------------------
+// Block Widget
+// ------------------------------------------------------------------------------
+
+pub struct Block {
+    pub title_text: str,
+    pub border_type: i32,
+    pub border_style: Style,
+    pub block_style: Style,
+    pub has_borders: bool,
+}
+
+impl Block {
+    pub fn new() -> Block {
+        return Block {
+            title_text: "",
+            border_type: BORDER_TYPE_ROUNDED,
+            border_style: Style.default(),
+            block_style: Style.default(),
+            has_borders: true,
+        };
+    }
+
+    pub fn title(self, t: str) -> Block {
+        return Block {
+            title_text: t,
+            border_type: self.border_type,
+            border_style: self.border_style,
+            block_style: self.block_style,
+            has_borders: self.has_borders,
+        };
+    }
+
+    pub fn border(self, btype: i32) -> Block {
+        return Block {
+            title_text: self.title_text,
+            border_type: btype,
+            border_style: self.border_style,
+            block_style: self.block_style,
+            has_borders: true,
+        };
+    }
+
+    pub fn borders_enabled(self, enabled: bool) -> Block {
+        return Block {
+            title_text: self.title_text,
+            border_type: self.border_type,
+            border_style: self.border_style,
+            block_style: self.block_style,
+            has_borders: enabled,
+        };
+    }
+
+    pub fn border_style(self, s: Style) -> Block {
+        return Block {
+            title_text: self.title_text,
+            border_type: self.border_type,
+            border_style: s,
+            block_style: self.block_style,
+            has_borders: self.has_borders,
+        };
+    }
+
+    pub fn block_style(self, s: Style) -> Block {
+        return Block {
+            title_text: self.title_text,
+            border_type: self.border_type,
+            border_style: self.border_style,
+            block_style: s,
+            has_borders: self.has_borders,
+        };
+    }
+
+    pub fn inner_area(self, area: Rect) -> Rect {
+        if !self.has_borders {
+            return area;
+        }
+        return area.inner(1, 1);
+    }
+
+    pub fn render_block(self, var buf: Buffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 {
+            return;
+        }
+
+        // Fill background
+        buf.fill_rect(area.x, area.y, area.width, area.height, 32u8, self.block_style);
+
+        if !self.has_borders {
+            return;
+        }
+
+        let tl = "╭"; let tr = "╮"; let bl = "╰"; let br = "╯";
+        let hl = "─"; let vl = "│";
+
+        var c_tl = tl; var c_tr = tr; var c_bl = bl; var c_br = br;
+        var c_hl = hl; var c_vl = vl;
+
+        if self.border_type == BORDER_TYPE_PLAIN {
+            c_tl = "+"; c_tr = "+"; c_bl = "+"; c_br = "+";
+            c_hl = "-"; c_vl = "|";
+        } else if self.border_type == BORDER_TYPE_DOUBLE {
+            c_tl = "╔"; c_tr = "╗"; c_bl = "╚"; c_br = "╝";
+            c_hl = "═"; c_vl = "║";
+        } else if self.border_type == BORDER_TYPE_THICK {
+            c_tl = "┏"; c_tr = "┓"; c_bl = "┗"; c_br = "┛";
+            c_hl = "━"; c_vl = "┃";
+        }
+
+        // Corners
+        buf.set_glyph(area.x, area.y, c_tl, self.border_style);
+        buf.set_glyph(area.x + area.width - 1, area.y, c_tr, self.border_style);
+        buf.set_glyph(area.x, area.y + area.height - 1, c_bl, self.border_style);
+        buf.set_glyph(area.x + area.width - 1, area.y + area.height - 1, c_br, self.border_style);
+
+        // Horizontal edges
+        var cx = area.x + 1;
+        while cx < area.x + area.width - 1 {
+            buf.set_glyph(cx, area.y, c_hl, self.border_style);
+            buf.set_glyph(cx, area.y + area.height - 1, c_hl, self.border_style);
+            cx = cx + 1;
+        }
+
+        // Vertical edges
+        var cy = area.y + 1;
+        while cy < area.y + area.height - 1 {
+            buf.set_glyph(area.x, cy, c_vl, self.border_style);
+            buf.set_glyph(area.x + area.width - 1, cy, c_vl, self.border_style);
+            cy = cy + 1;
+        }
+
+        // Title
+        let tlen = w_str_len(self.title_text) as i32;
+        if tlen > 0 && area.width > tlen + 2 {
+            let tx = area.x + 2;
+            buf.set_string(tx, area.y, self.title_text, self.border_style);
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Paragraph / Text Widget
+// ------------------------------------------------------------------------------
+
+pub struct Paragraph {
+    pub content: str,
+    pub text_style: Style,
+    pub alignment: i32,
+}
+
+impl Paragraph {
+    pub fn new(text: str) -> Paragraph {
+        return Paragraph {
+            content: text,
+            text_style: Style.default(),
+            alignment: ALIGN_LEFT,
+        };
+    }
+
+    pub fn paragraph_style(self, s: Style) -> Paragraph {
+        return Paragraph {
+            content: self.content,
+            text_style: s,
+            alignment: self.alignment,
+        };
+    }
+
+    pub fn align(self, a: i32) -> Paragraph {
+        return Paragraph {
+            content: self.content,
+            text_style: self.text_style,
+            alignment: a,
+        };
+    }
+
+    pub fn render_paragraph(self, var buf: Buffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 {
+            return;
+        }
+
+        let p = self.content as *raw u8;
+        let total_len = w_str_len(self.content);
+        var offset = 0usize;
+        var row = area.y;
+
+        while offset < total_len && row < area.y + area.height {
+            // Find next newline or end
+            var line_end = offset;
+            while line_end < total_len && p[line_end] != 10u8 && (line_end - offset) < (area.width as usize) {
+                line_end = line_end + 1usize;
+            }
+
+            let line_len = (line_end - offset) as i32;
+            var start_x = area.x;
+            if self.alignment == ALIGN_CENTER {
+                start_x = area.x + (area.width - line_len) / 2;
+                if start_x < area.x { start_x = area.x; }
+            } else if self.alignment == ALIGN_RIGHT {
+                start_x = area.x + (area.width - line_len);
+                if start_x < area.x { start_x = area.x; }
+            }
+
+            // Copy line into null-terminated temp buffer
+            let temp = malloc(line_len as usize + 1usize) as *raw var u8;
+            var li = 0usize;
+            while li < (line_len as usize) {
+                temp[li] = p[offset + li];
+                li = li + 1usize;
+            }
+            temp[li] = 0u8;
+
+            buf.set_string(start_x, row, temp as str, self.text_style);
+            free(temp as *raw u8);
+
+            offset = line_end;
+            if offset < total_len && p[offset] == 10u8 {
+                offset = offset + 1usize;
+            }
+            row = row + 1;
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Button Widget
+// ------------------------------------------------------------------------------
+
+pub struct Button {
+    pub label_text: str,
+    pub is_focused: bool,
+    pub is_active: bool,
+    pub base_style: Style,
+    pub focus_style: Style,
+}
+
+impl Button {
+    pub fn new(label: str) -> Button {
+        return Button {
+            label_text: label,
+            is_focused: false,
+            is_active: false,
+            base_style: Style.default(),
+            focus_style: Style.default().bold().reverse(),
+        };
+    }
+
+    pub fn focused(self, f: bool) -> Button {
+        return Button {
+            label_text: self.label_text,
+            is_focused: f,
+            is_active: self.is_active,
+            base_style: self.base_style,
+            focus_style: self.focus_style,
+        };
+    }
+
+    pub fn active(self, a: bool) -> Button {
+        return Button {
+            label_text: self.label_text,
+            is_focused: self.is_focused,
+            is_active: a,
+            base_style: self.base_style,
+            focus_style: self.focus_style,
+        };
+    }
+
+    pub fn button_style(self, s: Style) -> Button {
+        return Button {
+            label_text: self.label_text,
+            is_focused: self.is_focused,
+            is_active: self.is_active,
+            base_style: s,
+            focus_style: self.focus_style,
+        };
+    }
+
+    pub fn render_button(self, var buf: Buffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 {
+            return;
+        }
+
+        var s = self.base_style;
+        if self.is_focused {
+            s = self.focus_style;
+        }
+
+        buf.fill_rect(area.x, area.y, area.width, area.height, 32u8, s);
+
+        let llen = w_str_len(self.label_text) as i32;
+        let cx = area.x + (area.width - llen) / 2;
+        let cy = area.y + area.height / 2;
+
+        buf.set_string(cx, cy, self.label_text, s);
+    }
+}
+
+// ------------------------------------------------------------------------------
+// ProgressBar Widget
+// ------------------------------------------------------------------------------
+
+pub struct ProgressBar {
+    pub progress: i32, // 0 to 100
+    pub label_text: str,
+    pub bar_style: Style,
+    pub fill_style: Style,
+}
+
+impl ProgressBar {
+    pub fn new(p: i32) -> ProgressBar {
+        var pct = p;
+        if pct < 0 { pct = 0; }
+        if pct > 100 { pct = 100; }
+        return ProgressBar {
+            progress: pct,
+            label_text: "",
+            bar_style: Style.default().fg(Color.bright_black()),
+            fill_style: Style.default().fg(Color.green()).bold(),
+        };
+    }
+
+    pub fn label(self, l: str) -> ProgressBar {
+        return ProgressBar {
+            progress: self.progress,
+            label_text: l,
+            bar_style: self.bar_style,
+            fill_style: self.fill_style,
+        };
+    }
+
+    pub fn progress_color(self, c: Color) -> ProgressBar {
+        return ProgressBar {
+            progress: self.progress,
+            label_text: self.label_text,
+            bar_style: self.bar_style,
+            fill_style: Style.default().fg(c).bold(),
+        };
+    }
+
+    pub fn render_progress(self, var buf: Buffer, area: Rect) {
+        if area.width <= 2 || area.height <= 0 {
+            return;
+        }
+
+        let total_bar = area.width - 2;
+        let filled_bar = (total_bar * self.progress) / 100;
+
+        let y = area.y + area.height / 2;
+        buf.set_glyph(area.x, y, "[", self.bar_style);
+
+        var i = 0;
+        while i < total_bar {
+            let cx = area.x + 1 + i;
+            if i < filled_bar {
+                buf.set_glyph(cx, y, "━", self.fill_style);
+            } else {
+                buf.set_glyph(cx, y, "─", self.bar_style);
+            }
+            i = i + 1;
+        }
+
+        buf.set_glyph(area.x + area.width - 1, y, "]", self.bar_style);
+
+        if w_str_len(self.label_text) > 0usize {
+            let llen = w_str_len(self.label_text) as i32;
+            let tx = area.x + (area.width - llen) / 2;
+            buf.set_string(tx, y, self.label_text, Style.default().bold());
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// List / Menu Widget
+// ------------------------------------------------------------------------------
+
+pub struct List {
+    pub items: Vec,
+    pub selected_idx: usize,
+    pub item_style: Style,
+    pub selected_style: Style,
+}
+
+impl List {
+    pub fn new() -> List {
+        return List {
+            items: Vec.new(),
+            selected_idx: 0usize,
+            item_style: Style.default(),
+            selected_style: Style.default().fg(Color.black()).bg(Color.cyan()).bold(),
+        };
+    }
+
+    pub fn add_item(var self, item: str) {
+        self.items.push(item as *raw u8);
+    }
+
+    pub fn select(self, idx: usize) -> List {
+        return List {
+            items: self.items,
+            selected_idx: idx,
+            item_style: self.item_style,
+            selected_style: self.selected_style,
+        };
+    }
+
+    pub fn selected_style(self, s: Style) -> List {
+        return List {
+            items: self.items,
+            selected_idx: self.selected_idx,
+            item_style: self.item_style,
+            selected_style: s,
+        };
+    }
+
+    pub fn render_list(self, var buf: Buffer, area: Rect) {
+        if area.width <= 0 || area.height <= 0 {
+            return;
+        }
+
+        var r = 0usize;
+        while r < self.items.len && (r as i32) < area.height {
+            let item_str = self.items.ptr[r] as str;
+            let cy = area.y + (r as i32);
+
+            var s = self.item_style;
+            if r == self.selected_idx {
+                s = self.selected_style;
+                // Highlight full line width
+                buf.fill_rect(area.x, cy, area.width, 1, 32u8, s);
+                buf.set_string(area.x, cy, " > ", s);
+                buf.set_string(area.x + 3, cy, item_str, s);
+            } else {
+                buf.set_string(area.x + 3, cy, item_str, s);
+            }
+
+            r = r + 1usize;
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Low-Level 2D Canvas Drawing API
+// ------------------------------------------------------------------------------
+
+pub struct Canvas {}
+
+impl Canvas {
+    pub fn draw_char(var buf: Buffer, x: i32, y: i32, ch: u8, s: Style) {
+        buf.set_char(x, y, ch, s);
+    }
+
+    pub fn draw_text(var buf: Buffer, x: i32, y: i32, text: str, s: Style) {
+        buf.set_string(x, y, text, s);
+    }
+
+    pub fn draw_rect(var buf: Buffer, x: i32, y: i32, w: i32, h: i32, ch: u8, s: Style) {
+        if w <= 0 || h <= 0 { return; }
+        var cx = x;
+        while cx < x + w {
+            buf.set_char(cx, y, ch, s);
+            buf.set_char(cx, y + h - 1, ch, s);
+            cx = cx + 1;
+        }
+        var cy = y;
+        while cy < y + h {
+            buf.set_char(x, cy, ch, s);
+            buf.set_char(x + w - 1, cy, ch, s);
+            cy = cy + 1;
+        }
+    }
+
+    pub fn fill_rect(var buf: Buffer, x: i32, y: i32, w: i32, h: i32, ch: u8, s: Style) {
+        buf.fill_rect(x, y, w, h, ch, s);
+    }
+
+    // Bresenham's line algorithm
+    pub fn draw_line(var buf: Buffer, x0: i32, y0: i32, x1: i32, y1: i32, ch: u8, s: Style) {
+        var dx = x1 - x0;
+        if dx < 0 { dx = 0 - dx; }
+        var sx = 1;
+        if x0 >= x1 { sx = -1; }
+
+        var dy = y1 - y0;
+        if dy > 0 { dy = 0 - dy; }
+        var sy = 1;
+        if y0 >= y1 { sy = -1; }
+
+        var err = dx + dy;
+        var cx = x0;
+        var cy = y0;
+
+        while true {
+            buf.set_char(cx, cy, ch, s);
+            if cx == x1 && cy == y1 {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err = err + dy;
+                cx = cx + sx;
+            }
+            if e2 <= dx {
+                err = err + dx;
+                cy = cy + sy;
+            }
+        }
+    }
+}

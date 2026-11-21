@@ -1,0 +1,162 @@
+// ==============================================================================
+// rad-sqlite: Idiomatic C FFI SQLite3 Bindings for Rad
+// Fast, embedded relational database engine wrapper with zero-copy queries.
+// ==============================================================================
+
+pub const SQLITE_OK: i32 = 0
+pub const SQLITE_ERROR: i32 = 1
+pub const SQLITE_ROW: i32 = 100
+pub const SQLITE_DONE: i32 = 101
+
+extern "C" {
+    fn sqlite3_open(filename: *raw u8, ppDb: *raw var ptr) -> i32;
+    fn sqlite3_close(db: ptr) -> i32;
+    fn sqlite3_exec(db: ptr, sql: *raw u8, callback: ptr, arg: ptr, errmsg: *raw var ptr) -> i32;
+    fn sqlite3_errmsg(db: ptr) -> *raw u8;
+    fn sqlite3_prepare_v2(db: ptr, sql: *raw u8, nByte: i32, ppStmt: *raw var ptr, pzTail: *raw var ptr) -> i32;
+    fn sqlite3_step(stmt: ptr) -> i32;
+    fn sqlite3_column_text(stmt: ptr, iCol: i32) -> *raw u8;
+    fn sqlite3_column_int64(stmt: ptr, iCol: i32) -> i64;
+    fn sqlite3_column_double(stmt: ptr, iCol: i32) -> f64;
+    fn sqlite3_column_count(stmt: ptr) -> i32;
+    fn sqlite3_finalize(stmt: ptr) -> i32;
+    fn sqlite3_free(ptr: *raw u8);
+}
+
+pub struct SqliteStmt {
+    pub stmt: ptr,
+}
+
+impl SqliteStmt {
+    pub fn step(self) -> bool {
+        let rc = sqlite3_step(self.stmt)
+        return (rc == SQLITE_ROW)
+    }
+
+    pub fn column_text(self, col: i32) -> String {
+        let p = sqlite3_column_text(self.stmt, col)
+        if (p as usize) == 0usize {
+            return String.new()
+        }
+        return String.from_str(p as str)
+    }
+
+    pub fn column_i64(self, col: i32) -> i64 {
+        return sqlite3_column_int64(self.stmt, col)
+    }
+
+    pub fn column_f64(self, col: i32) -> f64 {
+        return sqlite3_column_double(self.stmt, col)
+    }
+
+    pub fn column_count(self) -> i32 {
+        return sqlite3_column_count(self.stmt)
+    }
+
+    pub fn finalize(var self) {
+        if (self.stmt as usize) != 0usize {
+            let _ = sqlite3_finalize(self.stmt)
+            self.stmt = 0 as ptr
+        }
+    }
+}
+
+pub struct SqliteDb {
+    pub handle: ptr,
+    pub is_open: bool,
+}
+
+impl SqliteDb {
+    pub fn open(path: str) -> Option<SqliteDb> {
+        let db_ptr = malloc(8usize) as *raw var ptr
+        let rc = sqlite3_open(path as *raw u8, db_ptr)
+        let handle = db_ptr[0usize]
+        free(db_ptr as *raw var u8)
+
+        if rc != SQLITE_OK {
+            if (handle as usize) != 0usize {
+                let _ = sqlite3_close(handle)
+            }
+            return Option.None
+        }
+        return Option.Some(SqliteDb {
+            handle: handle,
+            is_open: true,
+        })
+    }
+
+    pub fn open_memory() -> Option<SqliteDb> {
+        return SqliteDb.open(":memory:")
+    }
+
+    pub fn execute(self, sql: str) -> bool {
+        if !self.is_open {
+            return false
+        }
+        let err_box = malloc(8usize) as *raw var ptr
+        err_box[0usize] = 0 as ptr
+        let rc = sqlite3_exec(self.handle, sql as *raw u8, 0 as ptr, 0 as ptr, err_box)
+        let err_msg = err_box[0usize]
+        if (err_msg as usize) != 0usize {
+            sqlite3_free(err_msg as *raw u8)
+        }
+        free(err_box as *raw var u8)
+        return (rc == SQLITE_OK)
+    }
+
+    pub fn prepare(self, sql: str) -> Option<SqliteStmt> {
+        if !self.is_open {
+            return Option.None
+        }
+        let stmt_box = malloc(8usize) as *raw var ptr
+        stmt_box[0usize] = 0 as ptr
+        let tail_box = malloc(8usize) as *raw var ptr
+        tail_box[0usize] = 0 as ptr
+
+        let rc = sqlite3_prepare_v2(self.handle, sql as *raw u8, -1i32, stmt_box, tail_box)
+        let stmt_h = stmt_box[0usize]
+        free(stmt_box as *raw var u8)
+        free(tail_box as *raw var u8)
+
+        if rc != SQLITE_OK || (stmt_h as usize) == 0usize {
+            return Option.None
+        }
+        return Option.Some(SqliteStmt { stmt: stmt_h })
+    }
+
+    pub fn query_value(self, sql: str) -> Option<String> {
+        let stmt_opt = self.prepare(sql)
+        match stmt_opt {
+            Option.Some(stmt) => {
+                var s = stmt
+                if s.step() {
+                    let val = s.column_text(0i32)
+                    s.finalize()
+                    return Option.Some(val)
+                }
+                s.finalize()
+                return Option.None
+            },
+            _ => return Option.None
+        }
+    }
+
+    pub fn last_error(self) -> String {
+        if !self.is_open {
+            return String.from_str("database is closed")
+        }
+        let msg = sqlite3_errmsg(self.handle)
+        if (msg as usize) == 0usize {
+            return String.new()
+        }
+        return String.from_str(msg as str)
+    }
+
+    pub fn close(var self) {
+        if self.is_open && (self.handle as usize) != 0usize {
+            let _ = sqlite3_close(self.handle)
+            self.handle = 0 as ptr
+            self.is_open = false
+        }
+    }
+}

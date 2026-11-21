@@ -1,0 +1,11 @@
+[package]
+name = "rad-json"
+version = "0.1.0"
+edition = "2026"
+description = "Pure native Rad JSON DOM, recursive-descent parser, and serialization library"
+license = "MIT"
+authors = ["GamerxIOEPB"]
+repository = "https://github.com/GamerxIOEPB/rad-lib"
+min_rad_version = "0.2.4"
+
+[dependencies]

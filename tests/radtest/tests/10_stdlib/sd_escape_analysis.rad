@@ -1,0 +1,64 @@
+import std/smt;
+import std/mir;
+
+fn main() -> i32 {
+    println("--- Rad Formal SMT Verification & Escape Analysis ---");
+
+    // 1. Automated Memory Safety Proofs via SMT Solver (Array Bounds & Overflow)
+    var mem_verifier = MemorySafetyVerifier::new();
+
+    // Prove array bounds: 0 <= i < 100 for loop [0, 99]
+    let bounds_ok = mem_verifier.prove_bounds_safety(0i64, 99i64, 100i64);
+    var b_str = "FAILED";
+    if bounds_ok { b_str = "PROVEN SAFE"; }
+    println(f"SMT Array bounds proof (0 <= i < 100): {b_str}");
+
+    // Prove arithmetic overflow freedom: [100, 200] + [50, 100] <= MAX_I64
+    let overflow_ok = mem_verifier.prove_no_overflow_add(100i64, 200i64, 50i64, 100i64);
+    var o_str = "FAILED";
+    if overflow_ok { o_str = "PROVEN SAFE"; }
+    println(f"SMT Arithmetic overflow proof: {o_str}");
+
+    // Prove non-null pointer safety
+    let null_ok = mem_verifier.prove_non_null(0x7fff0000usize);
+    var n_str = "FAILED";
+    if null_ok { n_str = "PROVEN SAFE"; }
+    println(f"SMT Null pointer safety proof: {n_str}");
+
+    let is_all_safe = mem_verifier.is_safe();
+    var safe_str = "UNVERIFIED";
+    if is_all_safe { safe_str = "100% VERIFIED"; }
+    println(f"Overall SMT formal memory safety: {safe_str}");
+
+    // 2. Escape Analysis & Heap-to-Stack Allocation Promotion
+    var mir_fn = MirFunction::new("process_local_buffer", "i64");
+    let v1 = mir_fn.alloc_vreg();
+    let v2 = mir_fn.alloc_vreg();
+
+    // %1 = heap_alloc (Vec buffer, 64 bytes) - does not escape
+    mir_fn.blocks.ptr[0].append(MirInstr::heap_alloc(v1, 64i64));
+
+    // %2 = heap_alloc (String, 32 bytes) - escapes via return
+    mir_fn.blocks.ptr[0].append(MirInstr::heap_alloc(v2, 32i64));
+
+    // return %2 (v2 escapes!)
+    mir_fn.blocks.ptr[0].append(MirInstr::ret(MirOperand::vreg(v2)));
+
+    // Run escape analysis pass
+    let non_escaping = MirOptimizer::pass_escape_analysis(mir_fn);
+    println(f"Escape analysis pass: {non_escaping} non-escaping dynamic allocations detected");
+
+    // Run stack promotion pass
+    let promoted = MirOptimizer::pass_stack_promotion(mir_fn);
+    println(f"Heap-to-stack promotion pass: {promoted} allocations promoted to stack frame (MIR_ALLOCA)");
+
+    // Verify first instruction is now MIR_ALLOCA
+    let inst0_op = mir_fn.blocks.ptr[0].instructions.ptr[0].opcode;
+    let is_alloca = inst0_op == MIR_ALLOCA;
+    var alloca_str = "MIR_HEAP_ALLOC";
+    if is_alloca { alloca_str = "MIR_ALLOCA (stack frame)"; }
+    println(f"Instruction %1 promoted opcode: {alloca_str}");
+
+    println("Formal SMT verification & escape analysis completed successfully.");
+    return 0;
+}

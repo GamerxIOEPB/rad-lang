@@ -124,35 +124,36 @@ dist:
 
 install: all
 	@echo "==> Installing Rad toolchain to $(PREFIX)..."
-	@mkdir -p $(PREFIX)/bin $(PREFIX)/lib/targets/$(TARGET_TRIPLE) $(PREFIX)/lib/rad $(PREFIX)/share/rad $(PREFIX)/packages
+	@mkdir -p $(PREFIX)/bin $(PREFIX)/lib/targets/$(TARGET_TRIPLE) $(PREFIX)/lib/rad $(PREFIX)/share/rad
 	@find $(BIN_DIR) -maxdepth 1 -type f -exec cp -f {} $(PREFIX)/bin/ \;
-	cp -rf lib/rad/core lib/rad/alloc lib/rad/std lib/rad/rad-test lib/rad/rad-gfx lib/rad/rad-gui lib/rad/rad-sound $(PREFIX)/lib/rad/
+	cp -rf lib/rad/* $(PREFIX)/lib/rad/
 	cp -rf $(SYSROOT)/* $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/
 	@if [ -d "share/rad" ]; then cp -rf share/rad/* $(PREFIX)/share/rad/; fi
 	@if [ -d "../rad-lib/packages" ]; then \
-		echo "==> Pre-installing Rad ecosystem libraries to $(PREFIX)/packages..."; \
+		echo "==> Pre-installing Rad ecosystem libraries to $(PREFIX)/lib/rad..."; \
 		for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml rad-gui rad-sound; do \
 			if [ -d "../rad-lib/packages/$$pkg/0.1.0" ]; then \
-				rm -rf $(PREFIX)/packages/$$pkg; \
-				cp -rf ../rad-lib/packages/$$pkg/0.1.0 $(PREFIX)/packages/$$pkg; \
+				rm -rf $(PREFIX)/lib/rad/$$pkg; \
+				cp -rf ../rad-lib/packages/$$pkg/0.1.0 $(PREFIX)/lib/rad/$$pkg; \
 			fi; \
 		done; \
-		ln -sfn rad-tui $(PREFIX)/packages/tui; \
-		ln -sfn rad-json $(PREFIX)/packages/json; \
-		ln -sfn rad-http $(PREFIX)/packages/http; \
-		ln -sfn rad-args $(PREFIX)/packages/args; \
-		ln -sfn rad-test $(PREFIX)/packages/test; \
-		ln -sfn rad-math $(PREFIX)/packages/math; \
-		ln -sfn rad-log $(PREFIX)/packages/log; \
-		ln -sfn rad-kv $(PREFIX)/packages/kv; \
-		ln -sfn rad-sqlite $(PREFIX)/packages/sqlite; \
-		ln -sfn rad-gfx $(PREFIX)/packages/gfx; \
-		ln -sfn rad-gui $(PREFIX)/packages/gui; \
-		ln -sfn rad-sound $(PREFIX)/packages/sound; \
-		ln -sfn rad-toml $(PREFIX)/packages/toml; \
-		ln -sfn rad-yaml $(PREFIX)/packages/yaml; \
-		echo "    [✓] Ecosystem libraries installed to $(PREFIX)/packages"; \
+		ln -sfn rad-tui $(PREFIX)/lib/rad/tui; \
+		ln -sfn rad-json $(PREFIX)/lib/rad/json; \
+		ln -sfn rad-http $(PREFIX)/lib/rad/http; \
+		ln -sfn rad-args $(PREFIX)/lib/rad/args; \
+		ln -sfn rad-test $(PREFIX)/lib/rad/test; \
+		ln -sfn rad-math $(PREFIX)/lib/rad/math; \
+		ln -sfn rad-log $(PREFIX)/lib/rad/log; \
+		ln -sfn rad-kv $(PREFIX)/lib/rad/kv; \
+		ln -sfn rad-sqlite $(PREFIX)/lib/rad/sqlite; \
+		ln -sfn rad-gfx $(PREFIX)/lib/rad/gfx; \
+		ln -sfn rad-gui $(PREFIX)/lib/rad/gui; \
+		ln -sfn rad-sound $(PREFIX)/lib/rad/sound; \
+		ln -sfn rad-toml $(PREFIX)/lib/rad/toml; \
+		ln -sfn rad-yaml $(PREFIX)/lib/rad/yaml; \
+		echo "    [✓] Ecosystem libraries installed to $(PREFIX)/lib/rad"; \
 	fi
+	@ln -sfn lib/rad $(PREFIX)/packages
 	@echo "[✓] Rad installed successfully to $(PREFIX)/bin"
 
 clean:

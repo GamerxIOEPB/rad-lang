@@ -1,0 +1,250 @@
+// ==============================================================================
+// rad-tui — layout.rad
+// Rect geometry, Direction, Alignment, Constraints, and Layout Solver.
+// ==============================================================================
+
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl Rect {
+    pub fn new(x: i32, y: i32, width: i32, height: i32) -> Rect {
+        var w = width;
+        var h = height;
+        if w < 0 { w = 0; }
+        if h < 0 { h = 0; }
+        return Rect { x: x, y: y, width: w, height: h };
+    }
+
+    pub fn area(self) -> i32 {
+        return self.width * self.height;
+    }
+
+    pub fn left(self) -> i32 {
+        return self.x;
+    }
+
+    pub fn right(self) -> i32 {
+        return self.x + self.width;
+    }
+
+    pub fn top(self) -> i32 {
+        return self.y;
+    }
+
+    pub fn bottom(self) -> i32 {
+        return self.y + self.height;
+    }
+
+    pub fn inner(self, margin_x: i32, margin_y: i32) -> Rect {
+        let nx = self.x + margin_x;
+        let ny = self.y + margin_y;
+        var nw = self.width - (margin_x * 2);
+        var nh = self.height - (margin_y * 2);
+        if nw < 0 { nw = 0; }
+        if nh < 0 { nh = 0; }
+        return Rect.new(nx, ny, nw, nh);
+    }
+}
+
+pub const DIR_HORIZONTAL: i32 = 0;
+pub const DIR_VERTICAL: i32   = 1;
+
+pub const ALIGN_LEFT: i32   = 0;
+pub const ALIGN_CENTER: i32 = 1;
+pub const ALIGN_RIGHT: i32  = 2;
+
+pub const CONSTRAINT_FIXED: i32   = 0;
+pub const CONSTRAINT_PERCENT: i32 = 1;
+pub const CONSTRAINT_MIN: i32     = 2;
+pub const CONSTRAINT_MAX: i32     = 3;
+pub const CONSTRAINT_RATIO: i32   = 4;
+
+pub struct Constraint {
+    pub tag: i32,
+    pub val1: i32,
+    pub val2: i32,
+}
+
+impl Constraint {
+    pub fn fixed(size: i32) -> Constraint {
+        return Constraint { tag: CONSTRAINT_FIXED, val1: size, val2: 0 };
+    }
+
+    pub fn percentage(pct: i32) -> Constraint {
+        return Constraint { tag: CONSTRAINT_PERCENT, val1: pct, val2: 0 };
+    }
+
+    pub fn min(min_size: i32) -> Constraint {
+        return Constraint { tag: CONSTRAINT_MIN, val1: min_size, val2: 0 };
+    }
+
+    pub fn max(max_size: i32) -> Constraint {
+        return Constraint { tag: CONSTRAINT_MAX, val1: max_size, val2: 0 };
+    }
+
+    pub fn ratio(num: i32, den: i32) -> Constraint {
+        return Constraint { tag: CONSTRAINT_RATIO, val1: num, val2: den };
+    }
+}
+
+pub struct Layout {
+    pub direction: i32,
+    pub margin: i32,
+    pub constraints: Vec,
+}
+
+impl Layout {
+    pub fn default() -> Layout {
+        return Layout {
+            direction: DIR_VERTICAL,
+            margin: 0,
+            constraints: Vec.new(),
+        };
+    }
+
+    pub fn horizontal() -> Layout {
+        return Layout {
+            direction: DIR_HORIZONTAL,
+            margin: 0,
+            constraints: Vec.new(),
+        };
+    }
+
+    pub fn vertical() -> Layout {
+        return Layout {
+            direction: DIR_VERTICAL,
+            margin: 0,
+            constraints: Vec.new(),
+        };
+    }
+
+    pub fn direction(self, d: i32) -> Layout {
+        return Layout {
+            direction: d,
+            margin: self.margin,
+            constraints: self.constraints,
+        };
+    }
+
+    pub fn margin(self, m: i32) -> Layout {
+        return Layout {
+            direction: self.direction,
+            margin: m,
+            constraints: self.constraints,
+        };
+    }
+
+    pub fn add_constraint(var self, c: Constraint) {
+        let boxed = malloc(24usize) as *raw var i64;
+        boxed[0usize] = c.tag as i64;
+        boxed[1usize] = c.val1 as i64;
+        boxed[2usize] = c.val2 as i64;
+        self.constraints.push(boxed as *raw u8);
+    }
+
+    pub fn split(self, area: Rect) -> Vec {
+        var result = Vec.new();
+        let count = self.constraints.len;
+        if count == 0usize {
+            return result;
+        }
+
+        let inner_area: Rect = area.inner(self.margin, self.margin);
+        var total_space = inner_area.height;
+        if self.direction == DIR_HORIZONTAL {
+            total_space = inner_area.width;
+        }
+
+        // Allocate target size for each constraint
+        let alloc_sizes = malloc(count * 8usize) as *raw var i64;
+        var fixed_sum = 0i64;
+        var flex_count = 0i64;
+
+        var i = 0usize;
+        while i < count {
+            let boxed = self.constraints.ptr[i] as *raw i64;
+            let tag = boxed[0usize] as i32;
+            let val1 = boxed[1usize] as i32;
+            let val2 = boxed[2usize] as i32;
+
+            var sz = 0i64;
+            if tag == CONSTRAINT_FIXED {
+                sz = val1 as i64;
+                fixed_sum = fixed_sum + sz;
+            } else if tag == CONSTRAINT_PERCENT {
+                sz = ((total_space * val1) / 100) as i64;
+                fixed_sum = fixed_sum + sz;
+            } else if tag == CONSTRAINT_RATIO && val2 > 0 {
+                sz = ((total_space * val1) / val2) as i64;
+                fixed_sum = fixed_sum + sz;
+            } else {
+                flex_count = flex_count + 1i64;
+            }
+            alloc_sizes[i] = sz;
+            i = i + 1usize;
+        }
+
+        // Distribute remaining space among flexible constraints
+        let remaining = (total_space as i64) - fixed_sum;
+        if flex_count > 0i64 && remaining > 0i64 {
+            let per_flex = remaining / flex_count;
+            var fi = 0usize;
+            while fi < count {
+                let boxed = self.constraints.ptr[fi] as *raw i64;
+                let tag = boxed[0usize] as i32;
+                if tag == CONSTRAINT_MIN || tag == CONSTRAINT_MAX {
+                    var s = per_flex;
+                    let val1 = boxed[1usize];
+                    if tag == CONSTRAINT_MIN && s < val1 { s = val1; }
+                    if tag == CONSTRAINT_MAX && s > val1 { s = val1; }
+                    alloc_sizes[fi] = s;
+                }
+                fi = fi + 1usize;
+            }
+        }
+
+        // Build Rects
+        var cur_pos = 0;
+        var r_idx = 0usize;
+        while r_idx < count {
+            var sz = alloc_sizes[r_idx] as i32;
+            // Clamp to remaining space
+            if cur_pos + sz > total_space {
+                sz = total_space - cur_pos;
+                if sz < 0 { sz = 0; }
+            }
+
+            var sub_rect: Rect = Rect.new(0, 0, 0, 0);
+            if self.direction == DIR_VERTICAL {
+                sub_rect = Rect.new(inner_area.x, inner_area.y + cur_pos, inner_area.width, sz);
+            } else {
+                sub_rect = Rect.new(inner_area.x + cur_pos, inner_area.y, sz, inner_area.height);
+            }
+
+            let r_box = malloc(32usize) as *raw var i64;
+            r_box[0usize] = sub_rect.x as i64;
+            r_box[1usize] = sub_rect.y as i64;
+            r_box[2usize] = sub_rect.width as i64;
+            r_box[3usize] = sub_rect.height as i64;
+            result.push(r_box as *raw u8);
+
+            cur_pos = cur_pos + sz;
+            r_idx = r_idx + 1usize;
+        }
+
+        free(alloc_sizes as *raw u8);
+        return result;
+    }
+}
+
+pub fn get_rect(list: Vec, idx: usize) -> Rect {
+    if idx >= list.len {
+        return Rect.new(0, 0, 0, 0);
+    }
+    let p = list.ptr[idx] as *raw i64;
+    return Rect.new(p[0usize] as i32, p[1usize] as i32, p[2usize] as i32, p[3usize] as i32);
+}
