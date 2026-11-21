@@ -92,6 +92,27 @@ for source in tests/test_memory.rad tests/test_collections.rad tests/test_stdlib
     fi
 done
 
+echo "==> Ecosystem package functional suites"
+while IFS= read -r source; do
+    package="$(basename "$(dirname "$(dirname "$source")")")"
+    name="$(basename "$source" .rad)"
+    binary="$TMP_DIR/${package}_$name"
+    if "$RADC" -g -O0 "$source" -o "$binary" >"$TMP_DIR/$name.compile.log" 2>&1; then
+        INTEGRATION_BINS+=("$binary")
+        if "$binary" >"$TMP_DIR/$name.run.log" 2>&1; then
+            printf '  [OK] %s/%s\n' "$package" "$name"
+        else
+            failed=$((failed + 1))
+            printf '  [FAIL] runtime %s/%s\n' "$package" "$name"
+            cat "$TMP_DIR/$name.run.log"
+        fi
+    else
+        failed=$((failed + 1))
+        printf '  [FAIL] compile %s/%s\n' "$package" "$name"
+        cat "$TMP_DIR/$name.compile.log"
+    fi
+done < <(find "$ROOT_DIR/lib/rad" -mindepth 3 -maxdepth 3 -type f -path '*/tests/test_*.rad' | sort)
+
 echo "==> Allocator, collections, and pointer stress suite"
 MEMORY_BIN="$TMP_DIR/memory_safety"
 if "$RADC" -g -O0 tests/quality/memory_safety.rad -o "$MEMORY_BIN" >"$TMP_DIR/memory.compile.log" 2>&1; then
