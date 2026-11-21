@@ -29,6 +29,7 @@ PREFIX     ?= $(HOME)/.rad
 # LLVM compilation and link flags
 LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags 2>/dev/null || echo "-I$(PREFIX)/include")
 LLVM_LDFLAGS  ?= $(shell llvm-config --ldflags 2>/dev/null || echo "")
+LLVM_SYSLIBS  ?= $(shell llvm-config --system-libs 2>/dev/null || echo "-lz -lzstd -lrt -ldl -lm")
 
 # Host & target triples
 TARGET_TRIPLE ?= x86_64-unknown-linux-musl
@@ -93,7 +94,7 @@ $(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp $(R
 		$(RADC) --emit-llvm $(RADC_SRCS) -o $(BIN_DIR)/radc_rad.ll $(RADC_FLAGS) && \
 		rad-llc -filetype=obj -relocation-model=pic $(BIN_DIR)/radc_rad.ll -o $(BIN_DIR)/radc_rad.o; \
 	fi
-	clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o $(BIN_DIR)/crash_report.o $(LLVM_LDFLAGS) -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldWasm -llldCommon -o $(BIN_RADC)
+	clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o $(BIN_DIR)/crash_report.o $(LLVM_LDFLAGS) -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldWasm -llldCommon $(LLVM_SYSLIBS) -o $(BIN_RADC)
 	@chmod 755 $(BIN_RADC)
 
 rad: $(BIN_RAD)

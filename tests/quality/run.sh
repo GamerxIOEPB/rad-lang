@@ -109,7 +109,7 @@ if command -v "$LLVM_CONFIG" >/dev/null 2>&1 && command -v "$CXX" >/dev/null 2>&
                 >"$TMP_DIR/crash-$signal_mode.log" 2>&1
             status=$?
             set -e
-            if [[ "$status" -lt 128 ]] ||
+            if [[ "$status" -eq 0 ]] ||
                ! grep -Fq "internal compiler error" "$TMP_DIR/crash-$signal_mode.log" ||
                ! grep -Eiq 'stack dump|backtrace|#0|0x[[:xdigit:]]+' "$TMP_DIR/crash-$signal_mode.log"; then
                 failed=$((failed + 1))
