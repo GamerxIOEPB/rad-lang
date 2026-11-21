@@ -105,11 +105,27 @@ for cat in "${CATS[@]}"; do
 
         if [ $crc -ne 0 ]; then
             if [ "$cat" = "12_must_fail" ] || [[ "$name" =~ (neg_|^nf_) ]]; then
-                echo "NEG_OK (compiler rejected: $(head -1 "$RES/$name/compile.out" | cut -c1-90))"
-                record "$name" "$cat" NEG_OK "$crc"
-                neg_ok=$((neg_ok+1))
+                # Shell reports signal termination as 128 + signal (e.g. 139
+                # for SIGSEGV, 134 for SIGABRT). A crash is never a valid reject.
+                if [ "$crc" -ge 128 ] || grep -Eqi 'segmentation fault|core dumped|aborted|signal [0-9]+' "$RES/$name/compile.out"; then
+                    echo "NEG_CRASH (compiler terminated abnormally; see results/$name/compile.out)"
+                    record "$name" "$cat" NEG_CRASH "$crc"
+                    compile_fail=$((compile_fail+1)); failed_tests+=("$name(compiler-crash)")
+                elif [ ! -s "$RES/$name/compile.out" ]; then
+                    echo "NEG_NO_DIAGNOSTIC (compiler failed without a diagnostic)"
+                    record "$name" "$cat" NEG_NO_DIAGNOSTIC "$crc"
+                    compile_fail=$((compile_fail+1)); failed_tests+=("$name(no-diagnostic)")
+                elif [ -f "$EDIR/$name.diag" ] && ! grep -qF "$(cat "$EDIR/$name.diag")" "$RES/$name/compile.out"; then
+                    echo "NEG_BAD_DIAGNOSTIC (expected diagnostic text missing)"
+                    record "$name" "$cat" NEG_BAD_DIAGNOSTIC "$crc"
+                    compile_fail=$((compile_fail+1)); failed_tests+=("$name(wrong-diagnostic)")
+                else
+                    echo "NEG_OK (compiler rejected: $(head -1 "$RES/$name/compile.out" | cut -c1-90))"
+                    record "$name" "$cat" NEG_OK "$crc"
+                    neg_ok=$((neg_ok+1))
+                fi
             else
-                echo "COMPILE_FAIL  (see results/$name/compile.err)"
+                echo "COMPILE_FAIL  (see results/$name/compile.out)"
                 record "$name" "$cat" COMPILE_FAIL "$crc"
                 compile_fail=$((compile_fail+1)); failed_tests+=("$name(compile)")
             fi
@@ -212,5 +228,8 @@ if [ ${#failed_tests[@]} -gt 0 ]; then
     echo
     echo "Failing tests:"
     printf '  - %s\n' "${failed_tests[@]}"
+fi
+if [ "$compile_fail" -gt 0 ] || [ "$run_fail" -gt 0 ] || [ "$mismatch" -gt 0 ] || [ "$neg_bug" -gt 0 ]; then
+    exit 1
 fi
 exit 0
