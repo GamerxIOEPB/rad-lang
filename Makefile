@@ -61,7 +61,7 @@ BIN_DIR := bin
 BIN_RADC := $(BIN_DIR)/radc
 BIN_RAD  := $(BIN_DIR)/rad
 
-.PHONY: all radc rad dist install clean help check-radc
+.PHONY: all radc rad dist install clean help check-radc test quality-test
 
 all: check-radc $(BIN_RADC) $(BIN_RAD)
 	@echo ""
@@ -81,10 +81,11 @@ check-radc:
 
 radc: $(BIN_RADC)
 
-$(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp
+$(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp $(RADC_DIR)/crash_report.cpp
 	@mkdir -p $(BIN_DIR)
 	@echo "==> Compiling backend bridge..."
 	clang++ -c -O2 -fPIC $(LLVM_CXXFLAGS) -fexceptions $(RADC_DIR)/backend_bridge.cpp -o $(BIN_DIR)/backend_bridge.o
+	clang++ -c -O2 -fPIC $(LLVM_CXXFLAGS) $(RADC_DIR)/crash_report.cpp -o $(BIN_DIR)/crash_report.o
 	@echo "==> Compiling self-hosted compiler ($@) using $(RADC)..."
 	@if $(RADC) --version 2>&1 | grep -q "0.2"; then \
 		$(RADC) -c $(RADC_SRCS) -o $(BIN_DIR)/radc_rad.o $(RADC_FLAGS); \
@@ -92,7 +93,7 @@ $(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp
 		$(RADC) --emit-llvm $(RADC_SRCS) -o $(BIN_DIR)/radc_rad.ll $(RADC_FLAGS) && \
 		rad-llc -filetype=obj -relocation-model=pic $(BIN_DIR)/radc_rad.ll -o $(BIN_DIR)/radc_rad.o; \
 	fi
-	clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o $(LLVM_LDFLAGS) -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldWasm -llldCommon -o $(BIN_RADC)
+	clang++ $(BIN_DIR)/radc_rad.o $(BIN_DIR)/backend_bridge.o $(BIN_DIR)/crash_report.o $(LLVM_LDFLAGS) -L$(PREFIX)/lib/llvm -Wl,-rpath,'$$ORIGIN/../lib/llvm' -lLLVM -llldELF -llldWasm -llldCommon -o $(BIN_RADC)
 	@chmod 755 $(BIN_RADC)
 
 rad: $(BIN_RAD)
@@ -102,6 +103,13 @@ $(BIN_RAD): $(RAD_SRCS) $(BIN_RADC)
 	@echo "==> Compiling package manager ($@) using $(BIN_RADC)..."
 	$(BIN_RADC) $(RAD_SRCS) -o $(BIN_RAD) $(RAD_FLAGS)
 	@chmod 755 $(BIN_RAD)
+
+quality-test: $(BIN_RADC)
+	@RADC="$(abspath $(BIN_RADC))" bash tests/quality/run.sh
+
+test: $(BIN_RADC)
+	@RADC="$(abspath $(BIN_RADC))" bash tests/radtest/runner/run_tests.sh
+	@RADC="$(abspath $(BIN_RADC))" bash tests/quality/run.sh
 
 arcade: $(BIN_RADC)
 	@echo "==> Building Rad Arcade games (pure native single-file imports)..."
