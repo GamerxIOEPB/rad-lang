@@ -3556,7 +3556,8 @@ impl Codegen {
                     err.push_str(sug)
                     err.push_str("'?)")
                 }
-                self.parser.report_error("E0023", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col)
+                let diag_source_id_4 = self.parser.expr_source_ids.ptr[expr_id]
+                self.parser.report_error_for_source(diag_source_id_4, "E0023", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col)
             }
             if !self.is_expr_ptr(recv_id) {
                 let cvt = self.alloc_ssa()
@@ -4151,7 +4152,8 @@ impl Codegen {
                     err.push_str("type mismatch: cannot assign string literal to integer variable '")
                     err.push_str(vname)
                     err.push_str("'")
-                    self.parser.report_error("E0021", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+                    let diag_source_id_5 = self.parser.stmt_source_ids.ptr[stmt_id]
+                    self.parser.report_error_for_source(diag_source_id_5, "E0021", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
                 }
                 var r = self.emit_expr(init_expr)
                 if str_starts_with(raw_ty, "dyn ") {
@@ -4366,7 +4368,8 @@ impl Codegen {
                 err.push_str("type mismatch: cannot assign string literal to integer variable '")
                 err.push_str(vname)
                 err.push_str("'")
-                self.parser.report_error("E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+                let diag_source_id_6 = self.parser.stmt_source_ids.ptr[stmt_id]
+                self.parser.report_error_for_source(diag_source_id_6, "E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
             }
             var r = self.emit_expr(init_expr)
             if str_starts_with(raw_ty, "dyn ") {
@@ -5740,7 +5743,8 @@ impl Codegen {
                     warn_msg.push_str(vname)
                     warn_msg.push_str("')")
                     let span = 4i64 + str_len(vname) as i64
-                    self.parser.report_warning_span("W0001", warn_msg.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, span)
+                    let diag_source_id_7 = self.parser.stmt_source_ids.ptr[stmt_id]
+                    self.parser.report_warning_span_for_source(diag_source_id_7, "W0001", warn_msg.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, span)
                 }
             }
         } else if k == STMT_IF {
