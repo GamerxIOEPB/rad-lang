@@ -534,6 +534,24 @@ impl Parser {
         }
     }
 
+    fn report_error_for_source(var self, source_id: usize, err_code: str, err_msg: str, line: i64, col: i64) {
+        self.report_error_span_for_source(source_id, err_code, err_msg, line, col, 1i64)
+    }
+
+    fn report_warning_span_for_source(var self, source_id: usize, warn_code: str, warn_msg: str, line: i64, col: i64, span_len: i64) {
+        if source_id >= self.source_files.len {
+            self.report_warning_span(warn_code, warn_msg, line, col, span_len)
+            return
+        }
+        let previous_filename = self.filename
+        let previous_source = self.source
+        self.filename = self.source_files.ptr[source_id].file_path
+        self.source = self.source_files.ptr[source_id].file_text
+        self.report_warning_span(warn_code, warn_msg, line, col, span_len)
+        self.filename = previous_filename
+        self.source = previous_source
+    }
+
     fn report_error(var self, err_code: str, err_msg: str, line: i64, col: i64) {
         self.report_error_span(err_code, err_msg, line, col, self.cur_tok_len())
     }
