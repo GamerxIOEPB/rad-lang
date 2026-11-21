@@ -99,7 +99,7 @@ docker run --rm \
             bin/backend_bridge.o \
             bin/llvm_stubs.o \
             -L/usr/local/lib/lld \
-            -llldELF -llldCommon \
+            -llldELF -llldWasm -llldCommon \
             -L/usr/lib/llvm21/lib \
             ${LLVM_LIBS} \
             ${LLVM_SYSLIBS} \
