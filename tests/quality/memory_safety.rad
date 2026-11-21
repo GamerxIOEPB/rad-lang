@@ -1,5 +1,7 @@
 // Runtime stress coverage for allocator and pointer-owning library types.
-import alloc;
+import alloc/boxed;
+import alloc/hash;
+import alloc/string;
 import std/arena;
 import std/collections;
 

@@ -109,8 +109,14 @@ quality-test: $(BIN_RADC)
 	@RADC="$(abspath $(BIN_RADC))" bash tests/quality/run.sh
 
 test: $(BIN_RADC)
-	@RADC="$(abspath $(BIN_RADC))" bash tests/radtest/runner/run_tests.sh
-	@RADC="$(abspath $(BIN_RADC))" bash tests/quality/run.sh
+	@set +e; \
+	  RADC="$(abspath $(BIN_RADC))" bash tests/radtest/runner/run_tests.sh; regression_status=$?; \
+	  RADC="$(abspath $(BIN_RADC))" bash tests/quality/run.sh; quality_status=$?; \
+	  set -e; \
+	  if [ $regression_status -ne 0 ] || [ $quality_status -ne 0 ]; then \
+	    echo "Rad test summary: regression=$regression_status quality=$quality_status"; \
+	    exit 1; \
+	  fi
 
 arcade: $(BIN_RADC)
 	@echo "==> Building Rad Arcade games (pure native single-file imports)..."
