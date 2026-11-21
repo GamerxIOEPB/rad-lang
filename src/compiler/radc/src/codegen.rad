@@ -4049,10 +4049,17 @@ impl Codegen {
         if str_len(clean) == 0usize || str_eq(clean, "void") || str_eq(clean, "i32") || str_eq(clean, "i64") || str_eq(clean, "bool") || str_eq(clean, "f64") || str_eq(clean, "f32") {
             return false
         }
+        // A prefix match is unsafe here: a generic placeholder such as
+        // "T" must never match an unrelated concrete destructor like
+        // "TcpStream__drop". Match the complete type-specific symbol.
+        var expected_drop = String.new()
+        expected_drop.push_str(clean)
+        expected_drop.push_str("__drop")
+        expected_drop.push_byte(0u8)
         var fi = 0usize
         while fi < self.parser.functions.len {
             let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
-            if str_ends_with(fn_str, "__drop") && str_starts_with(fn_str, clean) {
+            if str_eq(fn_str, expected_drop.as_ptr() as str) {
                 return true
             }
             fi = fi + 1usize
@@ -4076,11 +4083,15 @@ impl Codegen {
                 continue
             }
             let clean = self.clean_type_name(vty)
+            var expected_drop = String.new()
+            expected_drop.push_str(clean)
+            expected_drop.push_str("__drop")
+            expected_drop.push_byte(0u8)
             var drop_fn_name = ""
             var fi = 0usize
             while fi < self.parser.functions.len {
                 let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
-                if str_ends_with(fn_str, "__drop") && str_starts_with(fn_str, clean) {
+                if str_eq(fn_str, expected_drop.as_ptr() as str) {
                     drop_fn_name = fn_str
                     break
                 }
