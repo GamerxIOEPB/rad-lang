@@ -159,11 +159,8 @@ if ! command -v valgrind >/dev/null 2>&1; then
     else
         echo "  [SKIP] Valgrind not installed (set REQUIRE_VALGRIND=1 in CI)"
     fi
-elif [[ ! -x "$MEMORY_BIN" ]]; then
-    failed=$((failed + 1))
-    echo "  [FAIL] memory stress binary was not produced; cannot run Valgrind"
 else
-    for program in "${INTEGRATION_BINS[@]}" "$MEMORY_BIN"; do
+    for program in "${INTEGRATION_BINS[@]}"; do
         name="$(basename "$program")"
         set +e
         valgrind --quiet --track-origins=yes --error-exitcode=99 \
@@ -179,6 +176,25 @@ else
             cat "$TMP_DIR/valgrind-$name.log"
         fi
     done
+
+    if [[ -x "$MEMORY_BIN" ]]; then
+        set +e
+        valgrind --quiet --track-origins=yes --error-exitcode=99 \
+            --leak-check=full --errors-for-leak-kinds=definite,indirect \
+            "$MEMORY_BIN" >"$TMP_DIR/valgrind-memory_safety.log" 2>&1
+        memory_status=$?
+        set -e
+        if [[ "$memory_status" -eq 0 ]]; then
+            echo "  [OK] Valgrind: memory_safety"
+        else
+            failed=$((failed + 1))
+            printf '  [FAIL] Valgrind: memory_safety (exit %s)\n' "$memory_status"
+            cat "$TMP_DIR/valgrind-memory_safety.log"
+        fi
+    else
+        failed=$((failed + 1))
+        echo "  [FAIL] memory stress binary was not produced; Valgrind stress check skipped"
+    fi
 
     UAF_BIN="$TMP_DIR/use_after_free"
     if "$RADC" -g -O0 tests/quality/use_after_free.rad -o "$UAF_BIN" >"$TMP_DIR/uaf.compile.log" 2>&1; then
