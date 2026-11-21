@@ -1,40 +1,13 @@
 // ==============================================================================
-// Rad Desktop GUI: Native Wayland Showcase Application (std::gui)
-// Interactive 60 FPS Wayland Desktop GUI client connecting to KDE Plasma Wayland,
-// featuring dynamic themes, flexbox layout, interactive widgets, mouse telemetry,
+// Rad Universal Desktop GUI: Pure-Rad Native Showcase Application (std::gui)
+// 100% Pure Rad implementation with zero external C bridge files, zero
+// wayland-scanner, zero libwayland-client, zero libX11.
+// Automatically detects and supports Wayland and X11 display servers natively.
+// Features dynamic themes, flexbox layout, interactive widgets, pointer telemetry,
 // and hardware-independent software rasterizer.
 // ==============================================================================
 
 extern "C" {
-    fn rad_wayland_init(title: str, width: i32, height: i32) -> *raw var u8;
-    fn rad_wayland_poll_events(win: *raw var u8) -> i32;
-    fn rad_wayland_is_open(win: *raw var u8) -> i32;
-    fn rad_wayland_close(win: *raw var u8);
-    fn rad_wayland_destroy(win: *raw var u8);
-    fn rad_wayland_get_buffer(win: *raw var u8) -> *raw var u32;
-    fn rad_wayland_get_width(win: *raw var u8) -> i32;
-    fn rad_wayland_get_height(win: *raw var u8) -> i32;
-    fn rad_wayland_commit(win: *raw var u8);
-    fn rad_wayland_poll_event(win: *raw var u8) -> i32;
-    fn rad_wayland_event_type(win: *raw var u8) -> i32;
-    fn rad_wayland_event_x(win: *raw var u8) -> f32;
-    fn rad_wayland_event_y(win: *raw var u8) -> f32;
-    fn rad_wayland_event_code(win: *raw var u8) -> u32;
-    fn rad_wayland_mouse_x(win: *raw var u8) -> f32;
-    fn rad_wayland_mouse_y(win: *raw var u8) -> f32;
-    fn rad_wayland_mouse_down(win: *raw var u8) -> i32;
-    fn rad_wayland_clear(win: *raw var u8, color: u32);
-    fn rad_wayland_draw_rect(win: *raw var u8, x: i32, y: i32, w: i32, h: i32, color: u32);
-    fn rad_wayland_draw_rect_outline(win: *raw var u8, x: i32, y: i32, w: i32, h: i32, border_width: i32, color: u32);
-    fn rad_wayland_draw_rect_rounded(win: *raw var u8, x: i32, y: i32, w: i32, h: i32, radius: i32, color: u32);
-    fn rad_wayland_draw_text(win: *raw var u8, x: i32, y: i32, text: str, color: u32, scale: i32);
-    fn rad_wayland_draw_circle(win: *raw var u8, cx: i32, cy: i32, radius: i32, color: u32);
-    fn rad_wayland_text_width(text: str, scale: i32) -> i32;
-    fn rad_wayland_i64_width(val: i64, scale: i32) -> i32;
-    fn rad_wayland_draw_i64(win: *raw var u8, x: i32, y: i32, val: i64, color: u32, scale: i32);
-    fn rad_wayland_draw_formatted(win: *raw var u8, x: i32, y: i32, prefix: str, val: i64, suffix: str, color: u32, scale: i32);
-    fn rad_wayland_draw_xy(win: *raw var u8, x: i32, y: i32, prefix: str, val_x: i64, val_y: i64, color: u32, scale: i32);
-    fn rad_wayland_save_bmp(win: *raw var u8, filename: str) -> i32;
     fn usleep(usec: u32) -> i32;
     fn getenv(name: str) -> *raw u8;
 }
@@ -76,7 +49,7 @@ fn get_theme(idx: i32) -> GuiTheme {
             btn_hover: 0x364068u32,
             btn_active: 0x00E5FFu32,
             accent_glow: 0xFF007Fu32,   // Neon Magenta
-        }
+        };
     } else if idx == 1 {
         // Theme 1: Slate Modern Minimal
         return GuiTheme {
@@ -92,7 +65,7 @@ fn get_theme(idx: i32) -> GuiTheme {
             btn_hover: 0x414A5Du32,
             btn_active: 0x4D96FFu32,
             accent_glow: 0x6BCB77u32,   // Emerald Glow
-        }
+        };
     } else {
         // Theme 2: Matrix Emerald Terminal
         return GuiTheme {
@@ -108,14 +81,14 @@ fn get_theme(idx: i32) -> GuiTheme {
             btn_hover: 0x1C5C33u32,
             btn_active: 0x00FF66u32,
             accent_glow: 0x00FF66u32,   // Matrix Glow
-        }
+        };
     }
 }
 
 fn theme_button_label(idx: i32) -> str {
-    if idx == 0 { return "Theme: Cyberpunk Neon" }
-    if idx == 1 { return "Theme: Slate Modern" }
-    return "Theme: Matrix Emerald"
+    if idx == 0 { return "Theme: Cyberpunk Neon"; }
+    if idx == 1 { return "Theme: Slate Modern"; }
+    return "Theme: Matrix Emerald";
 }
 
 // ------------------------------------------------------------------------------
@@ -123,11 +96,11 @@ fn theme_button_label(idx: i32) -> str {
 // ------------------------------------------------------------------------------
 
 fn point_in_rect(px: f32, py: f32, rx: i32, ry: i32, rw: i32, rh: i32) -> bool {
-    let x0 = rx as f32
-    let y0 = ry as f32
-    let x1 = (rx + rw) as f32
-    let y1 = (ry + rh) as f32
-    return px >= x0 && px <= x1 && py >= y0 && py <= y1
+    let x0 = rx as f32;
+    let y0 = ry as f32;
+    let x1 = (rx + rw) as f32;
+    let y1 = (ry + rh) as f32;
+    return px >= x0 && px <= x1 && py >= y0 && py <= y1;
 }
 
 // ------------------------------------------------------------------------------
@@ -135,7 +108,6 @@ fn point_in_rect(px: f32, py: f32, rx: i32, ry: i32, rw: i32, rh: i32) -> bool {
 // ------------------------------------------------------------------------------
 
 pub struct AppState {
-    pub win: *raw var u8,
     pub width: i32,
     pub height: i32,
     pub counter: i64,
@@ -152,9 +124,8 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(win: *raw var u8, w: i32, h: i32) -> AppState {
+    pub fn new(w: i32, h: i32) -> AppState {
         return AppState {
-            win: win,
             width: w,
             height: h,
             counter: 42i64,
@@ -168,12 +139,12 @@ impl AppState {
             mouse_down: false,
             last_event: "WINDOW_EVENT_INIT",
             last_key: 0u32,
-        }
+        };
     }
 
     pub fn update_hover(var self) {
-        let mx = self.mouse_x
-        let my = self.mouse_y
+        let mx = self.mouse_x;
+        let my = self.mouse_y;
 
         // Button 1: Increment (+ Inc) [x=44, y=290, w=115, h=36]
         // Button 2: Decrement (- Dec) [x=169, y=290, w=115, h=36]
@@ -182,278 +153,297 @@ impl AppState {
         // Button 5: Theme Cycle       [x=44, y=124, w=240, h=36]
         // Button 6: Close Window [X]  [x=870, y=12, w=36, h=32]
         if point_in_rect(mx, my, 44, 290, 115, 36) {
-            self.hover_btn = 1i32
+            self.hover_btn = 1i32;
         } else if point_in_rect(mx, my, 169, 290, 115, 36) {
-            self.hover_btn = 2i32
+            self.hover_btn = 2i32;
         } else if point_in_rect(mx, my, 44, 336, 240, 36) {
-            self.hover_btn = 3i32
+            self.hover_btn = 3i32;
         } else if point_in_rect(mx, my, 44, 382, 240, 36) {
-            self.hover_btn = 4i32
+            self.hover_btn = 4i32;
         } else if point_in_rect(mx, my, 44, 124, 240, 36) {
-            self.hover_btn = 5i32
+            self.hover_btn = 5i32;
         } else if point_in_rect(mx, my, 870, 12, 36, 32) {
-            self.hover_btn = 6i32
+            self.hover_btn = 6i32;
         } else {
-            self.hover_btn = 0i32
+            self.hover_btn = 0i32;
         }
     }
 
-    pub fn handle_click(var self) {
-        self.click_count = self.click_count + 1i64
-        let btn = self.hover_btn
+    pub fn handle_click(var self, var win: Window) {
+        self.click_count = self.click_count + 1i64;
+        let btn = self.hover_btn;
 
         if btn == 1i32 {
-            self.counter = self.counter + 1i64
+            self.counter = self.counter + 1i64;
         } else if btn == 2i32 {
-            self.counter = self.counter - 1i64
+            self.counter = self.counter - 1i64;
         } else if btn == 3i32 {
-            self.counter = 0i64
+            self.counter = 0i64;
         } else if btn == 4i32 {
-            self.auto_tick = !self.auto_tick
+            self.auto_tick = !self.auto_tick;
         } else if btn == 5i32 {
-            self.theme_idx = (self.theme_idx + 1i32) % 3i32
+            self.theme_idx = (self.theme_idx + 1i32) % 3i32;
         } else if btn == 6i32 {
-            rad_wayland_close(self.win)
+            win.close();
         }
     }
 
-    pub fn render_button(self, x: i32, y: i32, w: i32, h: i32, label: str, btn_id: i32, theme: GuiTheme) {
-        let is_hover = self.hover_btn == btn_id
-        let is_down = is_hover && self.mouse_down
+    pub fn render_button(self, var win: Window, x: i32, y: i32, w: i32, h: i32, label: str, btn_id: i32, theme: GuiTheme) {
+        let is_hover = self.hover_btn == btn_id;
+        let is_down = is_hover && self.mouse_down;
 
-        var bg_col = theme.btn_bg
+        var bg_col = theme.btn_bg;
         if is_down {
-            bg_col = theme.btn_active
+            bg_col = theme.btn_active;
         } else if is_hover {
-            bg_col = theme.btn_hover
+            bg_col = theme.btn_hover;
         }
 
         // Draw rounded button base
-        rad_wayland_draw_rect_rounded(self.win, x, y, w, h, 6, bg_col)
+        win.draw_rect_rounded(x, y, w, h, 6, bg_col);
 
         // Draw outline border
-        var border_col = theme.card_border
+        var border_col = theme.card_border;
         if is_hover {
-            border_col = theme.text_accent
+            border_col = theme.text_accent;
         }
-        rad_wayland_draw_rect_outline(self.win, x, y, w, h, 1, border_col)
+        win.draw_rect_outline(x, y, w, h, 1, border_col);
 
         // Draw text label centered horizontally & vertically
-        let text_w = rad_wayland_text_width(label, 1)
-        let text_x = x + (w - text_w) / 2
-        let text_y = y + (h - 16) / 2
+        let text_w = win.text_width(label, 1);
+        let text_x = x + (w - text_w) / 2;
+        let text_y = y + (h - 16) / 2;
 
-        var text_col = theme.text_primary
+        var text_col = theme.text_primary;
         if is_down {
-            text_col = 0x000000u32 // dark text when active highlighted
+            text_col = 0x000000u32; // dark text when active highlighted
         }
-        rad_wayland_draw_text(self.win, text_x, text_y, label, text_col, 1)
+        win.draw_text(text_x, text_y, label, text_col, 1);
     }
 
-    pub fn render_frame(var self) {
-        let theme = get_theme(self.theme_idx)
+    pub fn render_frame(var self, var win: Window) {
+        let theme = get_theme(self.theme_idx);
 
         // 1. Clear background
-        rad_wayland_clear(self.win, theme.bg)
+        win.clear(theme.bg);
 
         // 2. Render Top Header Bar (0, 0, width, 56)
-        rad_wayland_draw_rect(self.win, 0, 0, self.width, 56, theme.panel_bg)
-        rad_wayland_draw_rect(self.win, 0, 55, self.width, 1, theme.card_border)
+        win.draw_rect(0, 0, self.width, 56, theme.panel_bg);
+        win.draw_rect(0, 55, self.width, 1, theme.card_border);
 
         // Title text & subtitle
-        rad_wayland_draw_text(self.win, 24, 12, "RAD DESKTOP GUI", theme.text_accent, 2)
-        rad_wayland_draw_text(self.win, 290, 20, "Wayland Native (KDE Plasma)", theme.text_secondary, 1)
+        win.draw_text(24, 12, "RAD DESKTOP GUI", theme.text_accent, 2);
+
+        let detected = win.backend_type;
+        var backend_name = "Wayland Native (KDE Plasma)";
+        if detected == WINDOW_BACKEND_X11 {
+            backend_name = "X11 Native (Unix Core)";
+        } else if detected == WINDOW_BACKEND_HEADLESS {
+            backend_name = "Headless Buffer";
+        }
+        win.draw_text(290, 20, backend_name, theme.text_secondary, 1);
 
         // Status Badges
-        rad_wayland_draw_rect_rounded(self.win, 510, 14, 110, 28, 4, theme.card_bg)
-        rad_wayland_draw_rect_outline(self.win, 510, 14, 110, 28, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, 520, 20, "WL-CLIENT", theme.text_primary, 1)
+        var badge_text = "WL-NATIVE";
+        if detected == WINDOW_BACKEND_X11 {
+            badge_text = "X11-NATIVE";
+        }
+        win.draw_rect_rounded(500, 14, 120, 28, 4, theme.card_bg);
+        win.draw_rect_outline(500, 14, 120, 28, 1, theme.card_border);
+        win.draw_text(510, 20, badge_text, theme.text_primary, 1);
 
-        rad_wayland_draw_rect_rounded(self.win, 630, 14, 110, 28, 4, theme.card_bg)
-        rad_wayland_draw_rect_outline(self.win, 630, 14, 110, 28, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, 642, 20, "XRGB8888", theme.text_primary, 1)
+        win.draw_rect_rounded(630, 14, 110, 28, 4, theme.card_bg);
+        win.draw_rect_outline(630, 14, 110, 28, 1, theme.card_border);
+        win.draw_text(642, 20, "XRGB8888", theme.text_primary, 1);
 
-        rad_wayland_draw_rect_rounded(self.win, 750, 14, 100, 28, 4, theme.card_bg)
-        rad_wayland_draw_rect_outline(self.win, 750, 14, 100, 28, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, 762, 20, "60 FPS", theme.text_accent, 1)
+        win.draw_rect_rounded(750, 14, 100, 28, 4, theme.card_bg);
+        win.draw_rect_outline(750, 14, 100, 28, 1, theme.card_border);
+        win.draw_text(762, 20, "60 FPS", theme.text_accent, 1);
 
         // Close button [X]
-        var close_bg = theme.btn_bg
+        var close_bg = theme.btn_bg;
         if self.hover_btn == 6i32 {
-            close_bg = 0xEE3344u32 // bright red on hover
+            close_bg = 0xEE3344u32; // bright red on hover
         }
-        rad_wayland_draw_rect_rounded(self.win, 870, 12, 36, 32, 4, close_bg)
-        rad_wayland_draw_text(self.win, 882, 20, "X", 0xFFFFFFu32, 1)
+        win.draw_rect_rounded(870, 12, 36, 32, 4, close_bg);
+        win.draw_text(882, 20, "X", 0xFFFFFFu32, 1);
 
         // 3. Left Control Panel (24, 76, 280, 550)
-        rad_wayland_draw_rect_rounded(self.win, 24, 76, 280, 550, 8, theme.panel_bg)
-        rad_wayland_draw_rect_outline(self.win, 24, 76, 280, 550, 1, theme.card_border)
+        win.draw_rect_rounded(24, 76, 280, 550, 8, theme.panel_bg);
+        win.draw_rect_outline(24, 76, 280, 550, 1, theme.card_border);
 
-        rad_wayland_draw_text(self.win, 44, 96, "CONTROL PANEL", theme.text_accent, 1)
+        win.draw_text(44, 96, "CONTROL PANEL", theme.text_accent, 1);
 
         // Theme Switcher Button
-        let theme_label = theme_button_label(self.theme_idx)
-        self.render_button(44, 124, 240, 36, theme_label, 5i32, theme)
+        let theme_label = theme_button_label(self.theme_idx);
+        self.render_button(win, 44, 124, 240, 36, theme_label, 5i32, theme);
 
         // Section: Interactive Counter
-        rad_wayland_draw_text(self.win, 44, 184, "REACTIVE COUNTER", theme.text_secondary, 1)
+        win.draw_text(44, 184, "REACTIVE COUNTER", theme.text_secondary, 1);
 
         // Counter Display Box
-        rad_wayland_draw_rect_rounded(self.win, 44, 208, 240, 68, 6, theme.card_bg)
-        rad_wayland_draw_rect_outline(self.win, 44, 208, 240, 68, 1, theme.card_border)
+        win.draw_rect_rounded(44, 208, 240, 68, 6, theme.card_bg);
+        win.draw_rect_outline(44, 208, 240, 68, 1, theme.card_border);
 
-        let cnt_w = rad_wayland_i64_width(self.counter, 3)
-        let cnt_x = 44 + (240 - cnt_w) / 2
-        rad_wayland_draw_i64(self.win, cnt_x, 218, self.counter, theme.text_accent, 3)
+        let cnt_w = win.i64_width(self.counter, 3);
+        let cnt_x = 44 + (240 - cnt_w) / 2;
+        win.draw_i64(cnt_x, 218, self.counter, theme.text_accent, 3);
 
         // Counter Buttons
-        self.render_button(44, 290, 115, 36, "+ Inc", 1i32, theme)
-        self.render_button(169, 290, 115, 36, "- Dec", 2i32, theme)
-        self.render_button(44, 336, 240, 36, "Reset (0)", 3i32, theme)
+        self.render_button(win, 44, 290, 115, 36, "+ Inc", 1i32, theme);
+        self.render_button(win, 169, 290, 115, 36, "- Dec", 2i32, theme);
+        self.render_button(win, 44, 336, 240, 36, "Reset (0)", 3i32, theme);
 
-        var auto_label = "Auto-Tick: OFF"
+        var auto_label = "Auto-Tick: OFF";
         if self.auto_tick {
-            auto_label = "Auto-Tick: ACTIVE [ON]"
+            auto_label = "Auto-Tick: ACTIVE [ON]";
         }
-        self.render_button(44, 382, 240, 36, auto_label, 4i32, theme)
+        self.render_button(win, 44, 382, 240, 36, auto_label, 4i32, theme);
 
         // Telemetry Stats in Left Panel
-        rad_wayland_draw_text(self.win, 44, 444, "SYSTEM TELEMETRY", theme.text_secondary, 1)
-        rad_wayland_draw_rect(self.win, 44, 464, 240, 1, theme.card_border)
+        win.draw_text(44, 444, "SYSTEM TELEMETRY", theme.text_secondary, 1);
+        win.draw_rect(44, 464, 240, 1, theme.card_border);
 
-        rad_wayland_draw_formatted(self.win, 44, 476, "Frame: ", self.frame_count, "", theme.text_primary, 1)
-        rad_wayland_draw_formatted(self.win, 44, 498, "Total Clicks: ", self.click_count, "", theme.text_primary, 1)
+        win.draw_formatted(44, 476, "Frame: ", self.frame_count, "", theme.text_primary, 1);
+        win.draw_formatted(44, 498, "Total Clicks: ", self.click_count, "", theme.text_primary, 1);
 
-        rad_wayland_draw_text(self.win, 44, 520, "Compositor: KDE Wayland", theme.text_primary, 1)
-        rad_wayland_draw_text(self.win, 44, 542, "Protocol: xdg_shell_v1", theme.text_primary, 1)
-        rad_wayland_draw_text(self.win, 44, 564, "Memory: Linux memfd SHM", theme.text_primary, 1)
-
-        // 4. Right Panel Showcase: Card 1 - Wayland Real-time Telemetry (324, 76, 572, 160)
-        rad_wayland_draw_rect_rounded(self.win, 324, 76, 572, 160, 8, theme.panel_bg)
-        rad_wayland_draw_rect_outline(self.win, 324, 76, 572, 160, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, 344, 96, "WAYLAND EVENT & POINTER TELEMETRY", theme.text_accent, 1)
-
-        let mx_val = self.mouse_x as i64
-        let my_val = self.mouse_y as i64
-        rad_wayland_draw_xy(self.win, 344, 124, "Cursor Position: ", mx_val, my_val, theme.text_primary, 1)
-
-        var mouse_btn_str = "Mouse Button: RELEASED (IDLE)"
-        var mouse_btn_col = theme.text_secondary
-        if self.mouse_down {
-            mouse_btn_str = "Mouse Button: PRESSED [BTN_LEFT]"
-            mouse_btn_col = theme.text_accent
+        if detected == WINDOW_BACKEND_WAYLAND {
+            win.draw_text(44, 520, "Compositor: KDE Wayland", theme.text_primary, 1);
+            win.draw_text(44, 542, "Protocol: xdg_shell_v1", theme.text_primary, 1);
+            win.draw_text(44, 564, "Memory: Linux memfd SHM", theme.text_primary, 1);
+        } else if detected == WINDOW_BACKEND_X11 {
+            win.draw_text(44, 520, "Server: X.Org X11 Unix", theme.text_primary, 1);
+            win.draw_text(44, 542, "Protocol: X11 Core Wire", theme.text_primary, 1);
+            win.draw_text(44, 564, "Auth: MIT-MAGIC-COOKIE", theme.text_primary, 1);
+        } else {
+            win.draw_text(44, 520, "Server: Headless Fallback", theme.text_primary, 1);
+            win.draw_text(44, 542, "Protocol: In-Memory Bitmap", theme.text_primary, 1);
+            win.draw_text(44, 564, "Memory: Heap Framebuffer", theme.text_primary, 1);
         }
-        rad_wayland_draw_text(self.win, 344, 146, mouse_btn_str, mouse_btn_col, 1)
 
-        rad_wayland_draw_text(self.win, 344, 168, self.last_event, theme.text_primary, 1)
-        rad_wayland_draw_formatted(self.win, 344, 190, "Last Key Code: ", self.last_key as i64, " (ESC/Q to exit)", theme.text_secondary, 1)
+        // 4. Right Panel Showcase: Card 1 - Real-time Telemetry (324, 76, 572, 160)
+        win.draw_rect_rounded(324, 76, 572, 160, 8, theme.panel_bg);
+        win.draw_rect_outline(324, 76, 572, 160, 1, theme.card_border);
+        win.draw_text(344, 96, "DESKTOP EVENT & POINTER TELEMETRY", theme.text_accent, 1);
+
+        let mx_val = self.mouse_x as i64;
+        let my_val = self.mouse_y as i64;
+        win.draw_xy(344, 124, "Cursor Position: ", mx_val, my_val, theme.text_primary, 1);
+
+        var mouse_btn_str = "Mouse Button: RELEASED (IDLE)";
+        var mouse_btn_col = theme.text_secondary;
+        if self.mouse_down {
+            mouse_btn_str = "Mouse Button: PRESSED [BTN_LEFT]";
+            mouse_btn_col = theme.text_accent;
+        }
+        win.draw_text(344, 146, mouse_btn_str, mouse_btn_col, 1);
+
+        win.draw_text(344, 168, self.last_event, theme.text_primary, 1);
+        win.draw_formatted(344, 190, "Last Key Code: ", self.last_key as i64, " (ESC/Q to exit)", theme.text_secondary, 1);
 
         // Visual radar crosshair on the right of Card 1
-        rad_wayland_draw_rect_rounded(self.win, 770, 92, 110, 128, 6, theme.card_bg)
-        rad_wayland_draw_rect_outline(self.win, 770, 92, 110, 128, 1, theme.card_border)
-        rad_wayland_draw_circle(self.win, 825, 156, 40, theme.card_border)
-        rad_wayland_draw_circle(self.win, 825, 156, 20, theme.card_border)
+        win.draw_rect_rounded(770, 92, 110, 128, 6, theme.card_bg);
+        win.draw_rect_outline(770, 92, 110, 128, 1, theme.card_border);
+        win.draw_circle(825, 156, 40, theme.card_border);
+        win.draw_circle(825, 156, 20, theme.card_border);
 
         // Scaled cursor position mapped into radar box
-        let radar_x = 770 + ((self.mouse_x / (self.width as f32)) * 110.0) as i32
-        let radar_y = 92 + ((self.mouse_y / (self.height as f32)) * 128.0) as i32
-        rad_wayland_draw_circle(self.win, radar_x, radar_y, 4, theme.accent_glow)
+        let radar_x = 770 + ((self.mouse_x / (self.width as f32)) * 110.0) as i32;
+        let radar_y = 92 + ((self.mouse_y / (self.height as f32)) * 128.0) as i32;
+        win.draw_circle(radar_x, radar_y, 4, theme.accent_glow);
 
         // 5. Right Panel Showcase: Card 2 - std/gui Flexbox Layout Engine (324, 252, 572, 170)
-        rad_wayland_draw_rect_rounded(self.win, 324, 252, 572, 170, 8, theme.panel_bg)
-        rad_wayland_draw_rect_outline(self.win, 324, 252, 572, 170, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, 344, 272, "FLEXBOX ENGINE (std::gui::LayoutBox)", theme.text_accent, 1)
+        win.draw_rect_rounded(324, 252, 572, 170, 8, theme.panel_bg);
+        win.draw_rect_outline(324, 252, 572, 170, 1, theme.card_border);
+        win.draw_text(344, 272, "FLEXBOX ENGINE (std::gui::LayoutBox)", theme.text_accent, 1);
 
         // Compute layout using Rad std::gui LayoutBox
-        var root_box = LayoutBox::new(532.0, 100.0)
-        root_box.x = 344.0
-        root_box.y = 302.0
-        root_box.direction = FLEX_DIRECTION_ROW
-        root_box.justify_content = JUSTIFY_SPACE_BETWEEN
+        var root_box = LayoutBox::new(532.0, 100.0);
+        root_box.x = 344.0;
+        root_box.y = 302.0;
+        root_box.direction = FLEX_DIRECTION_ROW;
+        root_box.justify_content = JUSTIFY_SPACE_BETWEEN;
 
-        let box_a = LayoutBox::new(168.0, 96.0)
-        let box_b = LayoutBox::new(168.0, 96.0)
-        let box_c = LayoutBox::new(168.0, 96.0)
-        root_box.add_child(box_a)
-        root_box.add_child(box_b)
-        root_box.add_child(box_c)
-        root_box.compute_layout(532.0, 100.0)
+        let box_a = LayoutBox::new(168.0, 96.0);
+        let box_b = LayoutBox::new(168.0, 96.0);
+        let box_c = LayoutBox::new(168.0, 96.0);
+        root_box.add_child(box_a);
+        root_box.add_child(box_b);
+        root_box.add_child(box_c);
+        root_box.compute_layout(532.0, 100.0);
 
         // Render Sub-card 1
-        let x1 = root_box.children.ptr[0].x as i32
-        let y1 = root_box.children.ptr[0].y as i32
-        rad_wayland_draw_rect_rounded(self.win, x1, y1, 168, 96, 6, theme.card_bg)
-        rad_wayland_draw_rect_outline(self.win, x1, y1, 168, 96, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, x1 + 12, y1 + 14, "ACTOR MODEL", theme.text_accent, 1)
-        rad_wayland_draw_text(self.win, x1 + 12, y1 + 38, "Lock-free Mailbox", theme.text_primary, 1)
-        rad_wayland_draw_text(self.win, x1 + 12, y1 + 60, "1M+ Concurrency", theme.text_secondary, 1)
+        let x1 = root_box.children.ptr[0].x as i32;
+        let y1 = root_box.children.ptr[0].y as i32;
+        win.draw_rect_rounded(x1, y1, 168, 96, 6, theme.card_bg);
+        win.draw_rect_outline(x1, y1, 168, 96, 1, theme.card_border);
+        win.draw_text(x1 + 12, y1 + 14, "ACTOR MODEL", theme.text_accent, 1);
+        win.draw_text(x1 + 12, y1 + 38, "Lock-free Mailbox", theme.text_primary, 1);
+        win.draw_text(x1 + 12, y1 + 60, "1M+ Concurrency", theme.text_secondary, 1);
 
         // Render Sub-card 2
-        let x2 = root_box.children.ptr[1].x as i32 + 14i32
-        let y2 = root_box.children.ptr[1].y as i32
-        rad_wayland_draw_rect_rounded(self.win, x2, y2, 168, 96, 6, theme.card_bg)
-        rad_wayland_draw_rect_outline(self.win, x2, y2, 168, 96, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, x2 + 12, y2 + 14, "DETERMINISTIC ARC", theme.text_accent, 1)
-        rad_wayland_draw_text(self.win, x2 + 12, y2 + 38, "Zero GC Latency", theme.text_primary, 1)
-        rad_wayland_draw_text(self.win, x2 + 12, y2 + 60, "Static Elision", theme.text_secondary, 1)
+        let x2 = root_box.children.ptr[1].x as i32 + 14i32;
+        let y2 = root_box.children.ptr[1].y as i32;
+        win.draw_rect_rounded(x2, y2, 168, 96, 6, theme.card_bg);
+        win.draw_rect_outline(x2, y2, 168, 96, 1, theme.card_border);
+        win.draw_text(x2 + 12, y2 + 14, "DETERMINISTIC ARC", theme.text_accent, 1);
+        win.draw_text(x2 + 12, y2 + 38, "Zero GC Latency", theme.text_primary, 1);
+        win.draw_text(x2 + 12, y2 + 60, "Static Elision", theme.text_secondary, 1);
 
         // Render Sub-card 3
-        let x3 = root_box.children.ptr[2].x as i32 + 28i32
-        let y3 = root_box.children.ptr[2].y as i32
-        rad_wayland_draw_rect_rounded(self.win, x3, y3, 168, 96, 6, theme.card_bg)
-        rad_wayland_draw_rect_outline(self.win, x3, y3, 168, 96, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, x3 + 12, y3 + 14, "NATIVE LINKER", theme.text_accent, 1)
-        rad_wayland_draw_text(self.win, x3 + 12, y3 + 38, "ELF & Mach-O & PE", theme.text_primary, 1)
-        rad_wayland_draw_text(self.win, x3 + 12, y3 + 60, "Zero C++ Bridge", theme.text_secondary, 1)
+        let x3 = root_box.children.ptr[2].x as i32 + 28i32;
+        let y3 = root_box.children.ptr[2].y as i32;
+        win.draw_rect_rounded(x3, y3, 168, 96, 6, theme.card_bg);
+        win.draw_rect_outline(x3, y3, 168, 96, 1, theme.card_border);
+        win.draw_text(x3 + 12, y3 + 14, "NATIVE LINKER", theme.text_accent, 1);
+        win.draw_text(x3 + 12, y3 + 38, "ELF & Mach-O & PE", theme.text_primary, 1);
+        win.draw_text(x3 + 12, y3 + 60, "Zero C++ Bridge", theme.text_secondary, 1);
 
         // 6. Right Panel Showcase: Card 3 - Dynamic Vector Graphics & Visualizer (324, 438, 572, 188)
-        rad_wayland_draw_rect_rounded(self.win, 324, 438, 572, 188, 8, theme.panel_bg)
-        rad_wayland_draw_rect_outline(self.win, 324, 438, 572, 188, 1, theme.card_border)
-        rad_wayland_draw_text(self.win, 344, 456, "HARDWARE-ACCELERATED VECTOR GRAPHICS ENGINE", theme.text_accent, 1)
+        win.draw_rect_rounded(324, 438, 572, 188, 8, theme.panel_bg);
+        win.draw_rect_outline(324, 438, 572, 188, 1, theme.card_border);
+        win.draw_text(344, 456, "HARDWARE-ACCELERATED VECTOR GRAPHICS ENGINE", theme.text_accent, 1);
 
         // Animated Equalizer Bars
-        var bar_i = 0usize
+        var bar_i = 0usize;
         while bar_i < 24usize {
-            let bi = bar_i as i64
+            let bi = bar_i as i64;
             // Integer wave calculation
-            let wave_phase = (self.frame_count * 4i64 + bi * 14i64) % 100i64
-            var bar_h = 15i32 + (wave_phase as i32)
+            let wave_phase = (self.frame_count * 4i64 + bi * 14i64) % 100i64;
+            var bar_h = 15i32 + (wave_phase as i32);
             if bar_h > 100i32 {
-                bar_h = 200i32 - bar_h
+                bar_h = 200i32 - bar_h;
             }
-            if bar_h < 10i32 { bar_h = 10i32 }
+            if bar_h < 10i32 { bar_h = 10i32; }
 
-            let bx = 344 + (bar_i as i32) * 16
-            let by = 590 - bar_h
+            let bx = 344 + (bar_i as i32) * 16;
+            let by = 590 - bar_h;
 
-            var bar_col = theme.btn_bg
+            var bar_col = theme.btn_bg;
             if (bar_i % 2usize) == 0usize {
-                bar_col = theme.text_accent
+                bar_col = theme.text_accent;
             } else {
-                bar_col = theme.accent_glow
+                bar_col = theme.accent_glow;
             }
 
-            rad_wayland_draw_rect_rounded(self.win, bx, by, 11, bar_h, 3, bar_col)
-            bar_i = bar_i + 1usize
+            win.draw_rect_rounded(bx, by, 11, bar_h, 3, bar_col);
+            bar_i = bar_i + 1usize;
         }
 
         // Concentric spinning visualizer on right of Card 3
-        let spin_cx = 810
-        let spin_cy = 530
-        rad_wayland_draw_circle(self.win, spin_cx, spin_cy, 48, theme.card_bg)
-        rad_wayland_draw_circle(self.win, spin_cx, spin_cy, 36, theme.card_border)
-        rad_wayland_draw_circle(self.win, spin_cx, spin_cy, 24, theme.panel_bg)
-        rad_wayland_draw_circle(self.win, spin_cx, spin_cy, 12, theme.text_accent)
+        let spin_cx = 810;
+        let spin_cy = 530;
+        win.draw_circle(spin_cx, spin_cy, 48, theme.card_bg);
+        win.draw_circle(spin_cx, spin_cy, 36, theme.card_border);
+        win.draw_circle(spin_cx, spin_cy, 24, theme.panel_bg);
+        win.draw_circle(spin_cx, spin_cy, 12, theme.text_accent);
 
         // 7. Bottom Status Bar (0, 642, width, 38)
-        rad_wayland_draw_rect(self.win, 0, 642, self.width, 38, theme.panel_bg)
-        rad_wayland_draw_rect(self.win, 0, 642, self.width, 1, theme.card_border)
+        win.draw_rect(0, 642, self.width, 38, theme.panel_bg);
+        win.draw_rect(0, 642, self.width, 1, theme.card_border);
 
-        rad_wayland_draw_text(self.win, 24, 654, "[ESC/Q] Exit  [SPACE] Inc  [T] Theme  [A] Auto  [S] Shot", theme.text_secondary, 1)
-        rad_wayland_draw_text(self.win, 490, 654, "RAD v0.2.4  |  Wayland Client  |  Zero C++ Runtime", theme.text_accent, 1)
-
-        // 8. Commit buffer to Wayland surface
-        rad_wayland_commit(self.win)
+        win.draw_text(24, 654, "[ESC/Q] Exit  [SPACE] Inc  [T] Theme  [A] Auto  [S] Shot", theme.text_secondary, 1);
+        win.draw_text(490, 654, "RAD v0.2.4  |  Universal Native GUI  |  100% Pure Rad", theme.text_accent, 1);
     }
 }
 
@@ -462,116 +452,122 @@ impl AppState {
 // ------------------------------------------------------------------------------
 
 fn main() -> i32 {
-    let win_w = 920i32
-    let win_h = 680i32
-    let win_title = "Rad Desktop GUI - Native Wayland"
+    let win_w = 920i32;
+    let win_h = 680i32;
+    let win_title = "Rad Desktop GUI - Pure Rad Universal Window";
 
-    println("==================================================================")
-    println("Rad Native Desktop GUI Showcase (std::gui + Wayland)")
-    println("Connecting to active Wayland compositor...")
+    println("==================================================================");
+    println("Rad Native Desktop GUI Showcase (100% Pure Rad std::gui)");
+    println("Detecting active display server (Wayland / X11 / Headless)...");
 
-    let win = rad_wayland_init(win_title, win_w, win_h)
-    if (win as usize) == 0usize {
-        println("ERROR: Could not connect to Wayland display socket or bind xdg_wm_base.")
-        println("Please ensure WAYLAND_DISPLAY and XDG_RUNTIME_DIR are set.")
-        return 1i32
+    let detected = detect_display_backend();
+    var detected_str = "Headless Fallback";
+    if detected == WINDOW_BACKEND_WAYLAND {
+        detected_str = "Wayland Unix Socket";
+    } else if detected == WINDOW_BACKEND_X11 {
+        detected_str = "X11 Unix Socket (:0)";
+    }
+    println(f"Connecting via {detected_str}...");
+
+    var win = Window::open(win_title, win_w, win_h);
+    if !win.is_open() {
+        println("ERROR: Could not open window on any display backend.");
+        return 1i32;
     }
 
-    println("Wayland display connected!")
-    println("XDG Shell toplevel configured and mapped successfully.")
-    println("SHM Framebuffer allocated: 920x680 (XRGB8888, 2,502,400 bytes)")
-    println("Entering interactive 60 FPS event loop...")
+    println("Window opened and surface mapped successfully!");
+    println("Zero C++ bridge, zero external library link flags.");
+    println("SHM Framebuffer allocated: 920x680 (XRGB8888)");
+    println("Entering interactive 60 FPS event loop...");
 
-    var app = AppState::new(win, win_w, win_h)
+    var app = AppState::new(win_w, win_h);
 
     // Check for test mode: RAD_DEMO_FRAMES environment variable
-    var max_frames = 0i64
-    let env_frames = getenv("RAD_DEMO_FRAMES")
+    var max_frames = 0i64;
+    let env_frames = getenv("RAD_DEMO_FRAMES");
     if (env_frames as usize) != 0usize {
-        max_frames = 60i64 // default 60 frames in automated test mode
+        max_frames = 60i64; // default 60 frames in automated test mode
     }
 
-    while rad_wayland_is_open(win) != 0i32 {
-        // 1. Poll incoming Wayland compositor events (non-blocking)
-        let _ = rad_wayland_poll_events(win)
+    while win.is_open() {
+        // 1. Process all pending events
+        while true {
+            let ev = win.poll_event();
+            if ev.event_type == WINDOW_EVENT_NONE {
+                break;
+            }
 
-        // 2. Process all pending events in event ring-buffer
-        while rad_wayland_poll_event(win) != 0i32 {
-            let ev_type = rad_wayland_event_type(win)
-            let ev_x = rad_wayland_event_x(win)
-            let ev_y = rad_wayland_event_y(win)
-            let ev_code = rad_wayland_event_code(win)
-
-            if ev_type == 1i32 {
-                // WINDOW_EVENT_CLOSE
-                app.last_event = "WINDOW_EVENT_CLOSE"
-                rad_wayland_close(win)
-            } else if ev_type == 5i32 {
-                // WINDOW_EVENT_MOUSE_MOVE
-                app.mouse_x = ev_x
-                app.mouse_y = ev_y
-                app.last_event = "WINDOW_EVENT_MOUSE_MOVE"
-                app.update_hover()
-            } else if ev_type == 3i32 {
-                // WINDOW_EVENT_MOUSE_DOWN
-                app.mouse_x = ev_x
-                app.mouse_y = ev_y
-                app.mouse_down = true
-                app.last_event = "WINDOW_EVENT_MOUSE_DOWN"
-                app.update_hover()
-                app.handle_click()
-            } else if ev_type == 4i32 {
-                // WINDOW_EVENT_MOUSE_UP
-                app.mouse_x = ev_x
-                app.mouse_y = ev_y
-                app.mouse_down = false
-                app.last_event = "WINDOW_EVENT_MOUSE_UP"
-                app.update_hover()
-            } else if ev_type == 6i32 {
-                // WINDOW_EVENT_KEY_DOWN
-                app.last_key = ev_code
-                app.last_event = "WINDOW_EVENT_KEY_DOWN"
-                if ev_code == 57u32 {
+            if ev.event_type == WINDOW_EVENT_CLOSE {
+                app.last_event = "WINDOW_EVENT_CLOSE";
+                win.close();
+            } else if ev.event_type == WINDOW_EVENT_MOUSE_MOVE {
+                app.mouse_x = ev.x;
+                app.mouse_y = ev.y;
+                app.last_event = "WINDOW_EVENT_MOUSE_MOVE";
+                app.update_hover();
+            } else if ev.event_type == WINDOW_EVENT_MOUSE_DOWN {
+                app.mouse_x = ev.x;
+                app.mouse_y = ev.y;
+                app.mouse_down = true;
+                app.last_event = "WINDOW_EVENT_MOUSE_DOWN";
+                app.update_hover();
+                app.handle_click(win);
+            } else if ev.event_type == WINDOW_EVENT_MOUSE_UP {
+                app.mouse_x = ev.x;
+                app.mouse_y = ev.y;
+                app.mouse_down = false;
+                app.last_event = "WINDOW_EVENT_MOUSE_UP";
+                app.update_hover();
+            } else if ev.event_type == WINDOW_EVENT_KEY_DOWN {
+                app.last_key = ev.key_code;
+                app.last_event = "WINDOW_EVENT_KEY_DOWN";
+                if ev.key_code == 1u32 || ev.key_code == 24u32 || ev.key_code == 9u32 {
+                    // ESC / Q
+                    win.close();
+                } else if ev.key_code == 57u32 || ev.key_code == 65u32 {
                     // KEY_SPACE: Increment counter
-                    app.counter = app.counter + 1i64
-                } else if ev_code == 20u32 {
+                    app.counter = app.counter + 1i64;
+                } else if ev.key_code == 20u32 || ev.key_code == 28u32 {
                     // KEY_T: Cycle theme
-                    app.theme_idx = (app.theme_idx + 1i32) % 3i32
-                } else if ev_code == 30u32 {
+                    app.theme_idx = (app.theme_idx + 1i32) % 3i32;
+                } else if ev.key_code == 30u32 || ev.key_code == 38u32 {
                     // KEY_A: Toggle auto-tick
-                    app.auto_tick = !app.auto_tick
-                } else if ev_code == 31u32 {
+                    app.auto_tick = !app.auto_tick;
+                } else if ev.key_code == 31u32 || ev.key_code == 39u32 {
                     // KEY_S: Capture screenshot
-                    let _ = rad_wayland_save_bmp(win, "demos/wayland_gui/screenshot.bmp")
-                    println("Screenshot captured: demos/wayland_gui/screenshot.bmp")
+                    let _ = win.save_bmp("demos/wayland_gui/screenshot.bmp");
+                    println("Screenshot captured: demos/wayland_gui/screenshot.bmp");
                 }
             }
         }
 
-        // 3. Update application state
-        app.frame_count = app.frame_count + 1i64
+        // 2. Update application state
+        app.frame_count = app.frame_count + 1i64;
         if app.auto_tick && (app.frame_count % 10i64) == 0i64 {
-            app.counter = app.counter + 1i64
+            app.counter = app.counter + 1i64;
         }
 
-        // 4. Render current frame
-        app.render_frame()
+        // 3. Render current frame
+        app.render_frame(win);
+
+        // 4. Present frame to compositor/display server
+        win.present();
 
         // 5. If running in automated benchmark/test mode, check frame limit
         if max_frames > 0i64 && app.frame_count >= max_frames {
-            println("Test frame count reached! Exiting demo cleanly...")
-            break
+            println("Test frame count reached! Exiting demo cleanly...");
+            break;
         }
 
         // 6. Frame timing (~60 FPS -> 16,000 microseconds)
-        let _ = usleep(16000u32)
+        let _ = usleep(16000u32);
     }
 
-    println("Saving final frame screenshot to demos/wayland_gui/screenshot.bmp...")
-    let _ = rad_wayland_save_bmp(win, "demos/wayland_gui/screenshot.bmp")
+    println("Saving final frame screenshot to demos/wayland_gui/screenshot.bmp...");
+    let _ = win.save_bmp("demos/wayland_gui/screenshot.bmp");
 
-    println("Cleaning up Wayland resources...")
-    rad_wayland_destroy(win)
-    println("Wayland GUI demo completed successfully!")
-    return 0i32
+    println("Cleaning up window resources...");
+    win.destroy();
+    println("Pure-Rad Desktop GUI demo completed successfully!");
+    return 0i32;
 }

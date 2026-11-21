@@ -1,34 +1,38 @@
-# Pure-Rad Native Wayland Desktop GUI Showcase
+# Pure-Rad Universal Native Desktop GUI Showcase
 
-An interactive, 60 FPS native desktop graphical application written in the **Rad** systems programming language, connecting directly to the Linux Wayland compositor (KDE Plasma) with zero external C++ dependencies and zero heavy GUI toolkits (no Qt, GTK, Electron, or Skia).
+An interactive, 60 FPS native desktop graphical application written in 100% pure **Rad** systems programming language, connecting directly to the Linux Wayland compositor (KDE Plasma) or X11 display server with **zero external C bridge files**, **zero C++ dependencies**, and **zero external GUI libraries** (no `libwayland-client`, no `libX11`, no Qt, GTK, Electron, or Skia).
 
-![Wayland GUI Screenshot](screenshot.png)
+![Universal Native GUI Screenshot](screenshot.png)
 
 ---
 
 ## Highlights & Features
 
-1. **Native Wayland Protocol Integration**:
-   - Directly connects to `$WAYLAND_DISPLAY` via `libwayland-client` and the standard `xdg-shell` desktop protocol.
-   - Binds `wl_compositor`, `wl_shm`, `xdg_wm_base`, and `wl_seat`.
-   - Handles `xdg_wm_base.ping` and responds with `xdg_wm_base_pong`.
-   - Listens for `xdg_surface.configure` and responds with `xdg_surface_ack_configure(serial)` before committing the initial buffer.
-   - Allocates Linux POSIX shared memory buffers via `memfd_create("rad-wayland-gui-shm", MFD_CLOEXEC)` and `mmap` with format `WL_SHM_FORMAT_XRGB8888`.
+1. **100% Pure-Rad Display Server Communication**:
+   - **Wayland Backend**: Pure Rad implementation of the Wayland wire protocol over AF_UNIX domain sockets (`/run/user/1000/wayland-1`).
+     - Issues binary requests directly via POSIX `syscall3(1, fd, buf, len)`.
+     - Allocates shared memory via `SYS_memfd_create` (319) and passes file descriptors to compositor via `SYS_sendmsg` (46) with `SCM_RIGHTS` control message headers.
+     - Implements `wl_display`, `wl_registry`, `wl_shm`, `wl_shm_pool`, `wl_buffer`, `wl_compositor`, `wl_surface`, `xdg_wm_base`, `xdg_surface`, `xdg_toplevel`, `wl_seat`, and `wl_pointer`.
+   - **X11 Backend**: Pure Rad implementation of the X11 core wire protocol over AF_UNIX domain sockets (`/tmp/.X11-unix/X0`).
+     - Directly parses binary authentication cookies from `$XAUTHORITY` (`MIT-MAGIC-COOKIE-1`).
+     - Performs client setup handshake, allocates XIDs, issues `CreateWindow` (opcode 1), `CreateGC` (opcode 55), `MapWindow` (opcode 8), and streams framebuffer scanlines via `PutImage` (opcode 72 ZPixmap).
+   - **Automatic Backend Detection**: Automatically inspects runtime environment (`$WAYLAND_DISPLAY`, `$DISPLAY`) and activates the appropriate native protocol backend.
 
 2. **Full `std::gui` Integration**:
+   - High-level `Window` API: `Window::open(title, width, height)` or `Window::open_with_backend(title, width, height, backend)`.
    - Uses `std::gui::LayoutBox` flexbox engine to compute reactive horizontal layouts (`justify_content = JUSTIFY_SPACE_BETWEEN`).
-   - Uses `std::gui` event model for non-blocking event dispatching.
+   - Unified non-blocking event polling (`win.poll_event()`).
 
 3. **Interactive UI Widgets**:
-   - **Header Bar**: Title, window status pills (`[WL-CLIENT]`, `[XRGB8888]`, `[60 FPS]`), and close window button `[X]`.
+   - **Header Bar**: Title, window status pills (`[WL-NATIVE]` or `[X11-NATIVE]`, `[XRGB8888]`, `[60 FPS]`), and close window button `[X]`.
    - **Visual Themes**: Dynamic theme switcher cycling through **Cyberpunk Neon**, **Slate Modern**, and **Matrix Emerald**.
    - **Reactive Counter**: Large 3x font counter with `+ Inc`, `- Dec`, `Reset (0)`, and an asynchronous `Auto-Tick` mode.
-   - **Real-Time Wayland Telemetry**: Live cursor coordinates `(X, Y)`, pointer button status (`PRESSED` / `RELEASED`), and an interactive mini radar reticle tracking cursor movement.
-   - **Hardware-Accelerated Vector Graphics**: 24 animated neon audio-visualizer equalizer bars and concentric rotating radar circles.
-   - **Status Bar**: Hotkey prompts and live compiler version telemetry.
+   - **Real-Time Telemetry**: Live cursor coordinates `(X, Y)`, pointer button status (`PRESSED` / `RELEASED`), and an interactive mini radar reticle tracking cursor movement.
+   - **Hardware-Independent Vector Graphics**: 24 animated neon audio-visualizer equalizer bars and concentric rotating radar circles.
+   - **Status Bar**: Hotkey prompts and live backend telemetry.
 
 4. **Keyboard & Mouse Hotkeys**:
-   - `[ESC]` or `[Q]`: Cleanly destroy Wayland surfaces and exit.
+   - `[ESC]` or `[Q]`: Cleanly destroy window surfaces and exit.
    - `[SPACE]`: Increment the counter.
    - `[T]`: Cycle through visual themes.
    - `[A]`: Toggle auto-tick mode.
@@ -43,23 +47,24 @@ An interactive, 60 FPS native desktop graphical application written in the **Rad
 │                   demos/wayland_gui/main.rad           │
 │  - AppState, event handling, flexbox layout, widgets   │
 └──────────────────────────┬─────────────────────────────┘
-                           │ extern "C"
+                           │ import std/gui;
 ┌──────────────────────────▼─────────────────────────────┐
-│                 wayland_native.c / wayland_native.h    │
-│  - wl_display / wl_registry / wl_seat / wl_shm         │
-│  - xdg_wm_base / xdg_surface / xdg_toplevel            │
-│  - Non-blocking poll() event loop ring-buffer          │
-│  - Fast software rasterizer (rect, rounded, text, bmp) │
-└──────────────────────────┬─────────────────────────────┘
-                           │ Wayland wire protocol
-┌──────────────────────────▼─────────────────────────────┐
-│            xdg-shell-protocol.c (wayland-scanner)      │
-│            libwayland-client.so                        │
-└──────────────────────────┬─────────────────────────────┘
-                           │ UNIX Domain Socket (/run/user/1000/wayland-1)
-┌──────────────────────────▼─────────────────────────────┐
-│                  KDE Plasma Compositor (KWin)          │
-└────────────────────────────────────────────────────────┘
+│                       std/gui (lib/rad/std/src/gui.rad)│
+│  - Unified Window API (open, poll_event, present)      │
+│  - Software Rasterizer (rect, rounded, text, bmp)      │
+│  - Font Cache (embedded 8x16 bitmap font)              │
+├──────────────────────────┬─────────────────────────────┤
+│ WaylandBackend (Pure Rad)│ X11Backend (Pure Rad)       │
+│ - AF_UNIX wire protocol  │ - AF_UNIX wire protocol     │
+│ - SCM_RIGHTS fd passing  │ - .Xauthority cookie parser │
+│ - memfd SHM buffer       │ - ZPixmap PutImage stream   │
+└────────────┬─────────────┴───────────────┬─────────────┘
+             │                             │
+             ▼                             ▼
+┌──────────────────────────┐  ┌──────────────────────────┐
+│   Wayland Compositor     │  │        X11 Server        │
+│      (KDE Plasma)        │  │     (/tmp/.X11-unix/X0)  │
+└──────────────────────────┘  └──────────────────────────┘
 ```
 
 ---
@@ -67,27 +72,15 @@ An interactive, 60 FPS native desktop graphical application written in the **Rad
 ## Building and Running
 
 ### Prerequisites
-- Linux running an active Wayland compositor (e.g., KDE Plasma, GNOME Wayland, Hyprland, Sway).
-- `wayland-client` library development headers (`libwayland-dev` on Debian/Ubuntu, `wayland` on Arch Linux).
+- Linux running Wayland or X11.
 - Self-hosted Rad compiler `bin/radc` (v0.2.4).
+- No external development libraries or headers needed!
 
-### Automated Build Script
+### Build Single Command
 ```bash
 ./demos/wayland_gui/build.sh
-```
-
-### Manual Compilation
-```bash
-# 1. Compile protocol objects
-clang -O2 -c demos/wayland_gui/xdg-shell-protocol.c -o demos/wayland_gui/xdg-shell-protocol.o
-clang -O2 -c demos/wayland_gui/wayland_native.c -Idemos/wayland_gui -o demos/wayland_gui/wayland_native.o
-
-# 2. Compile Rad application
-bin/radc demos/wayland_gui/main.rad \
-    demos/wayland_gui/wayland_native.o \
-    demos/wayland_gui/xdg-shell-protocol.o \
-    --linker "clang -lwayland-client" \
-    -o demos/wayland_gui/rad_wayland_demo
+# or directly:
+bin/radc demos/wayland_gui/main.rad -o demos/wayland_gui/rad_wayland_demo
 ```
 
 ### Launch Interactive Application
@@ -95,8 +88,14 @@ bin/radc demos/wayland_gui/main.rad \
 ./demos/wayland_gui/rad_wayland_demo
 ```
 
-### Automated Benchmark / Headless Test
+### Explicit Display Server Testing
 ```bash
-# Runs exactly 60 frames (~1.0s at 60 FPS), saves a screenshot, and exits cleanly
+# Run on Wayland (default on Wayland desktops):
+./demos/wayland_gui/rad_wayland_demo
+
+# Force run on X11:
+WAYLAND_DISPLAY="" DISPLAY=":0" ./demos/wayland_gui/rad_wayland_demo
+
+# Automated 60 frames test:
 RAD_DEMO_FRAMES=60 ./demos/wayland_gui/rad_wayland_demo
 ```
