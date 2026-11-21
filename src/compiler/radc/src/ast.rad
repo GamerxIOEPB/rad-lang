@@ -20,8 +20,8 @@ const EXPR_TRY: i32 = 15
 const EXPR_AWAIT: i32 = 16
 
 struct SourceFile {
-    path: String,
-    source: String,
+    file_path: String,
+    file_text: String,
 }
 
 struct Expr {
