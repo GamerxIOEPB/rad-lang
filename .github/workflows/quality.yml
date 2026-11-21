@@ -56,3 +56,14 @@ jobs:
             PREFIX="$HOME/.rad" \
             LLVM_CXXFLAGS="$(llvm-config --cxxflags)" \
             LLVM_LDFLAGS="$(llvm-config --ldflags)"
+
+      - name: Upload regression and quality diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rad-quality-diagnostics
+          path: |
+            tests/radtest/results/
+            tests/radtest/build/
+          if-no-files-found: warn
+          retention-days: 14
