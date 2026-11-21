@@ -28,7 +28,7 @@ RUN for f in libLLVMTestingAnnotations.a libLLVMTestingSupport.a libllvm_gtest.a
         ar crs "/usr/lib/llvm21/lib/$f" 2>/dev/null || true; \
     done
 
-# 3. Clone and build static LLD libraries (liblldELF.a and liblldCommon.a) with position-independent code (-fPIC)
+# 3. Clone and build static LLD libraries (ELF, Wasm, and Common) with position-independent code (-fPIC)
 RUN git clone -q --depth 1 --branch llvmorg-21.1.2 --filter=blob:none --sparse https://github.com/llvm/llvm-project.git /tmp/llvm-lld 2>/dev/null && \
     cd /tmp/llvm-lld && \
     git sparse-checkout set lld cmake llvm/cmake && \
@@ -41,9 +41,9 @@ RUN git clone -q --depth 1 --branch llvmorg-21.1.2 --filter=blob:none --sparse h
       -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
       -DCMAKE_C_FLAGS="-w" \
       -DCMAKE_CXX_FLAGS="-w" && \
-    ninja lldELF lldCommon && \
+    ninja lldELF lldWasm lldCommon && \
     mkdir -p /usr/local/lib/lld /usr/local/include && \
-    cp lib/liblldELF.a lib/liblldCommon.a /usr/local/lib/lld/ && \
+    cp lib/liblldELF.a lib/liblldWasm.a lib/liblldCommon.a /usr/local/lib/lld/ && \
     cp -r /tmp/llvm-lld/lld/include/* /usr/local/include/ && \
     rm -rf /tmp/llvm-lld
 

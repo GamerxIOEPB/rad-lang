@@ -636,6 +636,10 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         filename: String.new(),
         error_count: 0i64,
         source: String.new(),
+        source_files: Vec.new(),
+        expr_source_ids: Vec.new(),
+        stmt_source_ids: Vec.new(),
+        current_source_id: 0usize,
         moved_vars: Vec.new(),
         imported_modules: Vec.new(),
         diagnostics: Vec.new(),
@@ -680,6 +684,11 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         stmt_col: 0i64,
     })
 
+    // Source IDs share the same indices as their AST arena entries; reserve
+    // index zero for the null expression/statement sentinels.
+    parser.expr_source_ids.push(0usize)
+    parser.stmt_source_ids.push(0usize)
+
     var loaded_files = Vec.new()
     var file_idx = 0usize
     while file_idx < opts.input_paths.len {
@@ -721,6 +730,12 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
             return 1
         }
         let source = read_file_string(fpath)
+        let source_id = parser.source_files.len
+        parser.source_files.push(SourceFile {
+            file_path: String.from_str(fpath),
+            file_text: source,
+        })
+        parser.current_source_id = source_id
         let tokens = lex_source(source)
         parser.tokens = tokens
         parser.pos = 0usize

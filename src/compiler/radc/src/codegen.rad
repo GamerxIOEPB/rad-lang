@@ -1181,14 +1181,22 @@ impl Codegen {
         if str_eq(field_name, "filename") { return 10i64 }
         if str_eq(field_name, "error_count") { return 11i64 }
         if str_eq(field_name, "source") { return 12i64 }
-        if str_eq(field_name, "moved_vars") { return 13i64 }
-        if str_eq(field_name, "imported_modules") { return 14i64 }
-        if str_eq(field_name, "diagnostics") { return 15i64 }
-        if str_eq(field_name, "color_mode") { return 16i64 }
-        if str_eq(field_name, "json_format") { return 17i64 }
-        if str_eq(field_name, "test_mode") { return 18i64 }
-        if str_eq(field_name, "cur_is_test") { return 19i64 }
-        if str_eq(field_name, "cur_is_async") { return 20i64 }
+        if str_eq(field_name, "source_files") { return 13i64 }
+        if str_eq(field_name, "expr_source_ids") { return 14i64 }
+        if str_eq(field_name, "stmt_source_ids") { return 15i64 }
+        if str_eq(field_name, "current_source_id") { return 16i64 }
+        if str_eq(field_name, "moved_vars") { return 17i64 }
+        if str_eq(field_name, "imported_modules") { return 18i64 }
+        if str_eq(field_name, "diagnostics") { return 19i64 }
+        if str_eq(field_name, "color_mode") { return 20i64 }
+        if str_eq(field_name, "json_format") { return 21i64 }
+        if str_eq(field_name, "test_mode") { return 22i64 }
+        if str_eq(field_name, "cur_is_test") { return 23i64 }
+        if str_eq(field_name, "cur_is_async") { return 24i64 }
+
+        // SourceFile
+        if str_eq(field_name, "file_path") { return 0i64 }
+        if str_eq(field_name, "file_text") { return 1i64 }
 
         // StringEntry
         if str_eq(field_name, "content") { return 0i64 }
@@ -1986,7 +1994,8 @@ impl Codegen {
                     err.push_str(sug)
                     err.push_str("'?)")
                 }
-                self.parser.report_error_span("E0020", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col, str_len(vname) as i64)
+                let diag_source_id_1 = self.parser.expr_source_ids.ptr[expr_id]
+                self.parser.report_error_span_for_source(diag_source_id_1, "E0020", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col, str_len(vname) as i64)
             }
 
             let llvm_ty = self.get_var_type(vname)
@@ -2336,7 +2345,8 @@ impl Codegen {
                     err.push_str(sug)
                     err.push_str("'?)")
                 }
-                self.parser.report_error_span("E0020", err.as_ptr() as str, ep[callee_id].expr_line, ep[callee_id].expr_col, str_len(callee_name) as i64)
+                let diag_source_id_2 = self.parser.expr_source_ids.ptr[callee_id]
+                self.parser.report_error_span_for_source(diag_source_id_2, "E0020", err.as_ptr() as str, ep[callee_id].expr_line, ep[callee_id].expr_col, str_len(callee_name) as i64)
             }
 
             if str_eq(callee_name, "swap") {
@@ -3546,7 +3556,8 @@ impl Codegen {
                     err.push_str(sug)
                     err.push_str("'?)")
                 }
-                self.parser.report_error("E0023", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col)
+                let diag_source_id_4 = self.parser.expr_source_ids.ptr[expr_id]
+                self.parser.report_error_for_source(diag_source_id_4, "E0023", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col)
             }
             if !self.is_expr_ptr(recv_id) {
                 let cvt = self.alloc_ssa()
@@ -4141,7 +4152,8 @@ impl Codegen {
                     err.push_str("type mismatch: cannot assign string literal to integer variable '")
                     err.push_str(vname)
                     err.push_str("'")
-                    self.parser.report_error("E0021", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+                    let diag_source_id_5 = self.parser.stmt_source_ids.ptr[stmt_id]
+                    self.parser.report_error_for_source(diag_source_id_5, "E0021", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
                 }
                 var r = self.emit_expr(init_expr)
                 if str_starts_with(raw_ty, "dyn ") {
@@ -4343,7 +4355,8 @@ impl Codegen {
                     err.push_str(sug)
                     err.push_str("'?)")
                 }
-                self.parser.report_error_span("E0020", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, str_len(vname) as i64)
+                let diag_source_id_3 = self.parser.stmt_source_ids.ptr[stmt_id]
+                self.parser.report_error_span_for_source(diag_source_id_3, "E0020", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, str_len(vname) as i64)
                 let _r = self.emit_expr(init_expr)
                 return
             }
@@ -4355,7 +4368,8 @@ impl Codegen {
                 err.push_str("type mismatch: cannot assign string literal to integer variable '")
                 err.push_str(vname)
                 err.push_str("'")
-                self.parser.report_error("E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+                let diag_source_id_6 = self.parser.stmt_source_ids.ptr[stmt_id]
+                self.parser.report_error_for_source(diag_source_id_6, "E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
             }
             var r = self.emit_expr(init_expr)
             if str_starts_with(raw_ty, "dyn ") {
@@ -5729,7 +5743,8 @@ impl Codegen {
                     warn_msg.push_str(vname)
                     warn_msg.push_str("')")
                     let span = 4i64 + str_len(vname) as i64
-                    self.parser.report_warning_span("W0001", warn_msg.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, span)
+                    let diag_source_id_7 = self.parser.stmt_source_ids.ptr[stmt_id]
+                    self.parser.report_warning_span_for_source(diag_source_id_7, "W0001", warn_msg.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, span)
                 }
             }
         } else if k == STMT_IF {
