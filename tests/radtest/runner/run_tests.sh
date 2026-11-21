@@ -18,6 +18,9 @@
 set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RAD_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# Resolve project stdlib modules from the checked-out repository even though
+# tests execute from tests/radtest. Preserve an explicit user RAD_HOME.
+export RAD_HOME="${RAD_HOME:-$RAD_ROOT}"
 cd "$SCRIPT_DIR/.."   # radtest root
 
 if [ -z "${RADC:-}" ]; then

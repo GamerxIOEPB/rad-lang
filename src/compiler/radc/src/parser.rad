@@ -2204,7 +2204,7 @@ impl Parser {
             }
         }
         var fn_name = String.new()
-        if str_len(prefix) > 0usize && !str_eq(prefix, "String") && !str_eq(prefix, "Vec") {
+        if str_len(prefix) > 0usize && ((!str_eq(prefix, "String") && !str_eq(prefix, "Vec")) || str_eq(raw_fn_name.as_ptr() as str, "new") || (str_eq(prefix, "String") && str_eq(raw_fn_name.as_ptr() as str, "from_str"))) {
             fn_name.push_str(prefix)
             fn_name.push_str("__")
         }

@@ -3,7 +3,7 @@
 pub trait Copy {}
 
 pub trait Clone {
-    fn clone(self: Self) -> Self
+    fn clone(self: Self) -> Self;
 }
 
 pub trait Send {}
@@ -11,5 +11,5 @@ pub trait Send {}
 pub trait Sync {}
 
 pub trait Drop {
-    fn drop(var self: Self)
+    fn drop(var self: Self);
 }

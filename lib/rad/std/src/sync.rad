@@ -1,36 +1,41 @@
 // Rad Standard Library: Concurrency Primitives and Synchronization
 
-pub fn sched_yield() -> i32
-pub fn pthread_create(thread: *raw var u64, attr: *raw var u8, routine: *raw var u8, arg: *raw var u8) -> i32
-pub fn pthread_join(thread: u64, retval: *raw var u8) -> i32
-pub fn pthread_mutex_init(mutex: *raw var u8, attr: *raw var u8) -> i32
-pub fn pthread_mutex_lock(mutex: *raw var u8) -> i32
-pub fn pthread_mutex_unlock(mutex: *raw var u8) -> i32
-pub fn pthread_mutex_destroy(mutex: *raw var u8) -> i32
-pub fn pthread_cond_init(cond: *raw var u8, attr: *raw var u8) -> i32
-pub fn pthread_cond_wait(cond: *raw var u8, mutex: *raw var u8) -> i32
-pub fn pthread_cond_signal(cond: *raw var u8) -> i32
-pub fn pthread_cond_broadcast(cond: *raw var u8) -> i32
-pub fn pthread_cond_destroy(cond: *raw var u8) -> i32
-pub fn pthread_rwlock_init(rwlock: *raw var u8, attr: *raw var u8) -> i32
-pub fn pthread_rwlock_rdlock(rwlock: *raw var u8) -> i32
-pub fn pthread_rwlock_wrlock(rwlock: *raw var u8) -> i32
-pub fn pthread_rwlock_unlock(rwlock: *raw var u8) -> i32
-pub fn pthread_rwlock_destroy(rwlock: *raw var u8) -> i32
+import alloc/allocator;
+import core/mem;
+import core/ptr;
 
-pub fn atomic_load_i32(ptr: *raw i32) -> i32
-pub fn atomic_load_i64(ptr: *raw i64) -> i64
-pub fn atomic_store_i32(ptr: *raw var i32, val: i32)
-pub fn atomic_store_i64(ptr: *raw var i64, val: i64)
-pub fn atomic_fetch_add_i32(ptr: *raw var i32, val: i32) -> i32
-pub fn atomic_fetch_add_i64(ptr: *raw var i64, val: i64) -> i64
-pub fn atomic_fetch_sub_i32(ptr: *raw var i32, val: i32) -> i32
-pub fn atomic_fetch_sub_i64(ptr: *raw var i64, val: i64) -> i64
-pub fn atomic_swap_i32(ptr: *raw var i32, val: i32) -> i32
-pub fn atomic_swap_i64(ptr: *raw var i64, val: i64) -> i64
-pub fn atomic_compare_exchange_i32(ptr: *raw var i32, expected: i32, desired: i32) -> i32
-pub fn atomic_compare_exchange_i64(ptr: *raw var i64, expected: i64, desired: i64) -> i64
-pub fn atomic_fence()
+extern "C" {
+    fn sched_yield() -> i32;
+    fn pthread_create(thread: *raw var u64, attr: *raw var u8, routine: *raw var u8, arg: *raw var u8) -> i32;
+    fn pthread_join(thread: u64, retval: *raw var u8) -> i32;
+    fn pthread_mutex_init(mutex: *raw var u8, attr: *raw var u8) -> i32;
+    fn pthread_mutex_lock(mutex: *raw var u8) -> i32;
+    fn pthread_mutex_unlock(mutex: *raw var u8) -> i32;
+    fn pthread_mutex_destroy(mutex: *raw var u8) -> i32;
+    fn pthread_cond_init(cond: *raw var u8, attr: *raw var u8) -> i32;
+    fn pthread_cond_wait(cond: *raw var u8, mutex: *raw var u8) -> i32;
+    fn pthread_cond_signal(cond: *raw var u8) -> i32;
+    fn pthread_cond_broadcast(cond: *raw var u8) -> i32;
+    fn pthread_cond_destroy(cond: *raw var u8) -> i32;
+    fn pthread_rwlock_init(rwlock: *raw var u8, attr: *raw var u8) -> i32;
+    fn pthread_rwlock_rdlock(rwlock: *raw var u8) -> i32;
+    fn pthread_rwlock_wrlock(rwlock: *raw var u8) -> i32;
+    fn pthread_rwlock_unlock(rwlock: *raw var u8) -> i32;
+    fn pthread_rwlock_destroy(rwlock: *raw var u8) -> i32;
+    fn atomic_load_i32(ptr: *raw i32) -> i32;
+    fn atomic_load_i64(ptr: *raw i64) -> i64;
+    fn atomic_store_i32(ptr: *raw var i32, val: i32);
+    fn atomic_store_i64(ptr: *raw var i64, val: i64);
+    fn atomic_fetch_add_i32(ptr: *raw var i32, val: i32) -> i32;
+    fn atomic_fetch_add_i64(ptr: *raw var i64, val: i64) -> i64;
+    fn atomic_fetch_sub_i32(ptr: *raw var i32, val: i32) -> i32;
+    fn atomic_fetch_sub_i64(ptr: *raw var i64, val: i64) -> i64;
+    fn atomic_swap_i32(ptr: *raw var i32, val: i32) -> i32;
+    fn atomic_swap_i64(ptr: *raw var i64, val: i64) -> i64;
+    fn atomic_compare_exchange_i32(ptr: *raw var i32, expected: i32, desired: i32) -> i32;
+    fn atomic_compare_exchange_i64(ptr: *raw var i64, expected: i64, desired: i64) -> i64;
+    fn atomic_fence();
+}
 
 pub struct AtomicI32 {
     pub ptr: *raw var i32,
@@ -397,7 +402,12 @@ impl<T> Receiver<T> {
     }
 }
 
-pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
+pub struct ChannelEndpoints<T> {
+    pub sender: Sender<T>,
+    pub receiver: Receiver<T>,
+}
+
+pub fn channel<T>() -> ChannelEndpoints<T> {
     let m = malloc(64usize)
     pthread_mutex_init(m, 0usize as *raw var u8)
     let c = malloc(64usize)
@@ -412,6 +422,9 @@ pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let sz = size_of_val(dummy)
     let s_ptr = malloc(sz) as *raw var ChannelState<T>
     ptr_write(s_ptr, dummy)
-    let res = (Sender { state: s_ptr }, Receiver { state: s_ptr })
+    let res = ChannelEndpoints {
+        sender: Sender { state: s_ptr },
+        receiver: Receiver { state: s_ptr },
+    }
     res
 }

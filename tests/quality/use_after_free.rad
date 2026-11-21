@@ -1,0 +1,22 @@
+// Deliberate use-after-free detector probe. Execute ONLY under Valgrind.
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn main() -> i32 {
+    let ptr = malloc(8usize)
+    if (ptr as usize) == 0usize {
+        return 2
+    }
+
+    ptr[0usize] = 0xA5u8
+    free(ptr)
+
+    // Keep the invalid read observable so Memcheck must diagnose it.
+    let observed = ptr[0usize]
+    if observed == 0xA5u8 {
+        println("use-after-free probe reached")
+    }
+    return 0
+}

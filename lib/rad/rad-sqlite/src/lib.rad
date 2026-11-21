@@ -62,7 +62,7 @@ impl SqliteStmt {
 }
 
 pub struct SqliteDb {
-    pub handle: ptr,
+    pub db_handle: ptr,
     pub is_open: bool,
 }
 
@@ -70,17 +70,17 @@ impl SqliteDb {
     pub fn open(path: str) -> Option<SqliteDb> {
         let db_ptr = malloc(8usize) as *raw var ptr
         let rc = sqlite3_open(path as *raw u8, db_ptr)
-        let handle = db_ptr[0usize]
+        let db_handle = db_ptr[0usize]
         free(db_ptr as *raw var u8)
 
         if rc != SQLITE_OK {
-            if (handle as usize) != 0usize {
-                let _ = sqlite3_close(handle)
+            if (db_handle as usize) != 0usize {
+                let _ = sqlite3_close(db_handle)
             }
             return Option.None
         }
         return Option.Some(SqliteDb {
-            handle: handle,
+            db_handle: db_handle,
             is_open: true,
         })
     }
@@ -95,7 +95,7 @@ impl SqliteDb {
         }
         let err_box = malloc(8usize) as *raw var ptr
         err_box[0usize] = 0 as ptr
-        let rc = sqlite3_exec(self.handle, sql as *raw u8, 0 as ptr, 0 as ptr, err_box)
+        let rc = sqlite3_exec(self.db_handle, sql as *raw u8, 0 as ptr, 0 as ptr, err_box)
         let err_msg = err_box[0usize]
         if (err_msg as usize) != 0usize {
             sqlite3_free(err_msg as *raw u8)
@@ -113,7 +113,7 @@ impl SqliteDb {
         let tail_box = malloc(8usize) as *raw var ptr
         tail_box[0usize] = 0 as ptr
 
-        let rc = sqlite3_prepare_v2(self.handle, sql as *raw u8, -1i32, stmt_box, tail_box)
+        let rc = sqlite3_prepare_v2(self.db_handle, sql as *raw u8, -1i32, stmt_box, tail_box)
         let stmt_h = stmt_box[0usize]
         free(stmt_box as *raw var u8)
         free(tail_box as *raw var u8)
@@ -145,7 +145,7 @@ impl SqliteDb {
         if !self.is_open {
             return String.from_str("database is closed")
         }
-        let msg = sqlite3_errmsg(self.handle)
+        let msg = sqlite3_errmsg(self.db_handle)
         if (msg as usize) == 0usize {
             return String.new()
         }
@@ -153,9 +153,9 @@ impl SqliteDb {
     }
 
     pub fn close(var self) {
-        if self.is_open && (self.handle as usize) != 0usize {
-            let _ = sqlite3_close(self.handle)
-            self.handle = 0 as ptr
+        if self.is_open && (self.db_handle as usize) != 0usize {
+            let _ = sqlite3_close(self.db_handle)
+            self.db_handle = 0 as ptr
             self.is_open = false
         }
     }

@@ -1,3 +1,5 @@
+import "../src/lib.rad";
+
 // Comprehensive test suite for rad-yaml
 
 fn main() -> i32 {

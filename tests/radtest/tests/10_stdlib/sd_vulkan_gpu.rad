@@ -8,11 +8,14 @@ fn main() -> i32 {
     let dev_count = vk.enumerate_devices().len;
     println(f"Vulkan physical devices enumerated: {dev_count}");
 
-    let dev0 = vk.enumerate_devices().ptr[0];
+    // Keep the generic device-vector return type inferred, but split the
+    // chained method/index expression so the element type is explicit.
+    let devices = vk.enumerate_devices();
+    let dev0: VkPhysicalDeviceInfo = devices.ptr[0];
     let dev_name = dev0.device_name.as_ptr() as str;
     println(f"Primary GPU: {dev_name}");
 
-    let swapchain = vk.create_swapchain(1920u32, 1080u32, VK_FORMAT_B8G8R8A8_UNORM);
+    let swapchain: VkSwapchainKHR = vk.create_swapchain(1920u32, 1080u32, 44u32); // VK_FORMAT_B8G8R8A8_UNORM
     let sc_w = swapchain.width;
     let sc_h = swapchain.height;
     println(f"Vulkan swapchain created: {sc_w}x{sc_h}");

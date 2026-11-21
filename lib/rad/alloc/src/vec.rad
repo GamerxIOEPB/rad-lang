@@ -1,3 +1,6 @@
+import allocator;
+import core/mem;
+
 // Rad Alloc Library: Vec<T> (Growable Contiguous Vector)
 
 pub struct Vec<T> {
