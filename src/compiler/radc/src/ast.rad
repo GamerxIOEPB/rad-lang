@@ -19,6 +19,11 @@ const EXPR_RANGE: i32 = 14
 const EXPR_TRY: i32 = 15
 const EXPR_AWAIT: i32 = 16
 
+struct SourceFile {
+    path: String,
+    source: String,
+}
+
 struct Expr {
     kind: i32,
     op: i32,
