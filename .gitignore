@@ -21,3 +21,6 @@ extensions/vscode-rad/dist/*.map
 target/
 benches/bin/
 data/
+demos/wayland_gui/*.o
+demos/wayland_gui/*.bmp
+demos/wayland_gui/rad_wayland_demo
