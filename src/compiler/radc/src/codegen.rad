@@ -3024,7 +3024,7 @@ impl Codegen {
                 }
 
                 // Give String.new and Vec.new distinct symbols.
-                if str_eq(member, "new") && (str_eq(type_s, "String") || str_eq(type_s, "Vec")) {
+                if (str_eq(member, "new") && (str_eq(type_s, "String") || str_eq(type_s, "Vec"))) || (str_eq(member, "from_str") && str_eq(type_s, "String")) {
                     var ctor_name = String.new()
                     ctor_name.push_str(type_s)
                     ctor_name.push_str("__new")

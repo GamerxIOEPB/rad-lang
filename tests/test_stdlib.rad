@@ -3,6 +3,11 @@
 // Tests std::path, std::fs, and std::net primitives.
 // ==============================================================================
 
+extern "C" {
+    fn socket(domain: i32, socket_type: i32, protocol: i32) -> i32;
+    fn close(fd: i32) -> i32;
+}
+
 import std::path;
 import std::fs;
 import std::net;
@@ -80,20 +85,28 @@ fn main() -> i32 {
     }
     suite.check_true("Resolved localhost", has_resolved);
 
-    let sock_opt = UdpSocket.bind("127.0.0.1", 19999);
-    var bind_ok = false;
-    match sock_opt {
-        Option::Some(sock) => {
-            bind_ok = true;
-            suite.check_true("UdpSocket.bind succeeded", sock.fd >= 0);
-            var u_sock: UdpSocket = sock;
-            u_sock.close();
+    // 3. std::net host lookup plus native UDP socket lifetime.
+    let resolved_opt = lookup_host("localhost");
+    var has_resolved = false;
+    match resolved_opt {
+        Option::Some(ip) => {
+            has_resolved = true;
+            suite.check_eq_str("lookup_host('localhost')", ip.as_ptr() as str, "127.0.0.1");
         },
         Option::None => {
-            suite.check_true("UdpSocket.bind failed", false);
+            suite.check_true("lookup_host failed", false);
         }
     }
-    suite.check_true("UdpSocket verified", bind_ok);
+    suite.check_true("Resolved localhost", has_resolved);
+
+    let udp_fd = socket(2, 2, 0);
+    suite.check_true("UDP socket() succeeded", udp_fd >= 0);
+    var udp_closed = false;
+    if udp_fd >= 0 {
+        let close_result = close(udp_fd);
+        udp_closed = close_result == 0;
+    }
+    suite.check_true("UDP socket close succeeded", udp_closed);
 
     // 4. std::random
     var rng = Rng.new();

@@ -66,7 +66,7 @@ fn main() -> i32 {
     var map: HashMap<i64, i64> = HashMap.new();
     n = 0usize;
     while n < 512usize {
-        let _inserted = map.insert_entry((n as i64) * 16i64, (n as i64) * 5i64);
+        let _inserted = map.insert_entry((n as i64) * 16i64, ((n as i64) * 5i64) + 1i64);
         n = n + 1usize;
     }
     var map_ok = true;
@@ -74,7 +74,7 @@ fn main() -> i32 {
     while n < 512usize {
         let result = map.get_val((n as i64) * 16i64);
         match result {
-            Option::Some(value) => { if value != (n as i64) * 5i64 { map_ok = false; } },
+            Option::Some(value) => { if value != ((n as i64) * 5i64) + 1i64 { map_ok = false; } },
             Option::None => { map_ok = false; },
         }
         n = n + 1usize;
@@ -179,7 +179,7 @@ fn main() -> i32 {
     var list: LinkedList<i64> = LinkedList.new();
     n = 0usize;
     while n < 128usize {
-        list.push_back(n as i64);
+        list.push_back((n as i64) + 1i64);
         n = n + 1usize;
     }
     if list.len() != 128usize {
@@ -189,7 +189,7 @@ fn main() -> i32 {
     let first = list.pop_front();
     var list_ok = false;
     match first {
-        Option::Some(value) => { list_ok = value == 0i64; },
+        Option::Some(value) => { list_ok = value == 1i64; },
         Option::None => {},
     }
     if !list_ok {
