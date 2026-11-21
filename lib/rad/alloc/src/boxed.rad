@@ -1,5 +1,8 @@
 // Rad Alloc Library: Box<T> (Unique Owned Heap Pointer)
 
+import allocator;
+import core/mem;
+
 pub struct Box<T> {
     pub ptr: *raw var T,
 }
@@ -9,19 +12,20 @@ impl<T> Box<T> {
         let size = size_of_val(val)
         let raw = malloc(size)
         let p = raw as *raw var T
-        *p = val
+        p[0usize] = val
         Box { ptr: p }
     }
 
     pub fn get(self) -> T {
-        *self.ptr
+        return self.ptr[0usize]
     }
 
     pub fn set(var self, val: T) {
-        *self.ptr = val
+        self.ptr[0usize] = val
     }
 
     pub fn drop(var self) {
         free(self.ptr as *raw var u8)
+        self.ptr = 0usize as *raw var T
     }
 }

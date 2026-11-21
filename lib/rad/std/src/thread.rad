@@ -1,3 +1,5 @@
+import std/time;
+
 // ==============================================================================
 // Rad Standard Library: Thread Management and Execution
 // Native POSIX thread spawning, joining, yielding, and basic Mutex synchronization.

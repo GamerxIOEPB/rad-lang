@@ -34,6 +34,15 @@ check_import() {
     fi
 }
 
+echo "==> Core root and individual modules"
+check_import "core"
+for source in "$ROOT_DIR"/lib/rad/core/src/*.rad; do
+    [[ -f "$source" ]] || continue
+    module="$(basename "$source" .rad)"
+    [[ "$module" == "lib" ]] && continue
+    check_import "core/$module"
+done
+
 echo "==> Standard-library root and individual modules"
 check_import "std"
 for source in "$ROOT_DIR"/lib/rad/std/src/*.rad; do
@@ -59,10 +68,12 @@ while IFS= read -r package_root; do
 done < <(find "$ROOT_DIR/lib/rad" -mindepth 3 -maxdepth 3 -type f -path '*/src/lib.rad' | sort)
 
 echo "==> Existing functional integration suites"
+declare -a INTEGRATION_BINS=()
 for source in tests/test_memory.rad tests/test_collections.rad tests/test_stdlib.rad; do
     name="$(basename "$source" .rad)"
     binary="$TMP_DIR/$name"
     if "$RADC" -g -O0 "$source" -o "$binary" >"$TMP_DIR/$name.compile.log" 2>&1; then
+        INTEGRATION_BINS+=("$binary")
         if "$binary" >"$TMP_DIR/$name.run.log" 2>&1; then
             printf '  [OK] %s\n' "$source"
         else
@@ -96,12 +107,20 @@ LLVM_CONFIG="${LLVM_CONFIG:-llvm-config}"
 CXX="${CXX:-clang++}"
 if command -v "$LLVM_CONFIG" >/dev/null 2>&1 && command -v "$CXX" >/dev/null 2>&1; then
     read -r -a LLVM_CXXFLAGS <<<"$("$LLVM_CONFIG" --cxxflags)"
-    read -r -a LLVM_LINK_FLAGS <<<"$("$LLVM_CONFIG" --ldflags --libs support --system-libs)"
+    read -r -a LLVM_LDFLAGS <<<"$("$LLVM_CONFIG" --ldflags)"
+    LLVM_LIBDIR="$("$LLVM_CONFIG" --libdir)"
+    RAD_LLVM_DIR="${RAD_LLVM_DIR:-$HOME/.rad/lib/llvm}"
+    if [[ ! -d "$RAD_LLVM_DIR" ]]; then
+        RAD_LLVM_DIR="$LLVM_LIBDIR"
+    fi
+
     if "$CXX" "${LLVM_CXXFLAGS[@]}" \
         -Isrc/compiler/radc/src \
         src/compiler/radc/src/crash_report.cpp \
         tests/quality/crash_report_probe.cpp \
-        "${LLVM_LINK_FLAGS[@]}" \
+        "${LLVM_LDFLAGS[@]}" \
+        -L"$RAD_LLVM_DIR" -L"$LLVM_LIBDIR" \
+        -lLLVM -lz -lzstd -lrt -ldl -lm \
         -o "$TMP_DIR/crash-report-probe"; then
         for signal_mode in segv abort; do
             set +e
@@ -124,25 +143,58 @@ if command -v "$LLVM_CONFIG" >/dev/null 2>&1 && command -v "$CXX" >/dev/null 2>&
         echo "  [FAIL] unable to build crash-report probe"
     fi
 else
-    echo "  [SKIP] llvm-config or C++ compiler unavailable; crash probe not built"
+    failed=$((failed + 1))
+    echo "  [FAIL] llvm-config or C++ compiler unavailable"
 fi
 
 echo "==> Valgrind memory checking"
-if command -v valgrind >/dev/null 2>&1 && [[ -x "$MEMORY_BIN" ]]; then
-    if valgrind --quiet --error-exitcode=99 --leak-check=full \
-        --errors-for-leak-kinds=definite,indirect "$MEMORY_BIN" \
-        >"$TMP_DIR/valgrind.log" 2>&1; then
-        echo "  [OK] Valgrind reported no invalid accesses or definite/indirect leaks"
+if ! command -v valgrind >/dev/null 2>&1; then
+    if [[ "${REQUIRE_VALGRIND:-0}" == "1" ]]; then
+        failed=$((failed + 1))
+        echo "  [FAIL] REQUIRE_VALGRIND=1 but Valgrind is unavailable"
+    else
+        echo "  [SKIP] Valgrind not installed (set REQUIRE_VALGRIND=1 in CI)"
+    fi
+elif [[ ! -x "$MEMORY_BIN" ]]; then
+    failed=$((failed + 1))
+    echo "  [FAIL] memory stress binary was not produced; cannot run Valgrind"
+else
+    for program in "${INTEGRATION_BINS[@]}" "$MEMORY_BIN"; do
+        name="$(basename "$program")"
+        set +e
+        valgrind --quiet --track-origins=yes --error-exitcode=99 \
+            --leak-check=full --errors-for-leak-kinds=definite,indirect \
+            "$program" >"$TMP_DIR/valgrind-$name.log" 2>&1
+        status=$?
+        set -e
+        if [[ "$status" -eq 0 ]]; then
+            printf '  [OK] Valgrind: %s\n' "$name"
+        else
+            failed=$((failed + 1))
+            printf '  [FAIL] Valgrind: %s (exit %s)\n' "$name" "$status"
+            cat "$TMP_DIR/valgrind-$name.log"
+        fi
+    done
+
+    UAF_BIN="$TMP_DIR/use_after_free"
+    if "$RADC" -g -O0 tests/quality/use_after_free.rad -o "$UAF_BIN" >"$TMP_DIR/uaf.compile.log" 2>&1; then
+        set +e
+        valgrind --quiet --track-origins=yes --error-exitcode=99 --leak-check=no \
+            "$UAF_BIN" >"$TMP_DIR/uaf.log" 2>&1
+        uaf_status=$?
+        set -e
+        if [[ "$uaf_status" -eq 99 ]] && grep -Eiq 'Invalid read of size|use-after-free' "$TMP_DIR/uaf.log"; then
+            echo "  [OK] Valgrind detected the deliberate use-after-free probe"
+        else
+            failed=$((failed + 1))
+            echo "  [FAIL] Valgrind did not report the deliberate use-after-free (exit $uaf_status)"
+            cat "$TMP_DIR/uaf.log"
+        fi
     else
         failed=$((failed + 1))
-        echo "  [FAIL] Valgrind found a memory error or leak"
-        cat "$TMP_DIR/valgrind.log"
+        echo "  [FAIL] unable to compile use-after-free detector probe"
+        cat "$TMP_DIR/uaf.compile.log"
     fi
-elif [[ "${REQUIRE_VALGRIND:-0}" == "1" ]]; then
-    failed=$((failed + 1))
-    echo "  [FAIL] REQUIRE_VALGRIND=1 but Valgrind is unavailable"
-else
-    echo "  [SKIP] Valgrind not installed (set REQUIRE_VALGRIND=1 in CI)"
 fi
 
 echo
