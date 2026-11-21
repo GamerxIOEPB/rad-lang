@@ -29,7 +29,7 @@ PREFIX     ?= $(HOME)/.rad
 # LLVM compilation and link flags
 LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags 2>/dev/null || echo "-I$(PREFIX)/include")
 LLVM_LDFLAGS  ?= $(shell llvm-config --ldflags 2>/dev/null || echo "")
-LLVM_SYSLIBS  ?= $(shell llvm-config --system-libs 2>/dev/null || echo "-lz -lzstd -lrt -ldl -lm")
+LLVM_SYSLIBS  ?= -lz -lzstd -lrt -ldl -lm
 
 # Host & target triples
 TARGET_TRIPLE ?= x86_64-unknown-linux-musl
