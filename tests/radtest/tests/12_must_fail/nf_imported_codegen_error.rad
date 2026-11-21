@@ -1,0 +1,6 @@
+// Regression: code-generation diagnostics must retain the imported file's source.
+import ./nf_imported_codegen_error_helper.rad
+
+fn main() -> i32 {
+    return nf_imported_codegen_error_helper::imported_bug()
+}
