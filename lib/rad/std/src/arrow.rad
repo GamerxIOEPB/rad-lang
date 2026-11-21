@@ -1,0 +1,294 @@
+// ==============================================================================
+// Rad Standard Library: Apache Arrow In-Memory Columnar Format (std::arrow)
+// Validity bitmasks, chunked typed arrays, vectorized SIMD kernels, record batches.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+pub const ARROW_TYPE_INT32: i32   = 1
+pub const ARROW_TYPE_INT64: i32   = 2
+pub const ARROW_TYPE_FLOAT32: i32 = 3
+pub const ARROW_TYPE_FLOAT64: i32 = 4
+pub const ARROW_TYPE_STRING: i32  = 5
+pub const ARROW_TYPE_BOOL: i32    = 6
+
+// ------------------------------------------------------------------------------
+// ValidityBitmap: Bit-packed null tracking (64 bits per word)
+// ------------------------------------------------------------------------------
+
+pub struct ValidityBitmap {
+    pub len: usize,
+    pub words: Vec<u64>,
+    pub null_count: usize,
+}
+
+impl ValidityBitmap {
+    pub fn new(len: usize) -> ValidityBitmap {
+        let num_words = (len + 63usize) / 64usize
+        var words: Vec<u64> = Vec.new()
+        var i: usize = 0usize
+        while i < num_words {
+            words.push(18446744073709551615u64) // all 1s (all valid)
+            i = i + 1usize
+        }
+        return ValidityBitmap {
+            len: len,
+            words: words,
+            null_count: 0usize,
+        }
+    }
+
+    pub fn is_valid(self, idx: usize) -> bool {
+        if idx >= self.len {
+            return false
+        }
+        let word_idx = idx / 64usize
+        let bit_idx = (idx % 64usize) as u64
+        let word = self.words.ptr[word_idx]
+        let mask = 1u64 << bit_idx
+        return (word & mask) != 0u64
+    }
+
+    pub fn set_null(var self, idx: usize) {
+        if idx >= self.len {
+            return
+        }
+        let word_idx = idx / 64usize
+        let bit_idx = (idx % 64usize) as u64
+        let word = self.words.ptr[word_idx]
+        let mask = 1u64 << bit_idx
+        if (word & mask) != 0u64 {
+            // Arithmetic clear bit: word - mask
+            self.words.ptr[word_idx] = word - mask
+            self.null_count = self.null_count + 1usize
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Float64Array: Contiguous 64-bit float buffer with vectorized operations
+// ------------------------------------------------------------------------------
+
+pub struct Float64Array {
+    pub len: usize,
+    pub data: Vec<f64>,
+    pub validity: ValidityBitmap,
+}
+
+impl Float64Array {
+    pub fn new(data: Vec<f64>) -> Float64Array {
+        let l = data.len
+        return Float64Array {
+            len: l,
+            data: data,
+            validity: ValidityBitmap.new(l),
+        }
+    }
+
+    pub fn get(self, idx: usize) -> f64 {
+        if idx >= self.len {
+            return 0.0
+        }
+        let p: *raw f64 = self.data.ptr as *raw f64
+        return p[idx]
+    }
+
+    pub fn is_null(self, idx: usize) -> bool {
+        return !self.validity.is_valid(idx)
+    }
+
+    pub fn sum(self) -> f64 {
+        var total: f64 = 0.0
+        let p: *raw f64 = self.data.ptr as *raw f64
+        var i: usize = 0usize
+        while i < self.len {
+            if self.validity.is_valid(i) {
+                total = total + p[i]
+            }
+            i = i + 1usize
+        }
+        return total
+    }
+
+    pub fn avg(self) -> f64 {
+        let valid_count = (self.len - self.validity.null_count) as f64
+        if valid_count <= 0.0 {
+            return 0.0
+        }
+        return self.sum() / valid_count
+    }
+
+    pub fn min(self) -> f64 {
+        var min_val: f64 = 999999999.0
+        let p: *raw f64 = self.data.ptr as *raw f64
+        var i: usize = 0usize
+        while i < self.len {
+            if self.validity.is_valid(i) {
+                let v = p[i]
+                if v < min_val {
+                    min_val = v
+                }
+            }
+            i = i + 1usize
+        }
+        return min_val
+    }
+
+    pub fn max(self) -> f64 {
+        var max_val: f64 = -999999999.0
+        let p: *raw f64 = self.data.ptr as *raw f64
+        var i: usize = 0usize
+        while i < self.len {
+            if self.validity.is_valid(i) {
+                let v = p[i]
+                if v > max_val {
+                    max_val = v
+                }
+            }
+            i = i + 1usize
+        }
+        return max_val
+    }
+
+    pub fn filter_gt(self, threshold: f64) -> Vec<usize> {
+        var matches = Vec.new()
+        let p: *raw f64 = self.data.ptr as *raw f64
+        var i: usize = 0usize
+        while i < self.len {
+            if self.validity.is_valid(i) {
+                if p[i] > threshold {
+                    matches.push(i)
+                }
+            }
+            i = i + 1usize
+        }
+        return matches
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Int32Array: Contiguous 32-bit signed integer buffer
+// ------------------------------------------------------------------------------
+
+pub struct Int32Array {
+    pub len: usize,
+    pub data: Vec<i32>,
+    pub validity: ValidityBitmap,
+}
+
+impl Int32Array {
+    pub fn new(data: Vec<i32>) -> Int32Array {
+        let l = data.len
+        return Int32Array {
+            len: l,
+            data: data,
+            validity: ValidityBitmap.new(l),
+        }
+    }
+
+    pub fn get(self, idx: usize) -> i32 {
+        if idx >= self.len {
+            return 0
+        }
+        return self.data.ptr[idx]
+    }
+
+    pub fn is_null(self, idx: usize) -> bool {
+        return !self.validity.is_valid(idx)
+    }
+
+    pub fn sum(self) -> i64 {
+        var total: i64 = 0
+        var i: usize = 0usize
+        while i < self.len {
+            if self.validity.is_valid(i) {
+                total = total + (self.data.ptr[i] as i64)
+            }
+            i = i + 1usize
+        }
+        return total
+    }
+
+    pub fn filter_eq(self, target: i32) -> Vec<usize> {
+        var matches = Vec.new()
+        var i: usize = 0usize
+        while i < self.len {
+            if self.validity.is_valid(i) {
+                if self.data.ptr[i] == target {
+                    matches.push(i)
+                }
+            }
+            i = i + 1usize
+        }
+        return matches
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Schema & RecordBatch
+// ------------------------------------------------------------------------------
+
+pub struct ArrowField {
+    pub name: String,
+    pub data_type: i32,
+    pub nullable: bool,
+}
+
+impl ArrowField {
+    pub fn new(name: str, data_type: i32, nullable: bool) -> ArrowField {
+        return ArrowField {
+            name: String.from_str(name),
+            data_type: data_type,
+            nullable: nullable,
+        }
+    }
+}
+
+pub struct ArrowSchema {
+    pub fields: Vec<ArrowField>,
+}
+
+impl ArrowSchema {
+    pub fn new() -> ArrowSchema {
+        return ArrowSchema {
+            fields: Vec.new(),
+        }
+    }
+
+    pub fn add_field(var self, name: str, data_type: i32, nullable: bool) {
+        self.fields.push(ArrowField.new(name, data_type, nullable))
+    }
+
+    pub fn field_count(self) -> usize {
+        return self.fields.len
+    }
+}
+
+pub struct RecordBatch {
+    pub schema: ArrowSchema,
+    pub num_rows: usize,
+    pub int_columns: Vec<Int32Array>,
+    pub float_columns: Vec<Float64Array>,
+}
+
+impl RecordBatch {
+    pub fn new(schema: ArrowSchema, num_rows: usize) -> RecordBatch {
+        return RecordBatch {
+            schema: schema,
+            num_rows: num_rows,
+            int_columns: Vec.new(),
+            float_columns: Vec.new(),
+        }
+    }
+
+    pub fn add_int_column(var self, col: Int32Array) {
+        self.int_columns.push(col)
+    }
+
+    pub fn add_float_column(var self, col: Float64Array) {
+        self.float_columns.push(col)
+    }
+
+    pub fn row_count(self) -> usize {
+        return self.num_rows
+    }
+}

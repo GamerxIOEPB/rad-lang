@@ -1,0 +1,350 @@
+// ==============================================================================
+// Rad Standard Library: Raft Distributed Consensus Protocol (std::raft)
+// Leader election, term validation, replicated log, state machine commits.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+pub const RAFT_ROLE_FOLLOWER: i32  = 0
+pub const RAFT_ROLE_CANDIDATE: i32 = 1
+pub const RAFT_ROLE_LEADER: i32    = 2
+
+fn raft_str_clone(s: String) -> String {
+    return String.from_str(s.as_ptr() as str)
+}
+
+fn raft_str_eq(a: String, b: String) -> bool {
+    let sa = a.as_ptr() as str
+    let sb = b.as_ptr() as str
+    return sa == sb
+}
+
+pub struct RaftLogEntry {
+    pub term: u64,
+    pub index: u64,
+    pub command: String,
+}
+
+impl RaftLogEntry {
+    pub fn new(term: u64, index: u64, cmd: str) -> RaftLogEntry {
+        return RaftLogEntry {
+            term: term,
+            index: index,
+            command: String.from_str(cmd),
+        }
+    }
+}
+
+pub struct RequestVoteArgs {
+    pub term: u64,
+    pub candidate_id: String,
+    pub last_log_index: u64,
+    pub last_log_term: u64,
+}
+
+impl RequestVoteArgs {
+    pub fn new(term: u64, cand_id: str, last_idx: u64, last_term: u64) -> RequestVoteArgs {
+        return RequestVoteArgs {
+            term: term,
+            candidate_id: String.from_str(cand_id),
+            last_log_index: last_idx,
+            last_log_term: last_term,
+        }
+    }
+}
+
+pub struct RequestVoteReply {
+    pub term: u64,
+    pub vote_granted: bool,
+}
+
+impl RequestVoteReply {
+    pub fn new(term: u64, granted: bool) -> RequestVoteReply {
+        return RequestVoteReply {
+            term: term,
+            vote_granted: granted,
+        }
+    }
+}
+
+pub struct AppendEntriesArgs {
+    pub term: u64,
+    pub leader_id: String,
+    pub prev_log_index: u64,
+    pub prev_log_term: u64,
+    pub entries: Vec<RaftLogEntry>,
+    pub leader_commit: u64,
+}
+
+impl AppendEntriesArgs {
+    pub fn new(term: u64, leader: str, prev_idx: u64, prev_term: u64, commit: u64) -> AppendEntriesArgs {
+        return AppendEntriesArgs {
+            term: term,
+            leader_id: String.from_str(leader),
+            prev_log_index: prev_idx,
+            prev_log_term: prev_term,
+            entries: Vec.new(),
+            leader_commit: commit,
+        }
+    }
+
+    pub fn add_entry(var self, log_entry: RaftLogEntry) {
+        self.entries.push(log_entry)
+    }
+}
+
+pub struct AppendEntriesReply {
+    pub term: u64,
+    pub success: bool,
+    pub match_index: u64,
+}
+
+impl AppendEntriesReply {
+    pub fn new(term: u64, success: bool, match_idx: u64) -> AppendEntriesReply {
+        return AppendEntriesReply {
+            term: term,
+            success: success,
+            match_index: match_idx,
+        }
+    }
+}
+
+pub struct RaftNode {
+    pub node_id: String,
+    pub role: i32,
+    pub current_term: u64,
+    pub voted_for: String,
+    pub log: Vec<RaftLogEntry>,
+    pub commit_index: u64,
+    pub last_applied: u64,
+    pub votes_received: usize,
+    pub cluster_size: usize,
+    pub sm_keys: Vec<String>,
+    pub sm_vals: Vec<String>,
+}
+
+impl RaftNode {
+    pub fn new(node_id: str, cluster_size: usize) -> RaftNode {
+        let dummy_entry = RaftLogEntry.new(0u64, 0u64, "")
+        var entries = Vec.new()
+        entries.push(dummy_entry) // 1-based log indexing convention
+
+        return RaftNode {
+            node_id: String.from_str(node_id),
+            role: RAFT_ROLE_FOLLOWER,
+            current_term: 0u64,
+            voted_for: String.from_str(""),
+            log: entries,
+            commit_index: 0u64,
+            last_applied: 0u64,
+            votes_received: 0usize,
+            cluster_size: cluster_size,
+            sm_keys: Vec.new(),
+            sm_vals: Vec.new(),
+        }
+    }
+
+    pub fn get_last_log_index(self) -> u64 {
+        return (self.log.len - 1usize) as u64
+    }
+
+    pub fn get_last_log_term(self) -> u64 {
+        let idx = self.log.len - 1usize
+        return self.log.ptr[idx].term
+    }
+
+    pub fn start_election(var self) -> RequestVoteArgs {
+        self.role = RAFT_ROLE_CANDIDATE
+        self.current_term = self.current_term + 1u64
+        self.voted_for = raft_str_clone(self.node_id)
+        self.votes_received = 1usize // Vote for self
+
+        let last_idx = self.get_last_log_index()
+        let last_term = self.get_last_log_term()
+
+        return RequestVoteArgs.new(self.current_term, self.node_id.as_ptr() as str, last_idx, last_term)
+    }
+
+    pub fn handle_request_vote(var self, args: RequestVoteArgs) -> RequestVoteReply {
+        // Rule 1: If term < current_term, reject
+        if args.term < self.current_term {
+            return RequestVoteReply.new(self.current_term, false)
+        }
+
+        // Rule 2: If term > current_term, step down to follower
+        if args.term > self.current_term {
+            self.current_term = args.term
+            self.role = RAFT_ROLE_FOLLOWER
+            self.voted_for = String.from_str("")
+        }
+
+        // Rule 3: Check if already voted for someone else in this term
+        let can_vote = self.voted_for.len() == 0usize || raft_str_eq(self.voted_for, args.candidate_id)
+        if !can_vote {
+            return RequestVoteReply.new(self.current_term, false)
+        }
+
+        // Rule 4: Candidate's log must be at least as up-to-date as receiver's log
+        let my_last_idx = self.get_last_log_index()
+        let my_last_term = self.get_last_log_term()
+
+        var log_ok = false
+        if args.last_log_term > my_last_term {
+            log_ok = true
+        } else if args.last_log_term == my_last_term {
+            if args.last_log_index >= my_last_idx {
+                log_ok = true
+            }
+        }
+
+        if log_ok {
+            self.voted_for = raft_str_clone(args.candidate_id)
+            return RequestVoteReply.new(self.current_term, true)
+        }
+
+        return RequestVoteReply.new(self.current_term, false)
+    }
+
+    pub fn handle_vote_reply(var self, reply: RequestVoteReply) -> bool {
+        if reply.term > self.current_term {
+            self.current_term = reply.term
+            self.role = RAFT_ROLE_FOLLOWER
+            self.voted_for = String.from_str("")
+            return false
+        }
+
+        if self.role == RAFT_ROLE_CANDIDATE && reply.vote_granted {
+            self.votes_received = self.votes_received + 1usize
+            let majority = (self.cluster_size / 2usize) + 1usize
+            if self.votes_received >= majority {
+                self.role = RAFT_ROLE_LEADER
+                return true
+            }
+        }
+
+        return false
+    }
+
+    pub fn propose(var self, cmd: str) -> u64 {
+        if self.role != RAFT_ROLE_LEADER {
+            return 0u64
+        }
+
+        let new_idx = (self.log.len) as u64
+        let entry = RaftLogEntry.new(self.current_term, new_idx, cmd)
+        self.log.push(entry)
+        return new_idx
+    }
+
+    pub fn handle_append_entries(var self, args: AppendEntriesArgs) -> AppendEntriesReply {
+        // 1. Reply false if term < current_term
+        if args.term < self.current_term {
+            return AppendEntriesReply.new(self.current_term, false, self.get_last_log_index())
+        }
+
+        // If leader term is >= ours, confirm follower status
+        if args.term > self.current_term || self.role == RAFT_ROLE_CANDIDATE {
+            self.current_term = args.term
+            self.role = RAFT_ROLE_FOLLOWER
+            self.voted_for = String.from_str("")
+        }
+
+        // 2. Reply false if log doesn't contain an entry at prev_log_index matching prev_log_term
+        let prev_idx = args.prev_log_index as usize
+        if prev_idx >= self.log.len {
+            return AppendEntriesReply.new(self.current_term, false, self.get_last_log_index())
+        }
+
+        if self.log.ptr[prev_idx].term != args.prev_log_term {
+            return AppendEntriesReply.new(self.current_term, false, self.get_last_log_index())
+        }
+
+        // 3. Append any new entries not already in the log
+        var i: usize = 0usize
+        while i < args.entries.len {
+            let ent = args.entries.ptr[i]
+            let ent_idx = ent.index as usize
+            if ent_idx < self.log.len {
+                if self.log.ptr[ent_idx].term != ent.term {
+                    // Conflict: remove this and following entries
+                    while self.log.len > ent_idx {
+                        let _ = self.log.pop()
+                    }
+                    self.log.push(RaftLogEntry.new(ent.term, ent.index, ent.command.as_ptr() as str))
+                }
+            } else {
+                self.log.push(RaftLogEntry.new(ent.term, ent.index, ent.command.as_ptr() as str))
+            }
+            i = i + 1usize
+        }
+
+        // 4. Update commit_index
+        if args.leader_commit > self.commit_index {
+            let last_new = self.get_last_log_index()
+            if args.leader_commit < last_new {
+                self.commit_index = args.leader_commit
+            } else {
+                self.commit_index = last_new
+            }
+        }
+
+        return AppendEntriesReply.new(self.current_term, true, self.get_last_log_index())
+    }
+
+    pub fn commit_to(var self, new_commit: u64) {
+        if new_commit > self.commit_index && new_commit <= self.get_last_log_index() {
+            self.commit_index = new_commit
+        }
+    }
+
+    pub fn apply_entries(var self) -> usize {
+        var applied_count: usize = 0usize
+        while self.last_applied < self.commit_index {
+            self.last_applied = self.last_applied + 1u64
+            let idx = self.last_applied as usize
+            let cmd = self.log.ptr[idx].command.as_ptr() as str
+
+            // State machine execution: parse "SET key=val"
+            if cmd != "" {
+                var s = String.from_str(cmd)
+                if s.len() > 4usize {
+                    // Simple parser for "SET k=v"
+                    var key = String.new()
+                    var val = String.new()
+                    var parsing_val = false
+
+                    var j: usize = 4usize // skip "SET "
+                    let p = s.as_ptr()
+                    while j < s.len() {
+                        let c = p[j]
+                        if !parsing_val && c == 61u8 { // '='
+                            parsing_val = true
+                        } else if !parsing_val {
+                            key.push_byte(c)
+                        } else {
+                            val.push_byte(c)
+                        }
+                        j = j + 1usize
+                    }
+
+                    if key.len() > 0usize {
+                        self.sm_keys.push(key)
+                        self.sm_vals.push(val)
+                    }
+                }
+            }
+            applied_count = applied_count + 1usize
+        }
+        return applied_count
+    }
+
+    pub fn lookup_state(self, key: str) -> String {
+        var i: usize = self.sm_keys.len
+        while i > 0usize {
+            i = i - 1usize
+            if (self.sm_keys.ptr[i].as_ptr() as str) == key {
+                return raft_str_clone(self.sm_vals.ptr[i])
+            }
+        }
+        return String.from_str("")
+    }
+}

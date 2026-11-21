@@ -1,0 +1,85 @@
+import std/arrow;
+import std/parquet;
+
+fn main() {
+    println("--- Testing Apache Arrow In-Memory Columns ---")
+    var float_data: Vec<f64> = Vec.new()
+    float_data.push(10.0)
+    float_data.push(20.0)
+    float_data.push(30.0)
+    float_data.push(40.0)
+    float_data.push(50.0)
+
+    var f64_arr = Float64Array.new(float_data)
+    let s1 = f64_arr.sum() as i32
+    let avg1 = f64_arr.avg() as i32
+    let min1 = f64_arr.min() as i32
+    let max1 = f64_arr.max() as i32
+    let arr_len = f64_arr.len
+    println(f"Float64Array len: {arr_len}")
+    println(f"Float64Array sum: {s1}")
+    println(f"Float64Array avg: {avg1}")
+    println(f"Float64Array min: {min1}")
+    println(f"Float64Array max: {max1}")
+
+    let filtered = f64_arr.filter_gt(25.0)
+    let filt_count = filtered.len
+    println(f"Float64Array filter > 25.0 count: {filt_count}")
+
+    // Set null at index 2 (value 30.0)
+    f64_arr.validity.set_null(2usize)
+    let is_null_2 = f64_arr.is_null(2usize)
+    let s2 = f64_arr.sum() as i32
+    let avg2 = f64_arr.avg() as i32
+    println(f"Is index 2 null: {is_null_2}")
+    let null_cnt = f64_arr.validity.null_count
+    println(f"Null count: {null_cnt}")
+    println(f"Sum after null mask: {s2}")
+    println(f"Avg after null mask: {avg2}")
+
+    var int_data: Vec<i32> = Vec.new()
+    int_data.push(100)
+    int_data.push(200)
+    int_data.push(300)
+    int_data.push(200)
+    var i32_arr = Int32Array.new(int_data)
+    let int_sum = i32_arr.sum()
+    println(f"Int32Array sum: {int_sum}")
+    let eq_200 = i32_arr.filter_eq(200)
+    let eq_count = eq_200.len
+    println(f"Int32Array filter == 200 count: {eq_count}")
+
+    var schema = ArrowSchema.new()
+    schema.add_field("temperature", ARROW_TYPE_FLOAT64, false)
+    schema.add_field("sensor_id", ARROW_TYPE_INT32, false)
+    let fields_count = schema.field_count()
+    println(f"Schema fields: {fields_count}")
+
+    var batch = RecordBatch.new(schema, 5usize)
+    batch.add_float_column(f64_arr)
+    batch.add_int_column(i32_arr)
+    let batch_rows = batch.row_count()
+    println(f"RecordBatch rows: {batch_rows}")
+    let num_f_cols = batch.float_columns.len
+    println(f"RecordBatch float cols: {num_f_cols}")
+    let num_i_cols = batch.int_columns.len
+    println(f"RecordBatch int cols: {num_i_cols}")
+
+    println("--- Testing Apache Parquet Columnar Storage ---")
+    var pq = ParquetFile.new()
+    let ages: [i32; 4] = [25, 30, 35, 40]
+    pq.write_i32_column("age", ages)
+
+    let rg_len = pq.row_groups.len
+    println(f"Parquet row groups: {rg_len}")
+    let total_r = pq.total_rows
+    println(f"Parquet total rows: {total_r}")
+
+    let bytes = pq.serialize()
+    let byte_len = bytes.len
+    println(f"Serialized Parquet bytes: {byte_len}")
+    let valid_pq = ParquetFile::is_valid_parquet(bytes)
+    println(f"Is valid Parquet binary: {valid_pq}")
+
+    println("ARROW_PARQUET_OK")
+}

@@ -1,0 +1,310 @@
+// ==============================================================================
+// Rad Standard Library: Distributed Cluster Runtime & SWIM Gossip (std::cluster)
+// Cluster topology, failure detection, location-transparent remote actor transport.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+pub const CLUSTER_MEMBER_ALIVE: i32   = 0
+pub const CLUSTER_MEMBER_SUSPECT: i32 = 1
+pub const CLUSTER_MEMBER_DEAD: i32    = 2
+pub const CLUSTER_MEMBER_LEFT: i32    = 3
+
+fn cluster_str_clone(s: String) -> String {
+    return String.from_str(s.as_ptr() as str)
+}
+
+fn cluster_str_eq(a: String, b: String) -> bool {
+    let sa = a.as_ptr() as str
+    let sb = b.as_ptr() as str
+    return sa == sb
+}
+
+fn cluster_u64_to_str(val: u64) -> String {
+    if val == 0u64 {
+        return String.from_str("0")
+    }
+    var v = val
+    var rev = String.new()
+    while v > 0u64 {
+        let d = (v % 10u64) as u8
+        rev.push_byte(48u8 + d)
+        v = v / 10u64
+    }
+    var res = String.new()
+    var l = rev.len()
+    let p = rev.as_ptr()
+    while l > 0usize {
+        l = l - 1usize
+        res.push_byte(p[l])
+    }
+    return res
+}
+
+pub struct ClusterMember {
+    pub id: String,
+    pub address: String,
+    pub status: i32,
+    pub incarnation: u64,
+    pub heartbeat_count: u64,
+}
+
+impl ClusterMember {
+    pub fn new(id: str, address: str, status: i32, incarnation: u64) -> ClusterMember {
+        return ClusterMember {
+            id: String.from_str(id),
+            address: String.from_str(address),
+            status: status,
+            incarnation: incarnation,
+            heartbeat_count: 0u64,
+        }
+    }
+}
+
+pub struct SwimGossip {
+    pub local_id: String,
+    pub local_address: String,
+    pub local_incarnation: u64,
+    pub members: Vec<ClusterMember>,
+}
+
+impl SwimGossip {
+    pub fn new(local_id: str, address: str) -> SwimGossip {
+        var sg = SwimGossip {
+            local_id: String.from_str(local_id),
+            local_address: String.from_str(address),
+            local_incarnation: 1u64,
+            members: Vec.new(),
+        }
+        // Self is the first member
+        sg.members.push(ClusterMember.new(local_id, address, CLUSTER_MEMBER_ALIVE, 1u64))
+        return sg
+    }
+
+    pub fn join(var self, id: str, address: str) {
+        var i: usize = 0usize
+        while i < self.members.len {
+            if (self.members.ptr[i].id.as_ptr() as str) == id {
+                self.members.ptr[i].address = String.from_str(address)
+                self.members.ptr[i].status = CLUSTER_MEMBER_ALIVE
+                return
+            }
+            i = i + 1usize
+        }
+        self.members.push(ClusterMember.new(id, address, CLUSTER_MEMBER_ALIVE, 1u64))
+    }
+
+    pub fn ping(var self, target_idx: usize) -> bool {
+        if target_idx >= self.members.len {
+            return false
+        }
+        let m = self.members.ptr[target_idx]
+        if m.status == CLUSTER_MEMBER_DEAD || m.status == CLUSTER_MEMBER_LEFT {
+            return false
+        }
+        self.members.ptr[target_idx].heartbeat_count = self.members.ptr[target_idx].heartbeat_count + 1u64
+        return true
+    }
+
+    pub fn mark_suspect(var self, target_idx: usize) {
+        if target_idx < self.members.len {
+            if self.members.ptr[target_idx].status == CLUSTER_MEMBER_ALIVE {
+                self.members.ptr[target_idx].status = CLUSTER_MEMBER_SUSPECT
+            }
+        }
+    }
+
+    pub fn confirm_dead(var self, target_idx: usize) {
+        if target_idx < self.members.len {
+            self.members.ptr[target_idx].status = CLUSTER_MEMBER_DEAD
+        }
+    }
+
+    pub fn refutes_suspect(var self) {
+        // If someone suspects us, increment incarnation and broadcast ALIVE
+        self.local_incarnation = self.local_incarnation + 1u64
+        if self.members.len > 0usize {
+            self.members.ptr[0usize].incarnation = self.local_incarnation
+            self.members.ptr[0usize].status = CLUSTER_MEMBER_ALIVE
+        }
+    }
+
+    pub fn alive_count(self) -> usize {
+        var count: usize = 0usize
+        var i: usize = 0usize
+        while i < self.members.len {
+            if self.members.ptr[i].status == CLUSTER_MEMBER_ALIVE {
+                count = count + 1usize
+            }
+            i = i + 1usize
+        }
+        return count
+    }
+
+    pub fn disseminate(self) -> String {
+        // Serializes membership state into a compact gossip digest:
+        // "GOSSIP|id:addr:status:inc;id:addr:status:inc;..."
+        var out = String.from_str("GOSSIP|")
+        var i: usize = 0usize
+        while i < self.members.len {
+            let m = self.members.ptr[i]
+            out.push_str(m.id.as_ptr() as str)
+            out.push_byte(58u8) // ':'
+            out.push_str(m.address.as_ptr() as str)
+            out.push_byte(58u8) // ':'
+            if m.status == CLUSTER_MEMBER_ALIVE {
+                out.push_str("ALIVE:")
+            } else if m.status == CLUSTER_MEMBER_SUSPECT {
+                out.push_str("SUSPECT:")
+            } else if m.status == CLUSTER_MEMBER_DEAD {
+                out.push_str("DEAD:")
+            } else {
+                out.push_str("LEFT:")
+            }
+            let inc_s = cluster_u64_to_str(m.incarnation)
+            out.push_str(inc_s.as_ptr() as str)
+            out.push_byte(59u8) // ';'
+            i = i + 1usize
+        }
+        return out
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Location-Transparent Actor Transport
+// ------------------------------------------------------------------------------
+
+pub struct RemoteActorRef {
+    pub node_id: String,
+    pub actor_name: String,
+}
+
+impl RemoteActorRef {
+    pub fn new(node_id: str, actor_name: str) -> RemoteActorRef {
+        return RemoteActorRef {
+            node_id: String.from_str(node_id),
+            actor_name: String.from_str(actor_name),
+        }
+    }
+
+    pub fn to_uri(self) -> String {
+        var uri = String.from_str("rad://")
+        uri.push_str(self.node_id.as_ptr() as str)
+        uri.push_byte(47u8) // '/'
+        uri.push_str(self.actor_name.as_ptr() as str)
+        return uri
+    }
+}
+
+pub struct RemoteEnvelope {
+    pub target_node: String,
+    pub target_actor: String,
+    pub sender_node: String,
+    pub sender_actor: String,
+    pub tag: i32,
+    pub payload: String,
+    pub sequence: u64,
+}
+
+impl RemoteEnvelope {
+    pub fn new(target: RemoteActorRef, sender: RemoteActorRef, tag: i32, payload: str, seq: u64) -> RemoteEnvelope {
+        return RemoteEnvelope {
+            target_node: cluster_str_clone(target.node_id),
+            target_actor: cluster_str_clone(target.actor_name),
+            sender_node: cluster_str_clone(sender.node_id),
+            sender_actor: cluster_str_clone(sender.actor_name),
+            tag: tag,
+            payload: String.from_str(payload),
+            sequence: seq,
+        }
+    }
+
+    pub fn encode(self) -> String {
+        // Wire protocol format: RADPKT|seq|tag|target_node|target_actor|sender_node|sender_actor|payload
+        var s = String.from_str("RADPKT|")
+        let seq_s = cluster_u64_to_str(self.sequence)
+        s.push_str(seq_s.as_ptr() as str)
+        s.push_byte(124u8) // '|'
+        let tag_s = cluster_u64_to_str(self.tag as u64)
+        s.push_str(tag_s.as_ptr() as str)
+        s.push_byte(124u8) // '|'
+        s.push_str(self.target_node.as_ptr() as str)
+        s.push_byte(124u8) // '|'
+        s.push_str(self.target_actor.as_ptr() as str)
+        s.push_byte(124u8) // '|'
+        s.push_str(self.sender_node.as_ptr() as str)
+        s.push_byte(124u8) // '|'
+        s.push_str(self.sender_actor.as_ptr() as str)
+        s.push_byte(124u8) // '|'
+        s.push_str(self.payload.as_ptr() as str)
+        return s
+    }
+
+    pub fn decode(raw: str) -> RemoteEnvelope {
+        var text = String.from_str(raw)
+        let dummy_ref = RemoteActorRef.new("", "")
+        var env = RemoteEnvelope.new(dummy_ref, dummy_ref, 0, "", 0u64)
+
+        if text.len() < 8usize {
+            return env
+        }
+
+        // Split by '|'
+        var parts: Vec<String> = Vec.new()
+        var cur = String.new()
+        var i: usize = 0usize
+        let p = text.as_ptr()
+        while i < text.len() {
+            let b = p[i]
+            if b == 124u8 { // '|'
+                parts.push(cur)
+                cur = String.new()
+            } else {
+                cur.push_byte(b)
+            }
+            i = i + 1usize
+        }
+        parts.push(cur)
+
+        if parts.len >= 8usize {
+            var seq: u64 = 0u64
+            let p_seq = parts.ptr[1usize].as_ptr()
+            var si: usize = 0usize
+            while si < parts.ptr[1usize].len() {
+                seq = seq * 10u64 + ((p_seq[si] - 48u8) as u64)
+                si = si + 1usize
+            }
+            env.sequence = seq
+            env.target_node = String.from_str(parts.ptr[3usize].as_ptr() as str)
+            env.target_actor = String.from_str(parts.ptr[4usize].as_ptr() as str)
+            env.sender_node = String.from_str(parts.ptr[5usize].as_ptr() as str)
+            env.sender_actor = String.from_str(parts.ptr[6usize].as_ptr() as str)
+            env.payload = String.from_str(parts.ptr[7usize].as_ptr() as str)
+        }
+
+        return env
+    }
+}
+
+pub struct ClusterRouter {
+    pub local_node_id: String,
+    pub queued_envelopes: Vec<RemoteEnvelope>,
+}
+
+impl ClusterRouter {
+    pub fn new(node_id: str) -> ClusterRouter {
+        return ClusterRouter {
+            local_node_id: String.from_str(node_id),
+            queued_envelopes: Vec.new(),
+        }
+    }
+
+    pub fn route(var self, env: RemoteEnvelope) -> bool {
+        let is_local = cluster_str_eq(env.target_node, self.local_node_id)
+        self.queued_envelopes.push(env)
+        return is_local
+    }
+
+    pub fn pending_count(self) -> usize {
+        return self.queued_envelopes.len
+    }
+}

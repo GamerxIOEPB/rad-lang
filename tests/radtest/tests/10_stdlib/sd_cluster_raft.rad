@@ -1,0 +1,96 @@
+import std/raft;
+import std/cluster;
+
+fn main() {
+    println("--- Testing Raft Consensus ---")
+    var node1 = RaftNode.new("node-1", 3usize)
+    var node2 = RaftNode.new("node-2", 3usize)
+    let node3 = RaftNode.new("node-3", 3usize)
+
+    // Node 1 starts election
+    let vote_req = node1.start_election()
+    let is_cand = node1.role == RAFT_ROLE_CANDIDATE
+    println(f"Node 1 role candidate: {is_cand}")
+    println(f"Node 1 term: {vote_req.term}")
+
+    // Node 2 handles request vote
+    let reply2 = node2.handle_request_vote(vote_req)
+    println(f"Node 2 vote granted: {reply2.vote_granted}")
+
+    // Node 1 handles vote reply -> quorum reached (2/3)
+    let became_leader = node1.handle_vote_reply(reply2)
+    println(f"Node 1 became leader: {became_leader}")
+    let is_ldr = node1.role == RAFT_ROLE_LEADER
+    println(f"Node 1 role leader: {is_ldr}")
+
+    // Leader proposes commands
+    let idx1 = node1.propose("SET user=alice")
+    let idx2 = node1.propose("SET counter=42")
+    println(f"Proposed entries: idx1={idx1}, idx2={idx2}")
+
+    // Leader sends AppendEntries to Node 2
+    var append_args = AppendEntriesArgs.new(node1.current_term, "node-1", 0u64, 0u64, 2u64)
+    append_args.add_entry(RaftLogEntry.new(node1.current_term, 1u64, "SET user=alice"))
+    append_args.add_entry(RaftLogEntry.new(node1.current_term, 2u64, "SET counter=42"))
+
+    let app_reply = node2.handle_append_entries(append_args)
+    println(f"Node 2 append success: {app_reply.success}")
+    println(f"Node 2 match index: {app_reply.match_index}")
+
+    // Commit and apply to state machine
+    node1.commit_to(2u64)
+    let applied = node1.apply_entries()
+    println(f"Node 1 applied entries: {applied}")
+    let u = node1.lookup_state("user")
+    println(f"State user: {u}")
+    let c = node1.lookup_state("counter")
+    println(f"State counter: {c}")
+
+    println("--- Testing SWIM Gossip & Cluster ---")
+    var gossip = SwimGossip.new("node-1", "127.0.0.1:8001")
+    gossip.join("node-2", "127.0.0.1:8002")
+    gossip.join("node-3", "127.0.0.1:8003")
+    let m_len = gossip.members.len
+    println(f"Cluster members count: {m_len}")
+    let a_cnt1 = gossip.alive_count()
+    println(f"Cluster alive count: {a_cnt1}")
+
+    let ping_ok = gossip.ping(1usize)
+    println(f"Ping node-2: {ping_ok}")
+
+    gossip.mark_suspect(2usize)
+    let is_susp = gossip.members.ptr[2usize].status == CLUSTER_MEMBER_SUSPECT
+    println(f"Node-3 suspect status: {is_susp}")
+
+    gossip.confirm_dead(2usize)
+    let is_dead = gossip.members.ptr[2usize].status == CLUSTER_MEMBER_DEAD
+    println(f"Node-3 dead status: {is_dead}")
+    let a_cnt2 = gossip.alive_count()
+    println(f"Cluster alive after death: {a_cnt2}")
+
+    let digest = gossip.disseminate()
+    let p_dig = digest.as_ptr()
+    let is_gossip = p_dig[0usize] == 71u8 && p_dig[1usize] == 79u8
+    println(f"Gossip digest starts with GOSSIP: {is_gossip}")
+
+    // Remote Envelope Transport
+    let target_ref = RemoteActorRef.new("node-2", "WorkerPool")
+    let sender_ref = RemoteActorRef.new("node-1", "Client")
+    let env = RemoteEnvelope.new(target_ref, sender_ref, 10, "FLUSH_JOBS", 1u64)
+    let wire_bytes = env.encode()
+    println(f"Encoded wire packet: {wire_bytes}")
+
+    let decoded = RemoteEnvelope.decode(wire_bytes.as_ptr() as str)
+    println(f"Decoded target node: {decoded.target_node}")
+    println(f"Decoded target actor: {decoded.target_actor}")
+    println(f"Decoded payload: {decoded.payload}")
+
+    var router = ClusterRouter.new("node-1")
+    let is_local = router.route(env)
+    let is_remote = !is_local
+    println(f"Router routed remote envelope: {is_remote}")
+    let p_cnt = router.pending_count()
+    println(f"Pending routed envelopes: {p_cnt}")
+
+    println("CLUSTER_RAFT_OK")
+}

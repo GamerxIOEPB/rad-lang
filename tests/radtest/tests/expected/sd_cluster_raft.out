@@ -1,0 +1,27 @@
+--- Testing Raft Consensus ---
+Node 1 role candidate: 1
+Node 1 term: 1
+Node 2 vote granted: 1
+Node 1 became leader: 1
+Node 1 role leader: 1
+Proposed entries: idx1=1, idx2=2
+Node 2 append success: 1
+Node 2 match index: 2
+Node 1 applied entries: 2
+State user: alice
+State counter: 42
+--- Testing SWIM Gossip & Cluster ---
+Cluster members count: 3
+Cluster alive count: 3
+Ping node-2: 1
+Node-3 suspect status: 1
+Node-3 dead status: 1
+Cluster alive after death: 2
+Gossip digest starts with GOSSIP: 1
+Encoded wire packet: RADPKT|1|10|node-2|WorkerPool|node-1|Client|FLUSH_JOBS
+Decoded target node: node-2
+Decoded target actor: WorkerPool
+Decoded payload: FLUSH_JOBS
+Router routed remote envelope: 1
+Pending routed envelopes: 1
+CLUSTER_RAFT_OK

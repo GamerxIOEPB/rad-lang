@@ -1,0 +1,81 @@
+import std/zk;
+
+fn main() {
+    println("--- Testing Finite Field F_p Arithmetic ---")
+    let a = FieldElement.new(123456789u64)
+    let b = FieldElement.new(987654321u64)
+
+    let sum = a.add(b)
+    let diff = sum.sub(b)
+    let is_inv = diff.eq(a)
+    println(f"Addition and subtraction inverse: {is_inv}")
+
+    let inv_a = a.inv()
+    let prod = a.mul(inv_a)
+    let one_fe = FieldElement::one()
+    let is_mult_inv = prod.eq(one_fe)
+    println(f"Multiplicative inverse is one: {is_mult_inv}")
+
+    println("--- Testing Elliptic Curve G1 Arithmetic ---")
+    let g = PointG1::generator()
+    let g_inf = g.is_infinity
+    println(f"Generator is infinity: {g_inf}")
+
+    let g2 = g.double()
+    let g2_add = g.add(g)
+    let dbl_eq = g2.x.eq(g2_add.x) && g2.y.eq(g2_add.y)
+    println(f"Double equals add: {dbl_eq}")
+
+    let g5 = g.mul_scalar(5u64)
+    let g5_inf = g5.is_infinity
+    println(f"Scalar mul 5 is infinity: {g5_inf}")
+
+    println("--- Testing R1CS Circuit Synthesis ---")
+    // Circuit: Prove knowledge of factors x, y such that x * y = z
+    var cs = ConstraintSystem.new()
+    let var_z = cs.allocate_var(true)  // public output z = 35
+    let var_x = cs.allocate_var(false) // private secret x = 5
+    let var_y = cs.allocate_var(false) // private secret y = 7
+
+    cs.set_witness(var_z, FieldElement.new(35u64))
+    cs.set_witness(var_x, FieldElement.new(5u64))
+    cs.set_witness(var_y, FieldElement.new(7u64))
+
+    // Constraint: (1 * x) * (1 * y) = (1 * z)
+    var lin_a = LinearCombination.new()
+    lin_a.add_term(var_x, FieldElement::one())
+
+    var lin_b = LinearCombination.new()
+    lin_b.add_term(var_y, FieldElement::one())
+
+    var lin_c = LinearCombination.new()
+    lin_c.add_term(var_z, FieldElement::one())
+
+    cs.add_constraint(lin_a, lin_b, lin_c)
+    let sat1 = cs.is_satisfied()
+    println(f"R1CS satisfied with valid witness: {sat1}")
+
+    // Test with invalid witness (x = 6)
+    cs.set_witness(var_x, FieldElement.new(6u64))
+    let sat2 = !cs.is_satisfied()
+    println(f"R1CS rejected with invalid witness: {sat2}")
+
+    // Restore valid witness
+    cs.set_witness(var_x, FieldElement.new(5u64))
+
+    println("--- Testing Groth16 Prover & Verifier ---")
+    let proof = Groth16Engine::prove(cs)
+    let a_ok = !proof.a.is_infinity
+    let b_ok = !proof.b.is_infinity
+    let c_ok = !proof.c.is_infinity
+    println(f"Proof generated: A={a_ok}, B={b_ok}, C={c_ok}")
+
+    var vk = VerifyingKey.new(g, g2, g, g2)
+    vk.add_ic(g)
+    vk.add_ic(g)
+
+    let verified = Groth16Engine::verify(vk, 1usize, proof)
+    println(f"Groth16 proof verified: {verified}")
+
+    println("ZK_SNARK_OK")
+}

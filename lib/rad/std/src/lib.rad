@@ -47,3 +47,9 @@ pub import simd
 pub import kernel
 pub import gpu
 pub import gui
+pub import raft
+pub import cluster
+pub import arrow
+pub import parquet
+pub import zk
+pub import wasm_vm

@@ -1,0 +1,11 @@
+--- Testing WebAssembly Micro-VM ---
+WASM header valid: 1
+Module functions count: 2
+Export 'add' index: 0
+Export 'mul_seven' index: 1
+WASM add(15, 27) = 42
+WASM mul_seven(6) = 42
+Gas used: 1
+Linear memory at 128: 1337
+WASI stdout captured: 1
+WASM_VM_OK

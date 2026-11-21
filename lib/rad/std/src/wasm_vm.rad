@@ -1,0 +1,436 @@
+// ==============================================================================
+// Rad Standard Library: Embedded WebAssembly Micro-VM & WASI Runtime (std::wasm_vm)
+// Bytecode interpreter, 64KB paged linear memory, gas metering, capability sandbox.
+// Zero external C dynamic dependencies.
+// ==============================================================================
+
+pub const WASM_MAGIC_0: u8 = 0x00u8
+pub const WASM_MAGIC_1: u8 = 0x61u8 // 'a'
+pub const WASM_MAGIC_2: u8 = 0x73u8 // 's'
+pub const WASM_MAGIC_3: u8 = 0x6Du8 // 'm'
+
+pub const WASM_PAGE_SIZE: usize = 65536usize // 64 KB
+
+// Standard WebAssembly Opcode Table
+pub const OP_UNREACHABLE: u8 = 0x00u8
+pub const OP_NOP: u8         = 0x01u8
+pub const OP_BLOCK: u8       = 0x02u8
+pub const OP_LOOP: u8        = 0x03u8
+pub const OP_IF: u8          = 0x04u8
+pub const OP_ELSE: u8        = 0x05u8
+pub const OP_END: u8         = 0x0Bu8
+pub const OP_BR: u8          = 0x0Cu8
+pub const OP_BR_IF: u8       = 0x0Du8
+pub const OP_RETURN: u8      = 0x0Fu8
+pub const OP_CALL: u8        = 0x10u8
+pub const OP_DROP: u8        = 0x1Au8
+pub const OP_SELECT: u8      = 0x1Bu8
+pub const OP_LOCAL_GET: u8   = 0x20u8
+pub const OP_LOCAL_SET: u8   = 0x21u8
+pub const OP_LOCAL_TEE: u8   = 0x22u8
+pub const OP_GLOBAL_GET: u8  = 0x23u8
+pub const OP_GLOBAL_SET: u8  = 0x24u8
+pub const OP_I32_LOAD: u8    = 0x28u8
+pub const OP_I64_LOAD: u8    = 0x29u8
+pub const OP_I32_STORE: u8   = 0x36u8
+pub const OP_I64_STORE: u8   = 0x37u8
+pub const OP_MEMORY_SIZE: u8 = 0x3Fu8
+pub const OP_MEMORY_GROW: u8 = 0x40u8
+pub const OP_I32_CONST: u8   = 0x41u8
+pub const OP_I64_CONST: u8   = 0x42u8
+pub const OP_I32_EQZ: u8     = 0x45u8
+pub const OP_I32_EQ: u8      = 0x46u8
+pub const OP_I32_NE: u8      = 0x47u8
+pub const OP_I32_LT_S: u8    = 0x48u8
+pub const OP_I32_GT_S: u8    = 0x4Au8
+pub const OP_I32_ADD: u8     = 0x6Au8
+pub const OP_I32_SUB: u8     = 0x6Bu8
+pub const OP_I32_MUL: u8     = 0x6Cu8
+pub const OP_I32_DIV_S: u8   = 0x6Du8
+pub const OP_I32_REM_S: u8   = 0x6Fu8
+pub const OP_I32_AND: u8     = 0x71u8
+pub const OP_I32_OR: u8      = 0x72u8
+pub const OP_I32_XOR: u8     = 0x73u8
+pub const OP_I32_SHL: u8     = 0x74u8
+pub const OP_I32_SHR_S: u8   = 0x75u8
+
+// ------------------------------------------------------------------------------
+// WASI Preview 1 Sandbox Context
+// ------------------------------------------------------------------------------
+
+pub struct WasiContext {
+    pub stdout_capture: String,
+    pub exit_code: i32,
+    pub has_exited: bool,
+    pub can_write_stdout: bool,
+    pub can_access_clock: bool,
+}
+
+impl WasiContext {
+    pub fn new() -> WasiContext {
+        return WasiContext {
+            stdout_capture: String.new(),
+            exit_code: 0,
+            has_exited: false,
+            can_write_stdout: true,
+            can_access_clock: true,
+        }
+    }
+
+    pub fn proc_exit(var self, code: i32) {
+        self.exit_code = code
+        self.has_exited = true
+    }
+
+    pub fn write_stdout(var self, text: str) {
+        if self.can_write_stdout {
+            self.stdout_capture.push_str(text)
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// WasmFunction & WasmModule
+// ------------------------------------------------------------------------------
+
+pub struct WasmFunction {
+    pub name: String,
+    pub param_count: usize,
+    pub local_count: usize,
+    pub code: Vec<u8>,
+}
+
+impl WasmFunction {
+    pub fn new(name: str, params: usize, locals: usize) -> WasmFunction {
+        return WasmFunction {
+            name: String.from_str(name),
+            param_count: params,
+            local_count: locals,
+            code: Vec.new(),
+        }
+    }
+
+    pub fn emit(var self, byte: u8) {
+        self.code.push(byte)
+    }
+
+    pub fn emit_i32_const(var self, val: i32) {
+        self.code.push(OP_I32_CONST)
+        let v = val as u32
+        // Encode fixed 4 bytes little-endian
+        self.code.push((v & 255u32) as u8)
+        self.code.push(((v >> 8u32) & 255u32) as u8)
+        self.code.push(((v >> 16u32) & 255u32) as u8)
+        self.code.push(((v >> 24u32) & 255u32) as u8)
+    }
+}
+
+pub struct WasmModule {
+    pub functions: Vec<WasmFunction>,
+    pub export_names: Vec<String>,
+    pub export_indices: Vec<usize>,
+    pub initial_memory_pages: usize,
+}
+
+impl WasmModule {
+    pub fn new() -> WasmModule {
+        return WasmModule {
+            functions: Vec.new(),
+            export_names: Vec.new(),
+            export_indices: Vec.new(),
+            initial_memory_pages: 1usize,
+        }
+    }
+
+    pub fn add_function(var self, func: WasmFunction) -> usize {
+        let idx = self.functions.len
+        self.functions.push(func)
+        return idx
+    }
+
+    pub fn export_func(var self, name: str, func_idx: usize) {
+        self.export_names.push(String.from_str(name))
+        self.export_indices.push(func_idx)
+    }
+
+    pub fn find_export(self, name: str) -> i32 {
+        var i: usize = 0usize
+        while i < self.export_names.len {
+            if (self.export_names.ptr[i].as_ptr() as str) == name {
+                return self.export_indices.ptr[i] as i32
+            }
+            i = i + 1usize
+        }
+        return -1
+    }
+
+    pub fn is_valid_wasm(bytes: []i64) -> bool {
+        if bytes.len < 8usize {
+            return false
+        }
+        // Magic "\0asm" = 0x00, 0x61 ('a' = 97), 0x73 ('s' = 115), 0x6D ('m' = 109)
+        if bytes[0usize] != 0 || bytes[1usize] != 97 || bytes[2usize] != 115 || bytes[3usize] != 109 {
+            return false
+        }
+        // Version 1 = 1, 0, 0, 0
+        if bytes[4usize] != 1 || bytes[5usize] != 0 || bytes[6usize] != 0 || bytes[7usize] != 0 {
+            return false
+        }
+        return true
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Sandboxed WasmInstance (Micro-VM)
+// ------------------------------------------------------------------------------
+
+pub struct WasmInstance {
+    pub module: WasmModule,
+    pub memory: Vec<u8>,
+    pub gas_limit: u64,
+    pub gas_used: u64,
+    pub wasi: WasiContext,
+}
+
+impl WasmInstance {
+    pub fn new(module: WasmModule, gas_limit: u64) -> WasmInstance {
+        let mem_size = module.initial_memory_pages * WASM_PAGE_SIZE
+        var mem: Vec<u8> = Vec.new()
+        // Pre-allocate linear memory with zero bytes
+        var i: usize = 0usize
+        while i < mem_size {
+            mem.push(0u8)
+            i = i + 1usize
+        }
+
+        return WasmInstance {
+            module: module,
+            memory: mem,
+            gas_limit: gas_limit,
+            gas_used: 0u64,
+            wasi: WasiContext.new(),
+        }
+    }
+
+    pub fn write_mem_u8(var self, offset: usize, val: u8) -> bool {
+        if offset < self.memory.len {
+            let p: *raw var u8 = self.memory.ptr as *raw var u8
+            p[offset] = val
+            return true
+        }
+        return false
+    }
+
+    pub fn read_mem_u8(self, offset: usize) -> u8 {
+        if offset < self.memory.len {
+            let p: *raw var u8 = self.memory.ptr as *raw var u8
+            return p[offset]
+        }
+        return 0u8
+    }
+
+    pub fn write_mem_i32(var self, offset: usize, val: i32) -> bool {
+        if offset + 4usize <= self.memory.len {
+            let p: *raw var u8 = self.memory.ptr as *raw var u8
+            let v = val as u32
+            p[offset] = (v & 255u32) as u8
+            p[offset + 1usize] = ((v >> 8u32) & 255u32) as u8
+            p[offset + 2usize] = ((v >> 16u32) & 255u32) as u8
+            p[offset + 3usize] = ((v >> 24u32) & 255u32) as u8
+            return true
+        }
+        return false
+    }
+
+    pub fn read_mem_i32(self, offset: usize) -> i32 {
+        if offset + 4usize <= self.memory.len {
+            let p: *raw var u8 = self.memory.ptr as *raw var u8
+            let b0 = p[offset] as u32
+            let b1 = p[offset + 1usize] as u32
+            let b2 = p[offset + 2usize] as u32
+            let b3 = p[offset + 3usize] as u32
+            let uval = b0 | (b1 << 8u32) | (b2 << 16u32) | (b3 << 24u32)
+            return uval as i32
+        }
+        return 0
+    }
+
+    pub fn invoke_i32(var self, export_name: str, args: []i64) -> i32 {
+        let fn_idx = self.module.find_export(export_name)
+        if fn_idx < 0 {
+            return -1
+        }
+        return self.execute_fn(fn_idx as usize, args) as i32
+    }
+
+    pub fn execute_fn(var self, func_idx: usize, args: []i64) -> i64 {
+        if func_idx >= self.module.functions.len {
+            return 0
+        }
+
+        let f = self.module.functions.ptr[func_idx]
+        var stack: Vec<i64> = Vec.new()
+        var locals: Vec<i64> = Vec.new()
+
+        // Initialize locals with arguments
+        var i: usize = 0usize
+        while i < args.len && i < f.param_count {
+            locals.push(args[i])
+            i = i + 1usize
+        }
+        // Pad extra declared locals with 0
+        while locals.len < f.param_count + f.local_count {
+            locals.push(0)
+        }
+
+        var pc: usize = 0usize
+        while pc < f.code.len {
+            // Check gas limits
+            self.gas_used = self.gas_used + 1u64
+            if self.gas_limit > 0u64 && self.gas_used > self.gas_limit {
+                return -999999 // Out of gas trap
+            }
+
+            let op = f.code.ptr[pc]
+            pc = pc + 1usize
+
+            if op == OP_I32_CONST {
+                if pc + 4usize <= f.code.len {
+                    let b0 = f.code.ptr[pc] as u32
+                    let b1 = f.code.ptr[pc + 1usize] as u32
+                    let b2 = f.code.ptr[pc + 2usize] as u32
+                    let b3 = f.code.ptr[pc + 3usize] as u32
+                    let uval = b0 | (b1 << 8u32) | (b2 << 16u32) | (b3 << 24u32)
+                    let ival = uval as i32
+                    stack.push(ival as i64)
+                    pc = pc + 4usize
+                }
+            }
+            if op == OP_LOCAL_GET {
+                if pc < f.code.len {
+                    let l_idx = f.code.ptr[pc] as usize
+                    pc = pc + 1usize
+                    if l_idx < locals.len {
+                        stack.push(locals.ptr[l_idx])
+                    } else {
+                        stack.push(0)
+                    }
+                }
+            }
+            if op == OP_LOCAL_SET {
+                if pc < f.code.len {
+                    let l_idx = f.code.ptr[pc] as usize
+                    pc = pc + 1usize
+                    if stack.len > 0usize {
+                        let val = stack.pop()
+                        if l_idx < locals.len {
+                            locals.ptr[l_idx] = val
+                        }
+                    }
+                }
+            }
+            if op == OP_I32_ADD {
+                if stack.len >= 2usize {
+                    let rhs = stack.pop()
+                    let lhs = stack.pop()
+                    let res = ((lhs as i32) + (rhs as i32)) as i64
+                    stack.push(res)
+                }
+            }
+            if op == OP_I32_SUB {
+                if stack.len >= 2usize {
+                    let rhs = stack.pop()
+                    let lhs = stack.pop()
+                    let res = ((lhs as i32) - (rhs as i32)) as i64
+                    stack.push(res)
+                }
+            }
+            if op == OP_I32_MUL {
+                if stack.len >= 2usize {
+                    let rhs = stack.pop()
+                    let lhs = stack.pop()
+                    let res = ((lhs as i32) * (rhs as i32)) as i64
+                    stack.push(res)
+                }
+            }
+            if op == OP_I32_DIV_S {
+                if stack.len >= 2usize {
+                    let rhs = stack.pop()
+                    let lhs = stack.pop()
+                    if rhs != 0 {
+                        let res = ((lhs as i32) / (rhs as i32)) as i64
+                        stack.push(res)
+                    } else {
+                        stack.push(0)
+                    }
+                }
+            }
+            if op == OP_I32_EQ {
+                if stack.len >= 2usize {
+                    let rhs = stack.pop()
+                    let lhs = stack.pop()
+                    var res: i64 = 0
+                    if (lhs as i32) == (rhs as i32) {
+                        res = 1
+                    }
+                    stack.push(res)
+                }
+            }
+            if op == OP_I32_LT_S {
+                if stack.len >= 2usize {
+                    let rhs = stack.pop()
+                    let lhs = stack.pop()
+                    var res: i64 = 0
+                    if (lhs as i32) < (rhs as i32) {
+                        res = 1
+                    }
+                    stack.push(res)
+                }
+            }
+            if op == OP_I32_GT_S {
+                if stack.len >= 2usize {
+                    let rhs = stack.pop()
+                    let lhs = stack.pop()
+                    var res: i64 = 0
+                    if (lhs as i32) > (rhs as i32) {
+                        res = 1
+                    }
+                    stack.push(res)
+                }
+            }
+            if op == OP_I32_LOAD {
+                if pc + 2usize <= f.code.len {
+                    pc = pc + 2usize
+                    if stack.len > 0usize {
+                        let base_addr = stack.pop() as usize
+                        let loaded = self.read_mem_i32(base_addr)
+                        stack.push(loaded as i64)
+                    }
+                }
+            }
+            if op == OP_I32_STORE {
+                if pc + 2usize <= f.code.len {
+                    pc = pc + 2usize
+                    if stack.len >= 2usize {
+                        let val = stack.pop() as i32
+                        let base_addr = stack.pop() as usize
+                        let _ = self.write_mem_i32(base_addr, val)
+                    }
+                }
+            }
+            if op == OP_RETURN || op == OP_END {
+                if pc >= f.code.len || op == OP_RETURN {
+                    if stack.len > 0usize {
+                        return stack.pop()
+                    }
+                    return 0
+                }
+            }
+        }
+
+        if stack.len > 0usize {
+            return stack.pop()
+        }
+        return 0
+    }
+}

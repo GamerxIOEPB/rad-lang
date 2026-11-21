@@ -1,0 +1,23 @@
+--- Testing Apache Arrow In-Memory Columns ---
+Float64Array len: 5
+Float64Array sum: 150
+Float64Array avg: 30
+Float64Array min: 10
+Float64Array max: 50
+Float64Array filter > 25.0 count: 3
+Is index 2 null: 1
+Null count: 1
+Sum after null mask: 120
+Avg after null mask: 30
+Int32Array sum: 800
+Int32Array filter == 200 count: 2
+Schema fields: 2
+RecordBatch rows: 5
+RecordBatch float cols: 1
+RecordBatch int cols: 1
+--- Testing Apache Parquet Columnar Storage ---
+Parquet row groups: 1
+Parquet total rows: 4
+Serialized Parquet bytes: 36
+Is valid Parquet binary: 1
+ARROW_PARQUET_OK

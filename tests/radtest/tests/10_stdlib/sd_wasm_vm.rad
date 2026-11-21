@@ -1,0 +1,70 @@
+import std/wasm_vm;
+
+fn main() {
+    println("--- Testing WebAssembly Micro-VM ---")
+
+    // 1. WASM binary header validation
+    let wasm_header: [i64; 8] = [0, 97, 115, 109, 1, 0, 0, 0]
+    let is_valid = WasmModule::is_valid_wasm(wasm_header)
+    println(f"WASM header valid: {is_valid}")
+
+    // 2. Build WasmModule
+    var mod = WasmModule.new()
+
+    // Function 0: add(x: i32, y: i32) -> i32
+    // params = 2, locals = 0
+    var fn_add = WasmFunction.new("add", 2usize, 0usize)
+    fn_add.emit(OP_LOCAL_GET)
+    fn_add.emit(0u8)
+    fn_add.emit(OP_LOCAL_GET)
+    fn_add.emit(1u8)
+    fn_add.emit(OP_I32_ADD)
+    fn_add.emit(OP_RETURN)
+    let fn0_idx = mod.add_function(fn_add)
+    mod.export_func("add", fn0_idx)
+
+    // Function 1: mul_seven(x: i32) -> i32
+    // params = 1, locals = 0
+    var fn_mul = WasmFunction.new("mul_seven", 1usize, 0usize)
+    fn_mul.emit(OP_LOCAL_GET)
+    fn_mul.emit(0u8)
+    fn_mul.emit_i32_const(7)
+    fn_mul.emit(OP_I32_MUL)
+    fn_mul.emit(OP_RETURN)
+    let fn1_idx = mod.add_function(fn_mul)
+    mod.export_func("mul_seven", fn1_idx)
+
+    let f_count = mod.functions.len
+    println(f"Module functions count: {f_count}")
+    let exp_add = mod.find_export("add")
+    println(f"Export 'add' index: {exp_add}")
+    let exp_mul = mod.find_export("mul_seven")
+    println(f"Export 'mul_seven' index: {exp_mul}")
+
+    // 3. Instantiate Micro-VM with 10,000 gas limit
+    var vm = WasmInstance.new(mod, 10000u64)
+
+    // Execute add(15, 27) -> 42
+    let args_add: [i64; 2] = [15, 27]
+    let res_add = vm.invoke_i32("add", args_add)
+    println(f"WASM add(15, 27) = {res_add}")
+
+    // Execute mul_seven(6) -> 42
+    let args_mul: [i64; 1] = [6]
+    let res_mul = vm.invoke_i32("mul_seven", args_mul)
+    println(f"WASM mul_seven(6) = {res_mul}")
+    let gas_ok = vm.gas_used > 0u64
+    println(f"Gas used: {gas_ok}")
+
+    // 4. Linear Memory load/store
+    let _ = vm.write_mem_i32(128usize, 1337)
+    let loaded_val = vm.read_mem_i32(128usize)
+    println(f"Linear memory at 128: {loaded_val}")
+
+    // 5. WASI Preview 1 Sandbox
+    vm.wasi.write_stdout("Hello from WASI sandbox!\n")
+    let wasi_ok = vm.wasi.stdout_capture.len() > 0usize
+    println(f"WASI stdout captured: {wasi_ok}")
+
+    println("WASM_VM_OK")
+}
