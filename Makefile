@@ -138,28 +138,20 @@ install: all
 	cp -rf $(SYSROOT)/* $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/
 	@if [ -d "share/rad" ]; then cp -rf share/rad/* $(PREFIX)/share/rad/; fi
 	@if [ -d "../rad-lib/packages" ]; then \
-		echo "==> Pre-installing Rad ecosystem libraries to $(PREFIX)/lib/rad..."; \
-		for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml rad-gui rad-sound; do \
+		echo "==> Pre-installing default Rad ecosystem libraries to $(PREFIX)/lib/rad..."; \
+		for pkg in rad-args rad-test rad-json rad-toml rad-log rad-math; do \
 			if [ -d "../rad-lib/packages/$$pkg/0.1.0" ]; then \
 				rm -rf $(PREFIX)/lib/rad/$$pkg; \
 				cp -rf ../rad-lib/packages/$$pkg/0.1.0 $(PREFIX)/lib/rad/$$pkg; \
 			fi; \
 		done; \
-		ln -sfn rad-tui $(PREFIX)/lib/rad/tui; \
-		ln -sfn rad-json $(PREFIX)/lib/rad/json; \
-		ln -sfn rad-http $(PREFIX)/lib/rad/http; \
 		ln -sfn rad-args $(PREFIX)/lib/rad/args; \
 		ln -sfn rad-test $(PREFIX)/lib/rad/test; \
-		ln -sfn rad-math $(PREFIX)/lib/rad/math; \
-		ln -sfn rad-log $(PREFIX)/lib/rad/log; \
-		ln -sfn rad-kv $(PREFIX)/lib/rad/kv; \
-		ln -sfn rad-sqlite $(PREFIX)/lib/rad/sqlite; \
-		ln -sfn rad-gfx $(PREFIX)/lib/rad/gfx; \
-		ln -sfn rad-gui $(PREFIX)/lib/rad/gui; \
-		ln -sfn rad-sound $(PREFIX)/lib/rad/sound; \
+		ln -sfn rad-json $(PREFIX)/lib/rad/json; \
 		ln -sfn rad-toml $(PREFIX)/lib/rad/toml; \
-		ln -sfn rad-yaml $(PREFIX)/lib/rad/yaml; \
-		echo "    [✓] Ecosystem libraries installed to $(PREFIX)/lib/rad"; \
+		ln -sfn rad-log $(PREFIX)/lib/rad/log; \
+		ln -sfn rad-math $(PREFIX)/lib/rad/math; \
+		echo "    [✓] Default ecosystem libraries installed to $(PREFIX)/lib/rad"; \
 	fi
 	@ln -sfn lib/rad $(PREFIX)/packages
 	@echo "[✓] Rad installed successfully to $(PREFIX)/bin"

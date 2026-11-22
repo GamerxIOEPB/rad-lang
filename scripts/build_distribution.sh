@@ -166,7 +166,7 @@ elif [ -d "$HOME/Projects/rad-lib/packages" ]; then
     RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
 fi
 if [ -n "$RAD_LIB_DIR" ]; then
-    for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-toml rad-yaml rad-gui rad-sound; do
+    for pkg in rad-args rad-test rad-json rad-toml rad-log rad-math; do
         if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
             cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$DIST_ROOT/lib/rad/$pkg"
         fi
@@ -174,7 +174,7 @@ if [ -n "$RAD_LIB_DIR" ]; then
 fi
 
 # Ensure legacy short-name alias symlinks exist in lib/rad/
-for pkg_base in tui json http args test math log kv sqlite gfx toml yaml gui sound; do
+for pkg_base in args test json toml log math; do
     if [ -d "$DIST_ROOT/lib/rad/rad-$pkg_base" ]; then
         ln -sfn "rad-$pkg_base" "$DIST_ROOT/lib/rad/$pkg_base" 2>/dev/null || true
     fi

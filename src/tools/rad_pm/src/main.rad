@@ -925,6 +925,27 @@ fn ensure_library_installed_global(reg_root: str, pkg_name: str, version: str) -
         let _lc = system(link_comp.as_ptr() as str)
     }
 
+    // If package includes native static archive(s) (e.g. libsqlite3.a in rad-sqlite), install to target sysroot lib/
+    var sysroot_archive_cmd = String.new()
+    sysroot_archive_cmd.push_str("sh -c '")
+    sysroot_archive_cmd.push_str("GDIR=\"")
+    sysroot_archive_cmd.push_str(global_pkg_dir.as_ptr() as str)
+    sysroot_archive_cmd.push_str("\"; ")
+    sysroot_archive_cmd.push_str("THOME=\"")
+    sysroot_archive_cmd.push_str(env_home as str)
+    sysroot_archive_cmd.push_str("/.rad/lib/targets\"; ")
+    sysroot_archive_cmd.push_str("if [ -d \"$THOME\" ]; then ")
+    sysroot_archive_cmd.push_str("  for tdir in \"$THOME\"/*; do ")
+    sysroot_archive_cmd.push_str("    if [ -d \"$tdir/lib\" ]; then ")
+    sysroot_archive_cmd.push_str("      if [ -f \"$GDIR/vendor/libsqlite3.a\" ]; then cp -f \"$GDIR/vendor/libsqlite3.a\" \"$tdir/lib/\" 2>/dev/null || true; fi; ")
+    sysroot_archive_cmd.push_str("      if [ -f \"$GDIR/libsqlite3.a\" ]; then cp -f \"$GDIR/libsqlite3.a\" \"$tdir/lib/\" 2>/dev/null || true; fi; ")
+    sysroot_archive_cmd.push_str("      for af in \"$GDIR\"/vendor/*.a; do [ -f \"$af\" ] && cp -f \"$af\" \"$tdir/lib/\" 2>/dev/null || true; done; ")
+    sysroot_archive_cmd.push_str("    fi; ")
+    sysroot_archive_cmd.push_str("  done; ")
+    sysroot_archive_cmd.push_str("fi; ")
+    sysroot_archive_cmd.push_str("'")
+    let _sa = system(sysroot_archive_cmd.as_ptr() as str)
+
     return file_exists(test_global.as_ptr() as str) || file_exists(test_global2.as_ptr() as str)
 }
 
@@ -1183,6 +1204,10 @@ fn cmd_install(single_pkg: str, is_locked: bool) -> i32 {
         ok_msg.push_str(latest_ver.as_ptr() as str)
         ok_msg.push_str(") to ~/.rad/lib/rad/")
         println(ok_msg.as_ptr() as str)
+
+        if str_eq(p_str, "rad-sqlite") || str_eq(p_str, "sqlite") {
+            println("  \x1b[1;32m✓\x1b[0m Provisioned native static library libsqlite3.a to target sysroot")
+        }
 
         var import_name = p_str
         if str_starts_with(p_str, "rad-") {

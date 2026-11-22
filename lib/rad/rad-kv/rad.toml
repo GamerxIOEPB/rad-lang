@@ -1,8 +1,0 @@
-[package]
-name = "rad-kv"
-version = "0.1.0"
-authors = ["Rad Developers"]
-description = "Embedded persistent append-only Key-Value store with log compaction for Rad"
-license = "MIT"
-
-[dependencies]

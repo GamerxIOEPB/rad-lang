@@ -1,8 +1,0 @@
-[package]
-name = "rad-sound"
-version = "0.1.0"
-authors = ["Rad Developers"]
-description = "Pure native PCM audio synthesis engine, waveform generators, and retro game sound effects"
-license = "MIT"
-
-[dependencies]

@@ -1,8 +1,0 @@
-[package]
-name = "rad-gfx"
-version = "0.1.0"
-authors = ["Rad Developers"]
-description = "Lightweight 2D graphics framebuffer, drawing primitives, and PPM/BMP image exporter for Rad"
-license = "MIT"
-
-[dependencies]

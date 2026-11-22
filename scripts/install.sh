@@ -321,25 +321,17 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
     fi
     if [ -n "$RAD_LIB_DIR" ]; then
-        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-gui rad-sound rad-toml rad-yaml; do
+        for pkg in rad-args rad-test rad-json rad-toml rad-log rad-math; do
             if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
                 cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$STAGE_DIR/lib/rad/$pkg"
             fi
         done
-        ln -sfn rad-tui "$STAGE_DIR/lib/rad/tui" 2>/dev/null || true
-        ln -sfn rad-json "$STAGE_DIR/lib/rad/json" 2>/dev/null || true
-        ln -sfn rad-http "$STAGE_DIR/lib/rad/http" 2>/dev/null || true
         ln -sfn rad-args "$STAGE_DIR/lib/rad/args" 2>/dev/null || true
         ln -sfn rad-test "$STAGE_DIR/lib/rad/test" 2>/dev/null || true
-        ln -sfn rad-math "$STAGE_DIR/lib/rad/math" 2>/dev/null || true
-        ln -sfn rad-log "$STAGE_DIR/lib/rad/log" 2>/dev/null || true
-        ln -sfn rad-kv "$STAGE_DIR/lib/rad/kv" 2>/dev/null || true
-        ln -sfn rad-sqlite "$STAGE_DIR/lib/rad/sqlite" 2>/dev/null || true
-        ln -sfn rad-gfx "$STAGE_DIR/lib/rad/gfx" 2>/dev/null || true
-        ln -sfn rad-gui "$STAGE_DIR/lib/rad/gui" 2>/dev/null || true
-        ln -sfn rad-sound "$STAGE_DIR/lib/rad/sound" 2>/dev/null || true
+        ln -sfn rad-json "$STAGE_DIR/lib/rad/json" 2>/dev/null || true
         ln -sfn rad-toml "$STAGE_DIR/lib/rad/toml" 2>/dev/null || true
-        ln -sfn rad-yaml "$STAGE_DIR/lib/rad/yaml" 2>/dev/null || true
+        ln -sfn rad-log "$STAGE_DIR/lib/rad/log" 2>/dev/null || true
+        ln -sfn rad-math "$STAGE_DIR/lib/rad/math" 2>/dev/null || true
     fi
     # Maintain full backwards compatibility: packages -> lib/rad symlink
     ln -sfn lib/rad "$STAGE_DIR/packages" 2>/dev/null || true

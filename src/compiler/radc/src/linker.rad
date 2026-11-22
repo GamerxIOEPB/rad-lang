@@ -239,6 +239,14 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
             ld_cmd.push_str(" -L")
             ld_cmd.push_str(sysroot.as_ptr() as str)
             ld_cmd.push_str("/lib ")
+            let env_h1 = getenv("HOME")
+            if (env_h1 as usize) != 0usize {
+                ld_cmd.push_str("-L")
+                ld_cmd.push_str(env_h1 as str)
+                ld_cmd.push_str("/.rad/lib/targets/x86_64-unknown-linux-musl/lib -L")
+                ld_cmd.push_str(env_h1 as str)
+                ld_cmd.push_str("/.rad/lib/rad/rad-sqlite/vendor ")
+            }
             if needs_cxx && cxx_lib_dir.len() > 0usize {
                 ld_cmd.push_str("-L")
                 ld_cmd.push_str(cxx_lib_dir.as_ptr() as str)
@@ -285,6 +293,13 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
                     ld_cmd_fb.push_str(" -L")
                     ld_cmd_fb.push_str(sysroot.as_ptr() as str)
                     ld_cmd_fb.push_str("/lib ")
+                    if (env_h1 as usize) != 0usize {
+                        ld_cmd_fb.push_str("-L")
+                        ld_cmd_fb.push_str(env_h1 as str)
+                        ld_cmd_fb.push_str("/.rad/lib/targets/x86_64-unknown-linux-musl/lib -L")
+                        ld_cmd_fb.push_str(env_h1 as str)
+                        ld_cmd_fb.push_str("/.rad/lib/rad/rad-sqlite/vendor ")
+                    }
                     if needs_cxx && cxx_lib_dir.len() > 0usize {
                         ld_cmd_fb.push_str("-L")
                         ld_cmd_fb.push_str(cxx_lib_dir.as_ptr() as str)

@@ -124,6 +124,38 @@ while IFS= read -r source; do
     fi
 done < <(find "$ROOT_DIR/lib/rad" -mindepth 3 -maxdepth 3 -type f -path '*/tests/test_*.rad' | sort)
 
+echo "==> On-demand package installation & static archive test (rad-sqlite)"
+if [[ -x "$ROOT_DIR/bin/rad" ]]; then
+    rm -rf "$HOME/.rad/lib/rad/rad-sqlite" "$HOME/.rad/lib/rad/sqlite" "$HOME/.rad/lib/targets/x86_64-unknown-linux-musl/lib/libsqlite3.a" 2>/dev/null || true
+    if "$ROOT_DIR/bin/rad" install rad-sqlite >"$TMP_DIR/install_sqlite.log" 2>&1; then
+        if [[ -f "$HOME/.rad/lib/targets/x86_64-unknown-linux-musl/lib/libsqlite3.a" ]]; then
+            sqlite_test_src="$HOME/.rad/lib/rad/rad-sqlite/tests/test_sqlite.rad"
+            if [[ -f "$sqlite_test_src" ]]; then
+                if "$RADC" -g -O0 -lsqlite3 "$sqlite_test_src" -o "$TMP_DIR/ondemand_sqlite_bin" >"$TMP_DIR/ondemand_sqlite.compile.log" 2>&1; then
+                    if "$TMP_DIR/ondemand_sqlite_bin" >"$TMP_DIR/ondemand_sqlite.run.log" 2>&1; then
+                        printf '  [OK] rad install rad-sqlite provisions libsqlite3.a and runs successfully\n'
+                    else
+                        failed=$((failed + 1))
+                        printf '  [FAIL] runtime on-demand rad-sqlite\n'
+                        cat "$TMP_DIR/ondemand_sqlite.run.log"
+                    fi
+                else
+                    failed=$((failed + 1))
+                    printf '  [FAIL] compile on-demand rad-sqlite\n'
+                    cat "$TMP_DIR/ondemand_sqlite.compile.log"
+                fi
+            fi
+        else
+            failed=$((failed + 1))
+            printf '  [FAIL] libsqlite3.a not provisioned to sysroot\n'
+        fi
+    else
+        failed=$((failed + 1))
+        printf '  [FAIL] rad install rad-sqlite failed\n'
+        cat "$TMP_DIR/install_sqlite.log"
+    fi
+fi
+
 echo "==> Allocator, collections, and pointer stress suite"
 MEMORY_BIN="$TMP_DIR/memory_safety"
 if "$RADC" -g -O0 tests/quality/memory_safety.rad -o "$MEMORY_BIN" >"$TMP_DIR/memory.compile.log" 2>&1; then
