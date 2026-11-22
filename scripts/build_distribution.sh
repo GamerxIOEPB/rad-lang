@@ -285,7 +285,7 @@ fi
 (
     cd "$DIST_OUT"
     rm -f SHA256SUMS
-    sha256sum ${DIST_NAME}.tar.* *.vsix 2>/dev/null > SHA256SUMS || sha256sum ${DIST_NAME}.tar.* > SHA256SUMS
+    sha256sum ${DIST_NAME}.tar.xz *.vsix 2>/dev/null > SHA256SUMS || sha256sum ${DIST_NAME}.tar.xz > SHA256SUMS
 )
 echo "  [✓] Generated SHA256SUMS manifest"
 
@@ -356,6 +356,7 @@ if [ "$DO_UPLOAD" -eq 1 ]; then
     if command -v gh >/dev/null 2>&1; then
         if gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "  -> Updating existing release $RELEASE_TAG..."
+            gh release delete-asset "$RELEASE_TAG" "${DIST_NAME}.tar.gz" --repo "$REPO" -y 2>/dev/null || true
             gh release upload "$RELEASE_TAG" \
                 "${UPLOAD_FILES[@]}" \
                 --clobber --repo "$REPO"
