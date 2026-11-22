@@ -25,6 +25,14 @@ RADC ?= $(shell \
 RADC_FLAGS ?= -O2
 RAD_FLAGS  ?= -O2
 PREFIX     ?= $(HOME)/.rad
+RAD_LIB    ?= $(shell \
+    if [ -d "../rad-lib" ]; then \
+        echo "../rad-lib"; \
+    elif [ -d "$(HOME)/Projects/rad-lib" ]; then \
+        echo "$(HOME)/Projects/rad-lib"; \
+    else \
+        echo "../rad-lib"; \
+    fi)
 
 # LLVM compilation and link flags
 LLVM_CXXFLAGS ?= $(shell llvm-config --cxxflags 2>/dev/null || echo "-I$(PREFIX)/include")
@@ -137,21 +145,35 @@ install: all
 	cp -rf lib/rad/* $(PREFIX)/lib/rad/
 	cp -rf $(SYSROOT)/* $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/
 	@if [ -d "share/rad" ]; then cp -rf share/rad/* $(PREFIX)/share/rad/; fi
-	@if [ -d "../rad-lib/packages" ]; then \
-		echo "==> Pre-installing default Rad ecosystem libraries to $(PREFIX)/lib/rad..."; \
-		for pkg in rad-args rad-test rad-json rad-toml rad-log rad-math; do \
-			if [ -d "../rad-lib/packages/$$pkg/0.1.0" ]; then \
+	@echo "==> Installing full Rad ecosystem libraries to $(PREFIX)/lib/rad..."
+	@ALL_PKGS="rad-args rad-test rad-json rad-toml rad-log rad-math rad-tui rad-http rad-kv rad-sqlite rad-gfx rad-gui rad-sound rad-yaml"; \
+	RAD_LIB_PKGS="$(RAD_LIB)/packages"; \
+	if [ ! -d "$$RAD_LIB_PKGS" ] && [ -d "$(HOME)/Projects/rad-lib/packages" ]; then \
+		RAD_LIB_PKGS="$(HOME)/Projects/rad-lib/packages"; \
+	fi; \
+	if [ -d "$$RAD_LIB_PKGS" ]; then \
+		for pkg in $$ALL_PKGS; do \
+			if [ -d "$$RAD_LIB_PKGS/$$pkg/0.1.0" ]; then \
 				rm -rf $(PREFIX)/lib/rad/$$pkg; \
-				cp -rf ../rad-lib/packages/$$pkg/0.1.0 $(PREFIX)/lib/rad/$$pkg; \
+				cp -rf "$$RAD_LIB_PKGS/$$pkg/0.1.0" $(PREFIX)/lib/rad/$$pkg; \
+				short_name=$${pkg#rad-}; \
+				ln -sfn "$$pkg" "$(PREFIX)/lib/rad/$$short_name"; \
 			fi; \
 		done; \
-		ln -sfn rad-args $(PREFIX)/lib/rad/args; \
-		ln -sfn rad-test $(PREFIX)/lib/rad/test; \
-		ln -sfn rad-json $(PREFIX)/lib/rad/json; \
-		ln -sfn rad-toml $(PREFIX)/lib/rad/toml; \
-		ln -sfn rad-log $(PREFIX)/lib/rad/log; \
-		ln -sfn rad-math $(PREFIX)/lib/rad/math; \
-		echo "    [✓] Default ecosystem libraries installed to $(PREFIX)/lib/rad"; \
+		if [ -f "$$RAD_LIB_PKGS/rad-sqlite/0.1.0/vendor/libsqlite3.a" ]; then \
+			mkdir -p $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/lib; \
+			cp -f "$$RAD_LIB_PKGS/rad-sqlite/0.1.0/vendor/libsqlite3.a" $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/lib/; \
+			echo "    [✓] Installed static archive libsqlite3.a to $(PREFIX)/lib/targets/$(TARGET_TRIPLE)/lib"; \
+		fi; \
+		echo "    [✓] All ecosystem libraries installed from $$RAD_LIB_PKGS"; \
+	else \
+		echo "==> Local rad-lib not found. Installing missing ecosystem packages using bin/rad..."; \
+		for pkg in $$ALL_PKGS; do \
+			if [ ! -d "$(PREFIX)/lib/rad/$$pkg" ]; then \
+				echo "    Installing $$pkg via bin/rad install..."; \
+				$(BIN_DIR)/rad install "$$pkg" || true; \
+			fi; \
+		done; \
 	fi
 	@ln -sfn lib/rad $(PREFIX)/packages
 	@echo "[✓] Rad installed successfully to $(PREFIX)/bin"
