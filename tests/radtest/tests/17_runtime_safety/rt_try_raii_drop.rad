@@ -1,0 +1,31 @@
+struct Guard {
+    id: i32,
+}
+
+fn Guard__drop(var self) {
+    printf("Guard drop id=%d\n", self.id);
+}
+
+fn may_fail(val: i64) -> i64 {
+    if val > 0 {
+        return val * 10;
+    }
+    return 0;
+}
+
+fn run_with_try(val: i64) -> i64 {
+    let g = Guard { id: 42 };
+    let res = may_fail(val)?;
+    printf("Success after try: %lld\n", res);
+    return res;
+}
+
+fn main() -> i32 {
+    printf("--- Testing Try RAII Drop ---\n");
+    let r1 = run_with_try(5);
+    printf("r1=%lld\n", r1);
+    printf("--- Triggering early return ---\n");
+    let r2 = run_with_try(-1);
+    printf("r2=%lld\n", r2);
+    return 0;
+}

@@ -1,0 +1,10 @@
+// [negative] Cannot return reference to local stack variable
+fn leak_stack_ref() -> *raw i32 {
+    let local_var = 42;
+    return &local_var;
+}
+
+fn main() -> i32 {
+    let ptr = leak_stack_ref();
+    return 0;
+}

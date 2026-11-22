@@ -1,0 +1,9 @@
+some check ok
+none check ok
+u1=100 d1=999
+ok_or ok: 100
+result flags ok
+ok unwrap=555
+err unwrap_or=123
+ok->some: 555
+err->some: error_payload

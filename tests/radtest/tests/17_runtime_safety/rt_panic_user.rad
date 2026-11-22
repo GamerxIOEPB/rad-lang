@@ -1,0 +1,4 @@
+fn main() -> i32 {
+    panic("custom assertion failure");
+    return 0;
+}

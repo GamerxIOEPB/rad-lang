@@ -1,5 +1,16 @@
 // Rad Core Library: Panic Handler
+// Zero allocation, freestanding runtime panic handler
 
 pub fn panic(msg: str) {
-    // In bare-metal or standard runtime, terminates execution with diagnostic message
+    let prefix = "rad runtime panic: ";
+    let _ = syscall3(1i64, 2i64, prefix as *raw u8, 19i64);
+    let p = msg as *raw u8;
+    var len = 0usize;
+    while p[len] != 0u8 {
+        len = len + 1usize;
+    }
+    let _ = syscall3(1i64, 2i64, p, len as i64);
+    let nl = "\n";
+    let _ = syscall3(1i64, 2i64, nl as *raw u8, 1i64);
+    let _ = syscall1(60i64, 1i64);
 }

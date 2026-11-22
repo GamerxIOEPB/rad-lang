@@ -1,5 +1,7 @@
 // Rad Core Library: Option<T>
 
+import result;
+
 pub enum Option<T> {
     None,
     Some(T),
@@ -8,22 +10,49 @@ pub enum Option<T> {
 impl Option<T> {
     pub fn is_some(opt: Option<T>) -> bool {
         match opt {
-            Option.Some(_) => true,
-            Option.None => false,
+            Option.Some(_) => { return true; },
+            Option.None => { return false; },
         }
     }
 
     pub fn is_none(opt: Option<T>) -> bool {
         match opt {
-            Option.Some(_) => false,
-            Option.None => true,
+            Option.Some(_) => { return false; },
+            Option.None => { return true; },
         }
     }
 
     pub fn unwrap_or(opt: Option<T>, default_val: T) -> T {
         match opt {
-            Option.Some(val) => val,
-            Option.None => default_val,
+            Option.Some(val) => { return val; },
+            Option.None => { return default_val; },
+        }
+    }
+
+    pub fn unwrap(opt: Option<T>) -> T {
+        match opt {
+            Option.Some(val) => { return val; },
+            Option.None => {
+                panic("called Option.unwrap() on a None value");
+                return opt;
+            },
+        }
+    }
+
+    pub fn expect(opt: Option<T>, msg: str) -> T {
+        match opt {
+            Option.Some(val) => { return val; },
+            Option.None => {
+                panic(msg);
+                return opt;
+            },
+        }
+    }
+
+    pub fn ok_or<E>(opt: Option<T>, err: E) -> Result<T, E> {
+        match opt {
+            Option.Some(val) => { return Result.Ok(val); },
+            Option.None => { return Result.Err(err); },
         }
     }
 }

@@ -1,0 +1,7 @@
+--- Testing Try RAII Drop ---
+Success after try: 50
+Guard drop id=42
+r1=50
+--- Triggering early return ---
+Guard drop id=42
+r2=0

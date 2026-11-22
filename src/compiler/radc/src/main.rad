@@ -415,7 +415,18 @@ fn resolve_import_raw(spec: str, current_file: str) -> String {
             let found_l1 = try_path_with_rad(cand_l1)
             if found_l1.len() > 0usize { return found_l1 }
 
-            // 2. Primary: Global ~/.rad/lib/rad/<pname>/...
+            // 2. Primary: RAD_HOME/lib/rad/<pname>/...
+            let rad_home_val = getenv("RAD_HOME")
+            if (rad_home_val as usize) != 0usize && str_len(rad_home_val) > 0usize {
+                var cand_rl = String.from_str(rad_home_val)
+                cand_rl.push_str("/lib/rad/")
+                cand_rl.push_str(pname)
+                cand_rl.push_byte(0u8)
+                let found_rl = try_path_with_rad(cand_rl)
+                if found_rl.len() > 0usize { return found_rl }
+            }
+
+            // 3. Primary: Global ~/.rad/lib/rad/<pname>/...
             let home_val = getenv("HOME")
             if (home_val as usize) != 0usize && str_len(home_val) > 0usize {
                 var cand_gl = String.from_str(home_val)
@@ -434,23 +445,22 @@ fn resolve_import_raw(spec: str, current_file: str) -> String {
                 if found_glc.len() > 0usize { return found_glc }
             }
 
-            // 3. Primary: RAD_HOME/lib/rad/<pname>/...
-            let rad_home_val = getenv("RAD_HOME")
-            if (rad_home_val as usize) != 0usize && str_len(rad_home_val) > 0usize {
-                var cand_rl = String.from_str(rad_home_val)
-                cand_rl.push_str("/lib/rad/")
-                cand_rl.push_str(pname)
-                cand_rl.push_byte(0u8)
-                let found_rl = try_path_with_rad(cand_rl)
-                if found_rl.len() > 0usize { return found_rl }
-            }
-
             // 4. Fallback: Local ./packages/<pname>
             var cand_p1 = String.from_str("packages/")
             cand_p1.push_str(pname)
             cand_p1.push_byte(0u8)
             let found_p1 = try_path_with_rad(cand_p1)
             if found_p1.len() > 0usize { return found_p1 }
+
+            // Fallback: RAD_HOME/packages/<pname>/...
+            if (rad_home_val as usize) != 0usize && str_len(rad_home_val) > 0usize {
+                var cand_rp = String.from_str(rad_home_val)
+                cand_rp.push_str("/packages/")
+                cand_rp.push_str(pname)
+                cand_rp.push_byte(0u8)
+                let found_rp = try_path_with_rad(cand_rp)
+                if found_rp.len() > 0usize { return found_rp }
+            }
 
             // Fallback: Global ~/.rad/packages/<pname>/...
             if (home_val as usize) != 0usize && str_len(home_val) > 0usize {
@@ -468,16 +478,6 @@ fn resolve_import_raw(spec: str, current_file: str) -> String {
                 cand_gpc.push_byte(0u8)
                 let found_gpc = try_path_with_rad(cand_gpc)
                 if found_gpc.len() > 0usize { return found_gpc }
-            }
-
-            // Fallback: RAD_HOME/packages/<pname>/...
-            if (rad_home_val as usize) != 0usize && str_len(rad_home_val) > 0usize {
-                var cand_rp = String.from_str(rad_home_val)
-                cand_rp.push_str("/packages/")
-                cand_rp.push_str(pname)
-                cand_rp.push_byte(0u8)
-                let found_rp = try_path_with_rad(cand_rp)
-                if found_rp.len() > 0usize { return found_rp }
             }
         }
 
@@ -898,6 +898,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         current_ret_type: String.new(),
         loop_cond_labels: Vec.new(),
         loop_end_labels: Vec.new(),
+        loop_drop_stack: Vec.new(),
         current_func_idx: 0usize,
         active_defers: Vec.new(),
         active_drops_var: Vec.new(),

@@ -1,0 +1,22 @@
+struct Resource {
+    id: i32,
+}
+
+fn Resource__drop(var self) {
+    printf("Resource drop id=%d\n", self.id);
+}
+
+fn main() -> i32 {
+    printf("--- Testing Loop Break Drop ---\n");
+    var i = 0;
+    while i < 3 {
+        let r = Resource { id: i };
+        if i == 1 {
+            printf("breaking at i=1\n");
+            break;
+        }
+        i = i + 1;
+    }
+    printf("After while loop\n");
+    return 0;
+}

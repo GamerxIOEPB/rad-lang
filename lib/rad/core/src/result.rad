@@ -1,29 +1,71 @@
 // Rad Core Library: Result<T, E>
 
-pub enum Result<T, E> {
-    Ok(T),
-    Err(E),
+import option;
+
+pub struct Result<T, E> {
+    tag: i64,
+    val: i64,
 }
 
 impl Result<T, E> {
+    pub fn Ok(val: T) -> Result<T, E> {
+        return Result { tag: 1i64, val: val as i64 };
+    }
+
+    pub fn Err(err: E) -> Result<T, E> {
+        return Result { tag: 0i64, val: err as i64 };
+    }
+
     pub fn is_ok(res: Result<T, E>) -> bool {
-        match res {
-            Result.Ok(_) => true,
-            Result.Err(_) => false,
-        }
+        return res.tag == 1i64;
     }
 
     pub fn is_err(res: Result<T, E>) -> bool {
-        match res {
-            Result.Ok(_) => false,
-            Result.Err(_) => true,
-        }
+        return res.tag == 0i64;
     }
 
     pub fn unwrap_or(res: Result<T, E>, default_val: T) -> T {
-        match res {
-            Result.Ok(val) => val,
-            Result.Err(_) => default_val,
+        if res.tag == 1i64 {
+            return res.val as T;
         }
+        return default_val;
+    }
+
+    pub fn unwrap(res: Result<T, E>) -> T {
+        if res.tag == 1i64 {
+            return res.val as T;
+        }
+        panic("called Result.unwrap() on an Err value");
+        return res.val as T;
+    }
+
+    pub fn expect(res: Result<T, E>, msg: str) -> T {
+        if res.tag == 1i64 {
+            return res.val as T;
+        }
+        panic(msg);
+        return res.val as T;
+    }
+
+    pub fn unwrap_err(res: Result<T, E>) -> E {
+        if res.tag == 0i64 {
+            return res.val as E;
+        }
+        panic("called Result.unwrap_err() on an Ok value");
+        return res.val as E;
+    }
+
+    pub fn ok(res: Result<T, E>) -> Option<T> {
+        if res.tag == 1i64 {
+            return Option.Some(res.val as T);
+        }
+        return Option.None;
+    }
+
+    pub fn err(res: Result<T, E>) -> Option<E> {
+        if res.tag == 0i64 {
+            return Option.Some(res.val as E);
+        }
+        return Option.None;
     }
 }

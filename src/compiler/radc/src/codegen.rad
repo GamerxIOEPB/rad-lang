@@ -19,6 +19,7 @@ struct Codegen {
     current_ret_type: String,
     loop_cond_labels: Vec<i32>,
     loop_end_labels: Vec<i32>,
+    loop_drop_stack: Vec<usize>,
     current_func_idx: usize,
     active_defers: Vec<usize>,
     active_drops_var: Vec<String>,
@@ -78,7 +79,7 @@ impl Codegen {
         if str_eq(t, "void") {
             return "void"
         }
-        if str_starts_with(t, "*") || str_starts_with(t, "str") || str_starts_with(t, "ptr") || str_eq(t, "Vec") || str_eq(t, "String") || str_starts_with(t, "[]") || str_starts_with(t, "var []") || str_starts_with(t, "[") || str_starts_with(t, "dyn ") || self.is_struct_name(t) {
+        if str_starts_with(t, "*") || str_starts_with(t, "&") || str_starts_with(t, "str") || str_starts_with(t, "ptr") || str_eq(t, "Vec") || str_eq(t, "String") || str_starts_with(t, "[]") || str_starts_with(t, "var []") || str_starts_with(t, "[") || str_starts_with(t, "dyn ") || self.is_struct_name(t) {
             return "ptr"
         }
         if str_eq(t, "f64") {
@@ -104,20 +105,16 @@ impl Codegen {
                 }
                 let init_e = sp[stmt_id].expr_id
                 if init_e != 0usize {
-                    if self.is_expr_float(init_e) {
-                        return "f64"
-                    }
-                    if self.parser.exprs.ptr[init_e].kind == EXPR_ARRAY_LITERAL {
-                        return "[]i64"
-                    }
-                    if self.parser.exprs.ptr[init_e].kind == EXPR_IDENT {
-                        let id_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
-                        let raw_t = self.get_raw_var_type(id_name)
-                        if str_starts_with(raw_t, "Option<") {
-                            let plen = str_len(raw_t)
+                    if sp[stmt_id].index_expr == 1usize {
+                        var inner_ty = self.get_expr_struct_name(init_e)
+                        if str_len(inner_ty) == 0usize && self.parser.exprs.ptr[init_e].kind == EXPR_IDENT {
+                            inner_ty = self.get_raw_var_type(self.parser.exprs.ptr[init_e].str_val.as_ptr() as str)
+                        }
+                        if str_starts_with(inner_ty, "Option<") {
+                            let plen = str_len(inner_ty)
                             if plen > 8usize {
                                 var inner = String.new()
-                                let cp = raw_t as *raw u8
+                                let cp = inner_ty as *raw u8
                                 var ci = 7usize
                                 while ci < plen && cp[ci] != 62u8 {
                                     inner.push_byte(cp[ci])
@@ -127,6 +124,71 @@ impl Codegen {
                                 return inner.as_ptr() as str
                             }
                         }
+                        if str_starts_with(inner_ty, "Result<") {
+                            let plen = str_len(inner_ty)
+                            if plen > 8usize {
+                                var inner = String.new()
+                                let cp = inner_ty as *raw u8
+                                var ci = 7usize
+                                while ci < plen && cp[ci] != 44u8 && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        }
+                        if str_len(inner_ty) > 0usize {
+                            return inner_ty
+                        }
+                    }
+                    if self.is_expr_float(init_e) {
+                        return "f64"
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_ARRAY_LITERAL {
+                        return "[]i64"
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_TRY {
+                        let inner_id = self.parser.exprs.ptr[init_e].left
+                        var inner_ty = self.get_expr_struct_name(inner_id)
+                        if str_len(inner_ty) == 0usize && self.parser.exprs.ptr[inner_id].kind == EXPR_IDENT {
+                            inner_ty = self.get_raw_var_type(self.parser.exprs.ptr[inner_id].str_val.as_ptr() as str)
+                        }
+                        if str_starts_with(inner_ty, "Option<") {
+                            let plen = str_len(inner_ty)
+                            if plen > 8usize {
+                                var inner = String.new()
+                                let cp = inner_ty as *raw u8
+                                var ci = 7usize
+                                while ci < plen && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        }
+                        if str_starts_with(inner_ty, "Result<") {
+                            let plen = str_len(inner_ty)
+                            if plen > 8usize {
+                                var inner = String.new()
+                                let cp = inner_ty as *raw u8
+                                var ci = 7usize
+                                while ci < plen && cp[ci] != 44u8 && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        }
+                        if str_len(inner_ty) > 0usize {
+                            return inner_ty
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_IDENT {
+                        let id_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        let raw_t = self.get_raw_var_type(id_name)
                         if str_len(raw_t) > 0usize {
                             return raw_t
                         }
@@ -176,25 +238,50 @@ impl Codegen {
                                 if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, mangled.as_ptr() as str) {
                                     let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                                     if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
-                                        if str_starts_with(raw_r, "Option<") {
-                                            let plen = str_len(raw_r)
-                                            if plen > 8usize {
-                                                var inner = String.new()
-                                                let cp = raw_r as *raw u8
-                                                var ci = 7usize
-                                                while ci < plen && cp[ci] != 62u8 {
-                                                    inner.push_byte(cp[ci])
-                                                    ci = ci + 1usize
-                                                }
-                                                inner.push_byte(0u8)
-                                                return inner.as_ptr() as str
-                                            }
-                                        }
                                         return raw_r
                                     }
                                     break
                                 }
                                 fi = fi + 1usize
+                            }
+                            let base_ty = self.clean_type_name(struct_name)
+                            if !str_eq(base_ty, struct_name) && str_len(base_ty) > 0usize {
+                                var bm = String.new()
+                                bm.push_str(base_ty)
+                                bm.push_str("__")
+                                bm.push_str(member)
+                                bm.push_byte(0u8)
+                                fi = 0usize
+                                while fi < self.parser.functions.len {
+                                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm.as_ptr() as str) {
+                                        let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                        if str_contains(struct_name, "<") {
+                                            var si = 0usize
+                                            while si < self.parser.structs.len {
+                                                let sdef = self.parser.structs.ptr[si]
+                                                if self.match_struct_name(sdef.struct_name.as_ptr() as str, base_ty) {
+                                                    var fld_i = 0usize
+                                                    while fld_i < sdef.field_names.len {
+                                                        if str_eq(sdef.field_types.ptr[fld_i].as_ptr() as str, raw_r) {
+                                                            let mono = self.get_monomorphized_field_type(sdef, struct_name, fld_i)
+                                                            if str_len(mono) > 0usize {
+                                                                return mono
+                                                            }
+                                                        }
+                                                        fld_i = fld_i + 1usize
+                                                    }
+                                                    break
+                                                }
+                                                si = si + 1usize
+                                            }
+                                        }
+                                        if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                            return raw_r
+                                        }
+                                        break
+                                    }
+                                    fi = fi + 1usize
+                                }
                             }
                         }
                         if self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
@@ -204,6 +291,12 @@ impl Codegen {
                             }
                             if str_eq(rname, "String") {
                                 return "String"
+                            }
+                            if str_eq(rname, "Option") {
+                                return "Option"
+                            }
+                            if str_eq(rname, "Result") {
+                                return "Result"
                             }
                             if self.is_struct_name(rname) {
                                 if str_eq(member, "new") {
@@ -257,20 +350,6 @@ impl Codegen {
                                 if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, cname) {
                                     let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                                     if str_len(raw_r) > 0usize && !str_eq(raw_r, "i64") && !str_eq(raw_r, "void") {
-                                        if str_starts_with(raw_r, "Option<") {
-                                            let plen = str_len(raw_r)
-                                            if plen > 8usize {
-                                                var inner = String.new()
-                                                let cp = raw_r as *raw u8
-                                                var ci = 7usize
-                                                while ci < plen && cp[ci] != 62u8 {
-                                                    inner.push_byte(cp[ci])
-                                                    ci = ci + 1usize
-                                                }
-                                                inner.push_byte(0u8)
-                                                return inner.as_ptr() as str
-                                            }
-                                        }
                                         return raw_r
                                     }
                                     break
@@ -287,6 +366,12 @@ impl Codegen {
                                 if str_eq(rname, "String") {
                                     return "String"
                                 }
+                                if str_eq(rname, "Option") {
+                                    return "Option"
+                                }
+                                if str_eq(rname, "Result") {
+                                    return "Result"
+                                }
                                 if self.is_struct_name(rname) {
                                     return rname
                                 }
@@ -296,6 +381,15 @@ impl Codegen {
                     if self.parser.exprs.ptr[init_e].kind == EXPR_METHOD_CALL {
                         let m_recv = self.parser.exprs.ptr[init_e].left
                         let m_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        if self.parser.exprs.ptr[m_recv].kind == EXPR_IDENT {
+                            let rec_id = self.parser.exprs.ptr[m_recv].str_val.as_ptr() as str
+                            if str_eq(rec_id, "Option") {
+                                return "Option"
+                            }
+                            if str_eq(rec_id, "Result") {
+                                return "Result"
+                            }
+                        }
                         let recv_ty = self.get_expr_struct_name(m_recv)
                         if str_len(recv_ty) > 0usize {
                             let base_ty = self.clean_type_name(recv_ty)
@@ -583,7 +677,7 @@ impl Codegen {
         let k = ep[expr_id].kind
         if k == EXPR_IDENT {
             let vname = ep[expr_id].str_val.as_ptr() as str
-            if self.is_struct_name(vname) {
+            if str_eq(vname, "Option") || str_eq(vname, "Result") || self.is_struct_name(vname) {
                 return vname
             }
             let raw = self.get_raw_var_type(vname)
@@ -1021,7 +1115,7 @@ impl Codegen {
             }
             fi = fi + 1usize
         }
-        if str_eq(fname, "puts") || str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "system") || str_eq(fname, "free") || str_eq(fname, "fclose") || str_eq(fname, "ftell") || str_eq(fname, "getenv") || (str_eq(fname, "printf") && param_idx == 0usize) || str_eq(fname, "atexit") || str_eq(fname, "__rad_register_panic_hook") {
+        if str_eq(fname, "puts") || str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "system") || str_eq(fname, "free") || str_eq(fname, "fclose") || str_eq(fname, "ftell") || str_eq(fname, "getenv") || (str_eq(fname, "printf") && param_idx == 0usize) || str_eq(fname, "atexit") || str_eq(fname, "panic") || str_eq(fname, "__rad_register_panic_hook") {
             return "ptr"
         }
         if str_eq(fname, "fopen") {
@@ -1063,7 +1157,7 @@ impl Codegen {
         if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") || str_eq(fname, "__rad_get_terminal_guard") {
             return "ptr"
         }
-        if str_starts_with(fname, "__rad_") {
+        if str_starts_with(fname, "__rad_") || str_eq(fname, "panic") || str_eq(fname, "eprintln") {
             return "void"
         }
         if str_eq(fname, "atexit") {
@@ -1308,6 +1402,7 @@ impl Codegen {
         if is_name_similar(target, "println") && 1i32 < best_dist { best_cand = "println"; best_dist = 1i32 }
         if is_name_similar(target, "print") && 1i32 < best_dist { best_cand = "print"; best_dist = 1i32 }
         if is_name_similar(target, "eprintln") && 1i32 < best_dist { best_cand = "eprintln"; best_dist = 1i32 }
+        if is_name_similar(target, "panic") && 1i32 < best_dist { best_cand = "panic"; best_dist = 1i32 }
         if is_name_similar(target, "assert") && 1i32 < best_dist { best_cand = "assert"; best_dist = 1i32 }
         return best_cand
     }
@@ -1374,6 +1469,9 @@ impl Codegen {
                 return true
             }
             return false
+        }
+        if k == EXPR_UNARY && ep[id].op == TOK_AMP {
+            return true
         }
         if k == EXPR_CAST {
             let target_ty = self.emit_llvm_type(ep[id].target_type.as_ptr() as str)
@@ -2283,6 +2381,32 @@ impl Codegen {
                 self.ir.push_str(int_to_str(sub_reg).as_ptr() as str)
                 self.ir.push_str(", -1\n")
                 return res
+            } else if un_op == TOK_AMP {
+                if ep[sub_id].kind == EXPR_IDENT {
+                    let vname = ep[sub_id].str_val.as_ptr() as str
+                    let vty = self.get_raw_var_type(vname)
+                    let lty = self.emit_llvm_type(vty)
+                    if str_eq(lty, "ptr") {
+                        self.ir.push_str(" = load ptr, ptr %")
+                        self.ir.push_str(vname)
+                        self.ir.push_str(".addr, align 8\n")
+                        return res
+                    }
+                    self.ir.push_str(" = bitcast ptr %")
+                    self.ir.push_str(vname)
+                    self.ir.push_str(".addr to ptr\n")
+                    return res
+                }
+                if self.is_expr_ptr(sub_id) {
+                    self.ir.push_str(" = bitcast ptr %")
+                    self.ir.push_str(int_to_str(sub_reg).as_ptr() as str)
+                    self.ir.push_str(" to ptr\n")
+                    return res
+                }
+                self.ir.push_str(" = inttoptr i64 %")
+                self.ir.push_str(int_to_str(sub_reg).as_ptr() as str)
+                self.ir.push_str(" to ptr\n")
+                return res
             } else {
                 return res
             }
@@ -2328,7 +2452,7 @@ impl Codegen {
                    str_eq(callee_name, "fread") || str_eq(callee_name, "fwrite") || str_eq(callee_name, "fseek") ||
                    str_eq(callee_name, "ftell") || str_eq(callee_name, "getenv") || str_eq(callee_name, "strcmp") ||
                    str_eq(callee_name, "isatty") || str_eq(callee_name, "input") ||
-                   str_eq(callee_name, "dprintf") || str_eq(callee_name, "eprintln") || str_eq(callee_name, "system") ||
+                   str_eq(callee_name, "dprintf") || str_eq(callee_name, "eprintln") || str_eq(callee_name, "panic") || str_eq(callee_name, "system") ||
                    str_eq(callee_name, "sqrt") || str_eq(callee_name, "remove") || str_starts_with(callee_name, "syscall") || self.is_struct_name(callee_name) || str_eq(callee_name, "swap") ||
                    str_eq(callee_name, "atexit") || str_starts_with(callee_name, "__rad_") {
                     is_known = true
@@ -3082,7 +3206,7 @@ impl Codegen {
                 if str_len(raw_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
                     let vname = ep[recv_id].str_val.as_ptr() as str
                     let vty = self.get_raw_var_type(vname)
-                    if self.is_struct_name(vty) {
+                    if str_len(vty) > 0usize {
                         raw_ty = vty
                     }
                 }
@@ -3302,17 +3426,32 @@ impl Codegen {
             var arg_is_ptrs = Vec.new()
             if !is_static {
                 var r_reg = self.emit_expr(recv_id)
-                if !self.is_expr_ptr(recv_id) {
-                    let cvt = self.alloc_ssa()
-                    self.emit_str("  %")
-                    self.emit_str(int_to_str(cvt).as_ptr() as str)
-                    self.emit_str(" = inttoptr i64 %")
-                    self.emit_str(int_to_str(r_reg).as_ptr() as str)
-                    self.emit_str(" to ptr\n")
-                    r_reg = cvt
+                let p0_ty = self.get_func_param_type(callee_name, 0usize)
+                if str_eq(p0_ty, "i64") {
+                    if self.is_expr_ptr(recv_id) {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = ptrtoint ptr %")
+                        self.emit_str(int_to_str(r_reg).as_ptr() as str)
+                        self.emit_str(" to i64\n")
+                        r_reg = cvt
+                    }
+                    arg_regs.push(r_reg)
+                    arg_is_ptrs.push(0)
+                } else {
+                    if !self.is_expr_ptr(recv_id) {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = inttoptr i64 %")
+                        self.emit_str(int_to_str(r_reg).as_ptr() as str)
+                        self.emit_str(" to ptr\n")
+                        r_reg = cvt
+                    }
+                    arg_regs.push(r_reg)
+                    arg_is_ptrs.push(1)
                 }
-                arg_regs.push(r_reg)
-                arg_is_ptrs.push(1)
             }
             var i = 0usize
             while i < ep[expr_id].args.len {
@@ -3358,7 +3497,9 @@ impl Codegen {
                 let is_p = arg_is_ptrs.ptr[j]
                 var is_flt = false
                 if !is_static && j == 0usize {
-                    pty = "ptr"
+                    if str_len(pty) == 0usize {
+                        pty = "ptr"
+                    }
                 } else {
                     var ai = j
                     if !is_static { ai = j - 1usize }
@@ -4018,6 +4159,7 @@ impl Codegen {
             self.ir.push_str("try.ret.")
             self.ir.push_str(int_to_str(early_ret_lbl).as_ptr() as str)
             self.ir.push_str(":\n")
+            self.emit_drops_from(0usize, "")
             self.emit_defers_from(0usize)
             let ret_ty = self.current_ret_type.as_ptr() as str
             if str_eq(ret_ty, "void") {
@@ -5099,6 +5241,7 @@ impl Codegen {
             self.ir.push_str(":\n")
             let prev_defers_while = self.active_defers.len
             let prev_drops_while = self.active_drops_var.len
+            self.loop_drop_stack.push(prev_drops_while)
             var i = 0usize
             var body_terminates = false
             while i < sp[stmt_id].body_stmts.len {
@@ -5129,6 +5272,7 @@ impl Codegen {
 
             let _pop_cond = self.loop_cond_labels.pop()
             let _pop_end = self.loop_end_labels.pop()
+            let _pop_drops = self.loop_drop_stack.pop()
         } else if k == STMT_FOR_RANGE {
             let vname = sp[stmt_id].name.as_ptr() as str
             let range_expr = sp[stmt_id].expr_id
@@ -5185,6 +5329,7 @@ impl Codegen {
             self.ir.push_str(":\n")
             let prev_defers_for = self.active_defers.len
             let prev_drops_for = self.active_drops_var.len
+            self.loop_drop_stack.push(prev_drops_for)
             var bi = 0usize
             var body_terminates = false
             while bi < sp[stmt_id].body_stmts.len {
@@ -5239,6 +5384,7 @@ impl Codegen {
 
             let _pop_c = self.loop_cond_labels.pop()
             let _pop_e = self.loop_end_labels.pop()
+            let _pop_d = self.loop_drop_stack.pop()
         } else if k == STMT_FOR_IN {
             let vname = sp[stmt_id].name.as_ptr() as str
             let coll_expr = sp[stmt_id].expr_id
@@ -5358,6 +5504,7 @@ impl Codegen {
 
             let prev_defers_for_in = self.active_defers.len
             let prev_drops_for_in = self.active_drops_var.len
+            self.loop_drop_stack.push(prev_drops_for_in)
             var bi = 0usize
             var body_terminates = false
             while bi < sp[stmt_id].body_stmts.len {
@@ -5412,8 +5559,13 @@ impl Codegen {
 
             let _pop_c = self.loop_cond_labels.pop()
             let _pop_e = self.loop_end_labels.pop()
+            let _pop_d = self.loop_drop_stack.pop()
         } else if k == STMT_BREAK {
             if self.loop_end_labels.len > 0usize {
+                if self.loop_drop_stack.len > 0usize {
+                    let loop_base = self.loop_drop_stack.ptr[self.loop_drop_stack.len - 1usize]
+                    self.emit_drops_from(loop_base, "")
+                }
                 let end_lbl = self.loop_end_labels.ptr[self.loop_end_labels.len - 1usize]
                 self.ir.push_str("  br label %while.end.")
                 self.ir.push_str(int_to_str(end_lbl).as_ptr() as str)
@@ -5421,6 +5573,10 @@ impl Codegen {
             }
         } else if k == STMT_CONTINUE {
             if self.loop_cond_labels.len > 0usize {
+                if self.loop_drop_stack.len > 0usize {
+                    let loop_base = self.loop_drop_stack.ptr[self.loop_drop_stack.len - 1usize]
+                    self.emit_drops_from(loop_base, "")
+                }
                 let cond_lbl = self.loop_cond_labels.ptr[self.loop_cond_labels.len - 1usize]
                 self.ir.push_str("  br label %while.cond.")
                 self.ir.push_str(int_to_str(cond_lbl).as_ptr() as str)
@@ -5429,6 +5585,30 @@ impl Codegen {
         } else if k == STMT_RETURN {
             if sp[stmt_id].expr_id != 0usize {
                 let ret_eid = sp[stmt_id].expr_id
+                let re = self.parser.exprs.ptr[ret_eid]
+                if re.kind == EXPR_UNARY && re.op == TOK_AMP {
+                    let operand = re.left
+                    if self.parser.exprs.ptr[operand].kind == EXPR_IDENT {
+                        let vname = self.parser.exprs.ptr[operand].str_val.as_ptr() as str
+                        let func = self.parser.functions.ptr[self.current_func_idx]
+                        var is_param = false
+                        var pi = 0usize
+                        while pi < func.param_names.len {
+                            if str_eq(func.param_names.ptr[pi].as_ptr() as str, vname) {
+                                is_param = true
+                                break
+                            }
+                            pi = pi + 1usize
+                        }
+                        if !is_param {
+                            var err = String.new()
+                            err.push_str("cannot return reference to local stack variable '")
+                            err.push_str(vname)
+                            err.push_str("'")
+                            self.parser.report_error("E0028", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+                        }
+                    }
+                }
                 var skip_vname = ""
                 if self.parser.exprs.ptr[ret_eid].kind == EXPR_IDENT {
                     skip_vname = self.parser.exprs.ptr[ret_eid].str_val.as_ptr() as str
@@ -6003,6 +6183,20 @@ impl Codegen {
         header.push_str("@.eprint_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n")
         header.push_str("define void @eprintln(ptr %msg) {\nentry:\n  %fmt = getelementptr inbounds [4 x i8], ptr @.eprint_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt, ptr %msg)\n  ret void\n}\n\n")
 
+        var has_user_panic = false
+        var pfi = 0usize
+        while pfi < self.parser.functions.len {
+            if str_eq(self.parser.functions.ptr[pfi].fn_name.as_ptr() as str, "panic") {
+                has_user_panic = true
+                break
+            }
+            pfi = pfi + 1usize
+        }
+        if !has_user_panic {
+            header.push_str("@.panic_user_fmt = private unnamed_addr constant [23 x i8] c\"rad runtime panic: %s\\0A\\00\", align 1\n")
+            header.push_str("define void @panic(ptr %msg) {\nentry:\n  call void @__rad_run_panic_hook()\n  %fmt = getelementptr inbounds [23 x i8], ptr @.panic_user_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt, ptr %msg)\n  call void @exit(i32 1)\n  ret void\n}\n\n")
+        }
+
         header.push_str("@__rad_panic_cleanup_hook = global ptr null, align 8\n")
         header.push_str("define void @__rad_register_panic_hook(ptr %hook) {\nentry:\n  store ptr %hook, ptr @__rad_panic_cleanup_hook, align 8\n  ret void\n}\n\n")
         header.push_str("define void @__rad_run_panic_hook() {\nentry:\n  %h = load ptr, ptr @__rad_panic_cleanup_hook, align 8\n  %is_null = icmp eq ptr %h, null\n  br i1 %is_null, label %done, label %call_hook\ncall_hook:\n  call void %h()\n  br label %done\ndone:\n  ret void\n}\n\n")
@@ -6151,6 +6345,9 @@ impl Codegen {
             self.active_defers = Vec.new()
             self.active_drops_var = Vec.new()
             self.active_drops_type = Vec.new()
+            self.loop_drop_stack = Vec.new()
+            self.loop_cond_labels = Vec.new()
+            self.loop_end_labels = Vec.new()
             var si = 0usize
             var has_returned = false
             while si < func.body.len {

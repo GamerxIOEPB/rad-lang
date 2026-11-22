@@ -1,0 +1,47 @@
+import core/option;
+import core/result;
+
+fn main() -> i32 {
+    // 1. Option combinators
+    let some_val = Option.Some(100);
+    let none_val: Option<i32> = Option.None;
+
+    if some_val.is_some() && !some_val.is_none() {
+        printf("some check ok\n");
+    }
+    if none_val.is_none() && !none_val.is_some() {
+        printf("none check ok\n");
+    }
+
+    let u1 = some_val.unwrap();
+    let d1 = none_val.unwrap_or(999);
+    printf("u1=%d d1=%d\n", u1, d1);
+
+    let res_from_opt = some_val.ok_or("missing");
+    if res_from_opt.is_ok() {
+        printf("ok_or ok: %d\n", res_from_opt.unwrap());
+    }
+
+    // 2. Result combinators
+    let ok_res = Result.Ok(555);
+    let err_res: Result<i32, str> = Result.Err("error_payload");
+
+    if ok_res.is_ok() && err_res.is_err() {
+        printf("result flags ok\n");
+    }
+
+    printf("ok unwrap=%d\n", ok_res.unwrap());
+    printf("err unwrap_or=%d\n", err_res.unwrap_or(123));
+
+    let opt_from_ok = ok_res.ok();
+    if opt_from_ok.is_some() {
+        printf("ok->some: %d\n", opt_from_ok.unwrap());
+    }
+
+    let opt_from_err = err_res.err();
+    if opt_from_err.is_some() {
+        printf("err->some: %s\n", opt_from_err.unwrap());
+    }
+
+    return 0;
+}

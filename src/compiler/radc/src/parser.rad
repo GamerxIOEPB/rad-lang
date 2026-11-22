@@ -983,9 +983,23 @@ impl Parser {
             })
         }
         if k == TOK_AMP {
+            let amp_l = self.cur_tok_line()
+            let amp_c = self.cur_tok_col()
             self.advance()
-            let sub = self.parse_primary()
-            return self.parse_postfix(sub)
+            let operand = self.parse_expr(10)
+            return self.add_expr(Expr {
+                kind: EXPR_UNARY,
+                op: TOK_AMP,
+                int_val: 0i64,
+                str_val: String.new(),
+                target_type: String.new(),
+                left: operand,
+                right: 0usize,
+                args: Vec.new(),
+                field_name: String.new(),
+                expr_line: amp_l,
+                expr_col: amp_c,
+            })
         }
         if k == TOK_LPAREN {
             self.advance()
@@ -1890,7 +1904,7 @@ impl Parser {
                         name: String.from_str(bound_name.as_ptr() as str),
                         type_name: String.new(),
                         expr_id: target_expr,
-                        index_expr: 0usize,
+                        index_expr: 1usize,
                         then_stmts: Vec.new(),
                         else_stmts: Vec.new(),
                         body_stmts: Vec.new(),

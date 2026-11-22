@@ -1,0 +1,5 @@
+--- Testing Loop Break Drop ---
+Resource drop id=0
+breaking at i=1
+Resource drop id=1
+After while loop
