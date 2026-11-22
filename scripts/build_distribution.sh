@@ -159,6 +159,7 @@ mkdir -p "$DIST_ROOT/lib/rad"
 cp -r "$ROOT_DIR/lib/rad"/* "$DIST_ROOT/lib/rad/"
 
 # Ecosystem packages into lib/rad
+RAD_LIB_DIR=""
 if [ -d "$ROOT_DIR/../rad-lib/packages" ]; then
     RAD_LIB_DIR="$ROOT_DIR/../rad-lib/packages"
 elif [ -d "$HOME/Projects/rad-lib/packages" ]; then
@@ -170,21 +171,14 @@ if [ -n "$RAD_LIB_DIR" ]; then
             cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$DIST_ROOT/lib/rad/$pkg"
         fi
     done
-    ln -sfn rad-tui "$DIST_ROOT/lib/rad/tui" 2>/dev/null || true
-    ln -sfn rad-json "$DIST_ROOT/lib/rad/json" 2>/dev/null || true
-    ln -sfn rad-http "$DIST_ROOT/lib/rad/http" 2>/dev/null || true
-    ln -sfn rad-args "$DIST_ROOT/lib/rad/args" 2>/dev/null || true
-    ln -sfn rad-test "$DIST_ROOT/lib/rad/test" 2>/dev/null || true
-    ln -sfn rad-math "$DIST_ROOT/lib/rad/math" 2>/dev/null || true
-    ln -sfn rad-log "$DIST_ROOT/lib/rad/log" 2>/dev/null || true
-    ln -sfn rad-kv "$DIST_ROOT/lib/rad/kv" 2>/dev/null || true
-    ln -sfn rad-sqlite "$DIST_ROOT/lib/rad/sqlite" 2>/dev/null || true
-    ln -sfn rad-gfx "$DIST_ROOT/lib/rad/gfx" 2>/dev/null || true
-    ln -sfn rad-gui "$DIST_ROOT/lib/rad/gui" 2>/dev/null || true
-    ln -sfn rad-sound "$DIST_ROOT/lib/rad/sound" 2>/dev/null || true
-    ln -sfn rad-toml "$DIST_ROOT/lib/rad/toml" 2>/dev/null || true
-    ln -sfn rad-yaml "$DIST_ROOT/lib/rad/yaml" 2>/dev/null || true
 fi
+
+# Ensure legacy short-name alias symlinks exist in lib/rad/
+for pkg_base in tui json http args test math log kv sqlite gfx toml yaml gui sound; do
+    if [ -d "$DIST_ROOT/lib/rad/rad-$pkg_base" ]; then
+        ln -sfn "rad-$pkg_base" "$DIST_ROOT/lib/rad/$pkg_base" 2>/dev/null || true
+    fi
+done
 # Compatibility symlink: packages -> lib/rad
 ln -sfn lib/rad "$DIST_ROOT/packages" 2>/dev/null || true
 
