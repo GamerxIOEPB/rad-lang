@@ -1,0 +1,31 @@
+fn id<T>(x: T) -> T {
+    return x;
+}
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+impl Point {
+    fn new(x: i64, y: i64) -> Point {
+        return Point { x: x, y: y };
+    }
+
+    fn scale<T>(self, factor: i64) -> Point {
+        return Point { x: self.x * factor, y: self.y * factor };
+    }
+}
+
+fn main() {
+    let a: i64 = id::<i64>(42i64);
+    let s: str = id::<str>("turbofish works!");
+    println("a={a}, s={s}");
+
+    let v: Vec<i64> = Vec::<i64>::new();
+    println("vec len={}", v.len());
+
+    let pt = Point.new(10, 20);
+    let scaled = pt.scale::<i64>(3);
+    println("scaled: x={}, y={}", scaled.x, scaled.y);
+}

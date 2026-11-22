@@ -8,13 +8,17 @@
 set -eu
 
 # Default configuration
-DEFAULT_VERSION="0.2.4"
+DEFAULT_VERSION="0.2.5"
 DEFAULT_REPO="GamerxIOEPB/rad-lang"
 DEFAULT_RAD_HOME="$HOME/.rad"
 
-VERSION="${VERSION:-$DEFAULT_VERSION}"
-VERSION="${VERSION#v}"
-VERSION_EXPLICIT=0
+VERSION_ENV="${VERSION:-}"
+VERSION="${VERSION_ENV#v}"
+if [ -n "$VERSION" ]; then
+    VERSION_EXPLICIT=1
+else
+    VERSION_EXPLICIT=0
+fi
 REPO="$DEFAULT_REPO"
 RAD_HOME="${RAD_HOME:-$DEFAULT_RAD_HOME}"
 PACKAGE_TYPE="full"   # "full" or "core"
@@ -87,7 +91,8 @@ list_versions() {
             fi
         done
     else
-        printf "  * ${GREEN}0.2.4${RESET} (latest)\n"
+        printf "  * ${GREEN}0.2.5${RESET} (latest)\n"
+        printf "  * 0.2.4\n"
         printf "  * 0.2.3\n"
         printf "  * 0.2.2\n"
         printf "  * 0.2.1\n"
@@ -104,7 +109,7 @@ validate_version() {
 
     # Known stable releases
     case "$REQ_VER" in
-        "0.2.4"|"0.2.3"|"0.2.2"|"0.2.1"|"0.2.0"|"0.1.0")
+        "0.2.5"|"0.2.4"|"0.2.3"|"0.2.2"|"0.2.1"|"0.2.0"|"0.1.0")
             return 0
             ;;
     esac
@@ -132,7 +137,8 @@ validate_version() {
     if [ "$EXISTS" -ne 1 ]; then
         log_error "Version '${REQ_VER}' is not a valid or published Rad release."
         printf "\n${BOLD}Available releases:${RESET}\n"
-        printf "  * 0.2.4 (latest)\n"
+        printf "  * 0.2.5 (latest)\n"
+        printf "  * 0.2.4\n"
         printf "  * 0.2.3\n"
         printf "  * 0.2.2\n"
         printf "  * 0.2.1\n"
@@ -236,6 +242,31 @@ while [ $# -gt 0 ]; do
 done
 
 REPO="${RAD_REPO:-$REPO}"
+
+# If version was not explicitly specified, auto-detect latest release from GitHub
+if [ "$VERSION_EXPLICIT" -eq 0 ] && [ "$OFFLINE_MODE" -eq 0 ]; then
+    LATEST_TAG=""
+    if command -v curl >/dev/null 2>&1; then
+        LATEST_URL="$(curl -fsSLI -o /dev/null -w "%{url_effective}" "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+        if [ -n "$LATEST_URL" ]; then
+            LATEST_TAG="${LATEST_URL##*/}"
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        LATEST_URL="$(wget -q -S -O /dev/null --max-redirect=0 "https://github.com/${REPO}/releases/latest" 2>&1 | grep -i 'Location:' | awk '{print $2}' | tr -d '\r\n' || true)"
+        if [ -n "$LATEST_URL" ]; then
+            LATEST_TAG="${LATEST_URL##*/}"
+        fi
+    fi
+
+    LATEST_VER="${LATEST_TAG#v}"
+    if [ -n "$LATEST_VER" ]; then
+        VERSION="$LATEST_VER"
+    else
+        VERSION="$DEFAULT_VERSION"
+    fi
+elif [ -z "$VERSION" ]; then
+    VERSION="$DEFAULT_VERSION"
+fi
 
 # Validate requested version
 validate_version "$VERSION"
@@ -385,7 +416,7 @@ else
     else
         if [ -n "${RAD_RELEASE_URL:-}" ]; then
             BASE_URL="$RAD_RELEASE_URL"
-        elif [ "$VERSION_EXPLICIT" -eq 0 ] && [ "$VERSION" = "$DEFAULT_VERSION" ]; then
+        elif [ "$VERSION_EXPLICIT" -eq 0 ]; then
             BASE_URL="https://github.com/${REPO}/releases/latest/download"
         else
             BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
@@ -394,23 +425,38 @@ else
 
         log_step "Downloading Rad release archive from $BASE_URL..."
         DOWNLOAD_OK=0
-        for cand in "rad-${VERSION}-linux-x86_64.tar.xz" "${ARCHIVE_NAME}" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
-            cand_url="${BASE_URL}/${cand}"
-            if command -v curl >/dev/null 2>&1; then
-                if curl -fSL --progress-bar "$cand_url" -o "$TMP_DIR/$cand" 2>/dev/null; then
-                    ARCHIVE_NAME="$cand"
-                    ARCHIVE_PATH="$TMP_DIR/$cand"
-                    DOWNLOAD_OK=1
-                    break
+        URL_CANDIDATES="$BASE_URL"
+        if [ "$VERSION_EXPLICIT" -eq 0 ]; then
+            URL_CANDIDATES="$BASE_URL https://github.com/${REPO}/releases/download/${VERSION} https://github.com/${REPO}/releases/download/v${VERSION}"
+        else
+            URL_CANDIDATES="$BASE_URL https://github.com/${REPO}/releases/download/v${VERSION} https://github.com/${REPO}/releases/latest/download"
+        fi
+
+        for b_url in $URL_CANDIDATES; do
+            for cand in "rad-${VERSION}-linux-x86_64.tar.xz" "${ARCHIVE_NAME}" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
+                cand_url="${b_url}/${cand}"
+                if command -v curl >/dev/null 2>&1; then
+                    if curl -fsI "$cand_url" >/dev/null 2>&1; then
+                        if curl -fSL --progress-bar "$cand_url" -o "$TMP_DIR/$cand"; then
+                            ARCHIVE_NAME="$cand"
+                            ARCHIVE_PATH="$TMP_DIR/$cand"
+                            MANIFEST_URL="${b_url}/SHA256SUMS"
+                            DOWNLOAD_OK=1
+                            break 2
+                        fi
+                    fi
+                elif command -v wget >/dev/null 2>&1; then
+                    if wget -q --spider "$cand_url" 2>/dev/null; then
+                        if wget -q --show-progress "$cand_url" -O "$TMP_DIR/$cand"; then
+                            ARCHIVE_NAME="$cand"
+                            ARCHIVE_PATH="$TMP_DIR/$cand"
+                            MANIFEST_URL="${b_url}/SHA256SUMS"
+                            DOWNLOAD_OK=1
+                            break 2
+                        fi
+                    fi
                 fi
-            elif command -v wget >/dev/null 2>&1; then
-                if wget -q --show-progress "$cand_url" -O "$TMP_DIR/$cand" 2>/dev/null; then
-                    ARCHIVE_NAME="$cand"
-                    ARCHIVE_PATH="$TMP_DIR/$cand"
-                    DOWNLOAD_OK=1
-                    break
-                fi
-            fi
+            done
         done
 
         if [ "$DOWNLOAD_OK" -eq 0 ]; then

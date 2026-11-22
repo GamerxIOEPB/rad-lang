@@ -5,4 +5,5 @@ SMT Null pointer safety proof: PROVEN SAFE
 Overall SMT formal memory safety: 100% VERIFIED
 Escape analysis pass: 1 non-escaping dynamic allocations detected
 Heap-to-stack promotion pass: 1 allocations promoted to stack frame (MIR_ALLOCA)
+Instruction %1 promoted opcode: MIR_ALLOCA (stack frame)
 Formal SMT verification & escape analysis completed successfully.

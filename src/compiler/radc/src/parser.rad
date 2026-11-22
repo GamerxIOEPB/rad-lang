@@ -976,6 +976,120 @@ impl Parser {
         return 0
     }
 
+    fn parse_fstring_expr(var self, raw_text: String, start_line: i64, start_col: i64) -> usize {
+        let p_raw: *raw u8 = raw_text.as_ptr()
+        let raw_len = str_len(p_raw as str)
+        var fmt_str = String.new()
+        var args = Vec.new()
+
+        var i = 0usize
+        while i < raw_len {
+            let ch = p_raw[i]
+            if ch == 123u8 { // '{'
+                // Check for '{{' (escaped '{')
+                var is_esc_open = false
+                if i + 1usize < raw_len {
+                    if p_raw[i + 1usize] == 123u8 {
+                        is_esc_open = true
+                    }
+                }
+                if is_esc_open {
+                    fmt_str.push_byte(123u8)
+                    i = i + 2usize
+                    continue
+                }
+                // Scan to matching '}' with brace depth tracking
+                var depth = 1i64
+                var j = i + 1usize
+                var in_str = false
+                while j < raw_len && depth > 0i64 {
+                    let c = p_raw[j]
+                    if c == 34u8 { // '"'
+                        var is_quote = false
+                        if j == 0usize {
+                            is_quote = true
+                        } else if p_raw[j - 1usize] != 92u8 {
+                            is_quote = true
+                        }
+                        if is_quote {
+                            in_str = !in_str
+                        }
+                    } else if !in_str {
+                        if c == 123u8 {
+                            depth = depth + 1i64
+                        } else if c == 125u8 {
+                            depth = depth - 1i64
+                            if depth == 0i64 {
+                                break
+                            }
+                        }
+                    }
+                    j = j + 1usize
+                }
+
+                if depth == 0i64 {
+                    var expr_code = String.new()
+                    var k = i + 1usize
+                    while k < j {
+                        expr_code.push_byte(p_raw[k])
+                        k = k + 1usize
+                    }
+                    expr_code.push_byte(0u8)
+
+                    let sub_tokens = lex_source(expr_code)
+                    let saved_tokens = self.tokens
+                    let saved_pos = self.pos
+                    self.tokens = sub_tokens
+                    self.pos = 0usize
+                    let parsed_expr = self.parse_expr(0)
+                    self.tokens = saved_tokens
+                    self.pos = saved_pos
+
+                    args.push(parsed_expr)
+                    fmt_str.push_byte(123u8)
+                    fmt_str.push_byte(125u8) // '{}'
+                    i = j + 1usize
+                } else {
+                    fmt_str.push_byte(ch)
+                    i = i + 1usize
+                }
+            } else if ch == 125u8 { // '}'
+                // Check for '}}' (escaped '}')
+                var is_esc_close = false
+                if i + 1usize < raw_len {
+                    if p_raw[i + 1usize] == 125u8 {
+                        is_esc_close = true
+                    }
+                }
+                if is_esc_close {
+                    fmt_str.push_byte(125u8)
+                    i = i + 2usize
+                } else {
+                    fmt_str.push_byte(ch)
+                    i = i + 1usize
+                }
+            } else {
+                fmt_str.push_byte(ch)
+                i = i + 1usize
+            }
+        }
+        fmt_str.push_byte(0u8)
+
+        return self.add_expr(Expr {
+            kind: EXPR_FSTRING,
+            op: 0,
+            int_val: 0i64,
+            str_val: fmt_str,
+            target_type: String.from_str("String"),
+            left: 0usize,
+            right: 0usize,
+            args: args,
+            field_name: String.new(),
+            expr_line: start_line,
+            expr_col: start_col,
+        })
+    }
+
     fn parse_primary(var self) -> usize {
         let k = self.peek_kind()
         let tok_l = self.cur_tok_line()
@@ -1022,10 +1136,13 @@ impl Parser {
             let txt = String.from_str(self.peek_text())
             let is_fstr = self.peek_int()
             self.advance()
+            if is_fstr == 1i64 {
+                return self.parse_fstring_expr(txt, tok_l, tok_c)
+            }
             return self.add_expr(Expr {
                 kind: EXPR_STR,
                 op: 0,
-                int_val: is_fstr,
+                int_val: 0i64,
                 str_val: txt,
                 target_type: String.new(),
                 left: 0usize,
@@ -1270,6 +1387,51 @@ impl Parser {
             let k = self.peek_kind()
             let base_l = self.exprs.ptr[base].expr_line
             let base_c = self.exprs.ptr[base].expr_col
+            var is_turbofish = false
+            if k == TOK_COLONCOLON {
+                if self.pos + 1usize < self.tokens.len {
+                    if self.tokens.ptr[self.pos + 1usize].kind == TOK_LT {
+                        is_turbofish = true
+                    }
+                }
+            }
+            if is_turbofish {
+                self.advance() // skip '::'
+                self.advance() // skip '<'
+                var type_args = String.new()
+                type_args.push_byte(60u8) // '<'
+                var depth = 1i64
+                while self.peek_kind() != TOK_EOF && depth > 0i64 {
+                    let tk = self.peek_kind()
+                    if tk == TOK_LT {
+                        depth = depth + 1i64
+                        type_args.push_byte(60u8)
+                    } else if tk == TOK_GT {
+                        depth = depth - 1i64
+                        if depth == 0i64 {
+                            type_args.push_byte(62u8) // '>'
+                            self.advance()
+                            break
+                        } else {
+                            type_args.push_byte(62u8)
+                        }
+                    } else if tk == TOK_COMMA {
+                        type_args.push_str(", ")
+                    } else {
+                        type_args.push_str(self.peek_text())
+                    }
+                    self.advance()
+                }
+                type_args.push_byte(0u8)
+                if self.exprs.ptr[base].kind == EXPR_IDENT {
+                    self.exprs.ptr[base].str_val.push_str(type_args.as_ptr() as str)
+                    self.exprs.ptr[base].target_type = type_args
+                } else if self.exprs.ptr[base].kind == EXPR_FIELD_ACCESS {
+                    self.exprs.ptr[base].field_name.push_str(type_args.as_ptr() as str)
+                    self.exprs.ptr[base].target_type = type_args
+                }
+                continue
+            }
             if k == TOK_LPAREN { // Call expr(args...)
                 self.advance()
                 var args = Vec.new()
@@ -1325,69 +1487,14 @@ impl Parser {
                                                 vi = vi + 1usize
                                             }
                                             var_name.push_byte(0u8)
-                                            let var_col = str_col + prefix_len + (scan_i as i64) + 1i64
-                                            var interp_expr = 0usize
-                                            let v_str = var_name.as_ptr() as str
-                                            if str_contains(v_str, ".") {
-                                                var obj_name = String.new()
-                                                var f_name = String.new()
-                                                var past_dot = false
-                                                var di = 0usize
-                                                let v_len = str_len(v_str)
-                                                let vp = v_str as *raw u8
-                                                while di < v_len {
-                                                    if vp[di] == 46u8 { // '.'
-                                                        past_dot = true
-                                                    } else if !past_dot {
-                                                        obj_name.push_byte(vp[di])
-                                                    } else {
-                                                        f_name.push_byte(vp[di])
-                                                    }
-                                                    di = di + 1usize
-                                                }
-                                                obj_name.push_byte(0u8)
-                                                f_name.push_byte(0u8)
-                                                let obj_expr = self.add_expr(Expr {
-                                                    kind: EXPR_IDENT,
-                                                    op: 0,
-                                                    int_val: 0i64,
-                                                    str_val: obj_name,
-                                                    target_type: String.new(),
-                                                    left: 0usize,
-                                                    right: 0usize,
-                                                    args: Vec.new(),
-                                                    field_name: String.new(),
-                                                    expr_line: str_line,
-                                                    expr_col: var_col,
-                                                })
-                                                interp_expr = self.add_expr(Expr {
-                                                    kind: EXPR_FIELD_ACCESS,
-                                                    op: 0,
-                                                    int_val: 0i64,
-                                                    str_val: String.new(),
-                                                    target_type: String.new(),
-                                                    left: obj_expr,
-                                                    right: 0usize,
-                                                    args: Vec.new(),
-                                                    field_name: f_name,
-                                                    expr_line: str_line,
-                                                    expr_col: var_col,
-                                                })
-                                            } else {
-                                                interp_expr = self.add_expr(Expr {
-                                                    kind: EXPR_IDENT,
-                                                    op: 0,
-                                                    int_val: 0i64,
-                                                    str_val: var_name,
-                                                    target_type: String.new(),
-                                                    left: 0usize,
-                                                    right: 0usize,
-                                                    args: Vec.new(),
-                                                    field_name: String.new(),
-                                                    expr_line: str_line,
-                                                    expr_col: var_col,
-                                                })
-                                            }
+                                            let sub_tokens = lex_source(var_name)
+                                            let saved_tokens = self.tokens
+                                            let saved_pos = self.pos
+                                            self.tokens = sub_tokens
+                                            self.pos = 0usize
+                                            let interp_expr = self.parse_expr(0)
+                                            self.tokens = saved_tokens
+                                            self.pos = saved_pos
                                             args.push(interp_expr)
                                             new_fmt.push_byte(123u8) // '{'
                                             new_fmt.push_byte(125u8) // '}'
@@ -1555,6 +1662,43 @@ impl Parser {
                 } else {
                     member = String.from_str(self.peek_text())
                     self.match_ident_or_kw()
+                }
+                // Turbofish on method: obj.method::<Type>()
+                var is_method_turbo = false
+                if self.peek_kind() == TOK_COLONCOLON {
+                    if self.pos + 1usize < self.tokens.len {
+                        if self.tokens.ptr[self.pos + 1usize].kind == TOK_LT {
+                            is_method_turbo = true
+                        }
+                    }
+                }
+                if is_method_turbo {
+                    self.advance() // skip '::'
+                    self.advance() // skip '<'
+                    member.push_byte(60u8) // '<'
+                    var depth = 1i64
+                    while self.peek_kind() != TOK_EOF && depth > 0i64 {
+                        let tk = self.peek_kind()
+                        if tk == TOK_LT {
+                            depth = depth + 1i64
+                            member.push_byte(60u8)
+                        } else if tk == TOK_GT {
+                            depth = depth - 1i64
+                            if depth == 0i64 {
+                                member.push_byte(62u8) // '>'
+                                self.advance()
+                                break
+                            } else {
+                                member.push_byte(62u8)
+                            }
+                        } else if tk == TOK_COMMA {
+                            member.push_str(", ")
+                        } else {
+                            member.push_str(self.peek_text())
+                        }
+                        self.advance()
+                    }
+                    member.push_byte(0u8)
                 }
                 if self.peek_kind() == TOK_LPAREN {
                     self.advance()

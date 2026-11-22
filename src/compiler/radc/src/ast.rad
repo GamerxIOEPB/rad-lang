@@ -19,6 +19,7 @@ const EXPR_RANGE: i32 = 14
 const EXPR_TRY: i32 = 15
 const EXPR_AWAIT: i32 = 16
 const EXPR_TUPLE: i32 = 17
+const EXPR_FSTRING: i32 = 18
 
 struct SourceFile {
     file_path: String,

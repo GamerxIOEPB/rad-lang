@@ -1,0 +1,13 @@
+struct User {
+    name: str,
+    age: i64,
+}
+
+fn main() {
+    let u = User { name: "Alice", age: 30 };
+    let msg: String = f"User {u.name} is {u.age} years old (in 5 years: {u.age + 5})";
+    println(msg.as_ptr());
+
+    let escaped: String = f"Braces: {{literal}} with value {10 * 4}";
+    println(escaped.as_ptr());
+}

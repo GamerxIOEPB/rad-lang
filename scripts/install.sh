@@ -12,9 +12,13 @@ DEFAULT_VERSION="0.2.5"
 DEFAULT_REPO="GamerxIOEPB/rad-lang"
 DEFAULT_RAD_HOME="$HOME/.rad"
 
-VERSION="${VERSION:-$DEFAULT_VERSION}"
-VERSION="${VERSION#v}"
-VERSION_EXPLICIT=0
+VERSION_ENV="${VERSION:-}"
+VERSION="${VERSION_ENV#v}"
+if [ -n "$VERSION" ]; then
+    VERSION_EXPLICIT=1
+else
+    VERSION_EXPLICIT=0
+fi
 REPO="$DEFAULT_REPO"
 RAD_HOME="${RAD_HOME:-$DEFAULT_RAD_HOME}"
 PACKAGE_TYPE="full"   # "full" or "core"
@@ -239,6 +243,31 @@ done
 
 REPO="${RAD_REPO:-$REPO}"
 
+# If version was not explicitly specified, auto-detect latest release from GitHub
+if [ "$VERSION_EXPLICIT" -eq 0 ] && [ "$OFFLINE_MODE" -eq 0 ]; then
+    LATEST_TAG=""
+    if command -v curl >/dev/null 2>&1; then
+        LATEST_URL="$(curl -fsSLI -o /dev/null -w "%{url_effective}" "https://github.com/${REPO}/releases/latest" 2>/dev/null || true)"
+        if [ -n "$LATEST_URL" ]; then
+            LATEST_TAG="${LATEST_URL##*/}"
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        LATEST_URL="$(wget -q -S -O /dev/null --max-redirect=0 "https://github.com/${REPO}/releases/latest" 2>&1 | grep -i 'Location:' | awk '{print $2}' | tr -d '\r\n' || true)"
+        if [ -n "$LATEST_URL" ]; then
+            LATEST_TAG="${LATEST_URL##*/}"
+        fi
+    fi
+
+    LATEST_VER="${LATEST_TAG#v}"
+    if [ -n "$LATEST_VER" ]; then
+        VERSION="$LATEST_VER"
+    else
+        VERSION="$DEFAULT_VERSION"
+    fi
+elif [ -z "$VERSION" ]; then
+    VERSION="$DEFAULT_VERSION"
+fi
+
 # Validate requested version
 validate_version "$VERSION"
 
@@ -321,17 +350,25 @@ if [ "$OFFLINE_MODE" -eq 1 ]; then
         RAD_LIB_DIR="$HOME/Projects/rad-lib/packages"
     fi
     if [ -n "$RAD_LIB_DIR" ]; then
-        for pkg in rad-args rad-test rad-json rad-toml rad-log rad-math; do
+        for pkg in rad-tui rad-json rad-http rad-args rad-test rad-math rad-log rad-kv rad-sqlite rad-gfx rad-gui rad-sound rad-toml rad-yaml; do
             if [ -d "$RAD_LIB_DIR/$pkg/0.1.0" ]; then
                 cp -rf "$RAD_LIB_DIR/$pkg/0.1.0" "$STAGE_DIR/lib/rad/$pkg"
             fi
         done
+        ln -sfn rad-tui "$STAGE_DIR/lib/rad/tui" 2>/dev/null || true
+        ln -sfn rad-json "$STAGE_DIR/lib/rad/json" 2>/dev/null || true
+        ln -sfn rad-http "$STAGE_DIR/lib/rad/http" 2>/dev/null || true
         ln -sfn rad-args "$STAGE_DIR/lib/rad/args" 2>/dev/null || true
         ln -sfn rad-test "$STAGE_DIR/lib/rad/test" 2>/dev/null || true
-        ln -sfn rad-json "$STAGE_DIR/lib/rad/json" 2>/dev/null || true
-        ln -sfn rad-toml "$STAGE_DIR/lib/rad/toml" 2>/dev/null || true
-        ln -sfn rad-log "$STAGE_DIR/lib/rad/log" 2>/dev/null || true
         ln -sfn rad-math "$STAGE_DIR/lib/rad/math" 2>/dev/null || true
+        ln -sfn rad-log "$STAGE_DIR/lib/rad/log" 2>/dev/null || true
+        ln -sfn rad-kv "$STAGE_DIR/lib/rad/kv" 2>/dev/null || true
+        ln -sfn rad-sqlite "$STAGE_DIR/lib/rad/sqlite" 2>/dev/null || true
+        ln -sfn rad-gfx "$STAGE_DIR/lib/rad/gfx" 2>/dev/null || true
+        ln -sfn rad-gui "$STAGE_DIR/lib/rad/gui" 2>/dev/null || true
+        ln -sfn rad-sound "$STAGE_DIR/lib/rad/sound" 2>/dev/null || true
+        ln -sfn rad-toml "$STAGE_DIR/lib/rad/toml" 2>/dev/null || true
+        ln -sfn rad-yaml "$STAGE_DIR/lib/rad/yaml" 2>/dev/null || true
     fi
     # Maintain full backwards compatibility: packages -> lib/rad symlink
     ln -sfn lib/rad "$STAGE_DIR/packages" 2>/dev/null || true
@@ -379,7 +416,7 @@ else
     else
         if [ -n "${RAD_RELEASE_URL:-}" ]; then
             BASE_URL="$RAD_RELEASE_URL"
-        elif [ "$VERSION_EXPLICIT" -eq 0 ] && [ "$VERSION" = "$DEFAULT_VERSION" ]; then
+        elif [ "$VERSION_EXPLICIT" -eq 0 ]; then
             BASE_URL="https://github.com/${REPO}/releases/latest/download"
         else
             BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
@@ -388,27 +425,38 @@ else
 
         log_step "Downloading Rad release archive from $BASE_URL..."
         DOWNLOAD_OK=0
-        for cand in "rad-${VERSION}-linux-x86_64.tar.xz" "${ARCHIVE_NAME}" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
-            cand_url="${BASE_URL}/${cand}"
-            if command -v curl >/dev/null 2>&1; then
-                if curl -fsI "$cand_url" >/dev/null 2>&1; then
-                    if curl -fSL --progress-bar "$cand_url" -o "$TMP_DIR/$cand"; then
-                        ARCHIVE_NAME="$cand"
-                        ARCHIVE_PATH="$TMP_DIR/$cand"
-                        DOWNLOAD_OK=1
-                        break
+        URL_CANDIDATES="$BASE_URL"
+        if [ "$VERSION_EXPLICIT" -eq 0 ]; then
+            URL_CANDIDATES="$BASE_URL https://github.com/${REPO}/releases/download/${VERSION} https://github.com/${REPO}/releases/download/v${VERSION}"
+        else
+            URL_CANDIDATES="$BASE_URL https://github.com/${REPO}/releases/download/v${VERSION} https://github.com/${REPO}/releases/latest/download"
+        fi
+
+        for b_url in $URL_CANDIDATES; do
+            for cand in "rad-${VERSION}-linux-x86_64.tar.xz" "${ARCHIVE_NAME}" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
+                cand_url="${b_url}/${cand}"
+                if command -v curl >/dev/null 2>&1; then
+                    if curl -fsI "$cand_url" >/dev/null 2>&1; then
+                        if curl -fSL --progress-bar "$cand_url" -o "$TMP_DIR/$cand"; then
+                            ARCHIVE_NAME="$cand"
+                            ARCHIVE_PATH="$TMP_DIR/$cand"
+                            MANIFEST_URL="${b_url}/SHA256SUMS"
+                            DOWNLOAD_OK=1
+                            break 2
+                        fi
+                    fi
+                elif command -v wget >/dev/null 2>&1; then
+                    if wget -q --spider "$cand_url" 2>/dev/null; then
+                        if wget -q --show-progress "$cand_url" -O "$TMP_DIR/$cand"; then
+                            ARCHIVE_NAME="$cand"
+                            ARCHIVE_PATH="$TMP_DIR/$cand"
+                            MANIFEST_URL="${b_url}/SHA256SUMS"
+                            DOWNLOAD_OK=1
+                            break 2
+                        fi
                     fi
                 fi
-            elif command -v wget >/dev/null 2>&1; then
-                if wget -q --spider "$cand_url" 2>/dev/null; then
-                    if wget -q --show-progress "$cand_url" -O "$TMP_DIR/$cand"; then
-                        ARCHIVE_NAME="$cand"
-                        ARCHIVE_PATH="$TMP_DIR/$cand"
-                        DOWNLOAD_OK=1
-                        break
-                    fi
-                fi
-            fi
+            done
         done
 
         if [ "$DOWNLOAD_OK" -eq 0 ]; then
