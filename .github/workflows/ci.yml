@@ -1,8 +1,13 @@
-name: Build & Release Toolchain
+name: Build, Test & Release Toolchain
 
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+  pull_request:
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -23,13 +28,79 @@ on:
         default: 'Rad v0.2.5: Comprehensive release introducing pure-Rad package registry CI & integrity validation, official test suites for ecosystem libraries (JSON, KV, Log, SQLite, YAML, TUI), live streaming progress bars in toolchain management, pure-Rad Wayland & X11 desktop GUI and Vulkan hardware compute pipelines, optimized distribution packaging (.tar.xz only), and 100% test pass rate across compiler, stdlib, and ecosystem packages.'
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: ci-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  release:
-    name: Build & Publish Release
+  quality:
+    name: Build, Quality & Memory Safety Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Native Build & Memory Diagnostics Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang llvm-dev lld liblld-21-dev valgrind
+
+      - name: Extract Bootstrap Rad Toolchain
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.rad" /tmp/rad-bootstrap
+          (gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap || \
+           gh release download 0.2.5 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap || \
+           gh release download 0.2.4 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap || \
+           gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap) || true
+          ARCHIVE="$(find /tmp/rad-bootstrap -maxdepth 1 -type f -name 'rad-*.tar.xz' | head -n 1)"
+          if [ -z "$ARCHIVE" ]; then
+            echo "error: unable to download a bootstrap Rad release archive" >&2
+            exit 1
+          fi
+          tar -xf "$ARCHIVE" -C "$HOME/.rad" --strip-components=1
+          cp -rf lib/rad "$HOME/.rad/lib/"
+          echo "$HOME/.rad/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$HOME/.rad/lib/llvm:$(llvm-config --libdir):${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      - name: Build Self-Hosted Compiler
+        run: |
+          make radc \
+            RADC="$HOME/.rad/bin/radc" \
+            PREFIX="$HOME/.rad" \
+            LLVM_CXXFLAGS="$(llvm-config --cxxflags)" \
+            LLVM_LDFLAGS="$(llvm-config --ldflags)"
+
+      - name: Run Regression & Quality Test Suites
+        env:
+          REQUIRE_VALGRIND: "1"
+        run: |
+          make test \
+            PREFIX="$HOME/.rad" \
+            LLVM_CXXFLAGS="$(llvm-config --cxxflags)" \
+            LLVM_LDFLAGS="$(llvm-config --ldflags)"
+
+      - name: Upload Quality Diagnostics Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rad-quality-diagnostics
+          path: |
+            tests/radtest/results/
+            tests/radtest/build/
+          if-no-files-found: warn
+          retention-days: 14
+
+  release:
+    name: Build & Publish Release Distribution
+    needs: quality
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
 
@@ -41,12 +112,13 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq pigz xz-utils
 
-      - name: Download & Extract Previous Release (Bootstrap)
+      - name: Download & Extract Bootstrap Toolchain
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p ~/.rad /tmp/bootstrap
           (gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/bootstrap || \
+           gh release download 0.2.5 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/bootstrap || \
            gh release download 0.2.4 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/bootstrap || \
            gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/bootstrap) || true
           if [ -d /tmp/bootstrap ] && [ -n "$(ls /tmp/bootstrap/rad-*.tar.xz 2>/dev/null)" ]; then
