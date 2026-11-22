@@ -8,7 +8,7 @@
 set -eu
 
 # Default configuration
-DEFAULT_VERSION="0.2.4"
+DEFAULT_VERSION="0.2.5"
 DEFAULT_REPO="GamerxIOEPB/rad-lang"
 DEFAULT_RAD_HOME="$HOME/.rad"
 
@@ -87,7 +87,8 @@ list_versions() {
             fi
         done
     else
-        printf "  * ${GREEN}0.2.4${RESET} (latest)\n"
+        printf "  * ${GREEN}0.2.5${RESET} (latest)\n"
+        printf "  * 0.2.4\n"
         printf "  * 0.2.3\n"
         printf "  * 0.2.2\n"
         printf "  * 0.2.1\n"
@@ -104,7 +105,7 @@ validate_version() {
 
     # Known stable releases
     case "$REQ_VER" in
-        "0.2.4"|"0.2.3"|"0.2.2"|"0.2.1"|"0.2.0"|"0.1.0")
+        "0.2.5"|"0.2.4"|"0.2.3"|"0.2.2"|"0.2.1"|"0.2.0"|"0.1.0")
             return 0
             ;;
     esac
@@ -132,7 +133,8 @@ validate_version() {
     if [ "$EXISTS" -ne 1 ]; then
         log_error "Version '${REQ_VER}' is not a valid or published Rad release."
         printf "\n${BOLD}Available releases:${RESET}\n"
-        printf "  * 0.2.4 (latest)\n"
+        printf "  * 0.2.5 (latest)\n"
+        printf "  * 0.2.4\n"
         printf "  * 0.2.3\n"
         printf "  * 0.2.2\n"
         printf "  * 0.2.1\n"

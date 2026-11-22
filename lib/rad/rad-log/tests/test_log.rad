@@ -1,0 +1,18 @@
+import "../src/lib.rad";
+
+fn main() -> i32 {
+    println("1. Testing log levels and formatting...");
+    log_trace("TEST", "Trace message probe");
+    log_debug("TEST", "Debug message probe");
+    log_info("TEST", "Info message probe");
+    log_warn("TEST", "Warn message probe");
+    log_error("TEST", "Error message probe");
+
+    if LOG_LEVEL_TRACE != 0 || LOG_LEVEL_ERROR != 4 {
+        println("FAIL: log level constants");
+        return 1;
+    }
+
+    println("[PASS] rad-log test suite succeeded!");
+    return 0;
+}

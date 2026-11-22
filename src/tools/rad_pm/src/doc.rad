@@ -414,7 +414,7 @@ pub fn cmd_doc(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     html.push_str("<h1>");
     html.push_str(html_escape(pkg_name).as_ptr() as str);
     html.push_str("</h1>\n");
-    html.push_str("<span class=\"tag\">Rad v0.2.4</span>\n");
+    html.push_str("<span class=\"tag\">Rad v0.2.5</span>\n");
     html.push_str("<input type=\"text\" id=\"docSearch\" class=\"search-box\" placeholder=\"Filter symbols...\" oninput=\"filterSymbols()\">\n");
 
     html.push_str("<div class=\"nav-section\">\n<h3>Summary</h3>\n");

@@ -1,0 +1,60 @@
+import "../src/lib.rad";
+
+fn main() -> i32 {
+    println("1. Testing SQLite in-memory open...");
+    let opt_db = SqliteDb.open(":memory:");
+    match opt_db {
+        Option.Some(database) => {
+            var db = database;
+            println("2. Testing table creation and insertions...");
+            let ok_table = db.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT);");
+            if !ok_table {
+                println("FAIL: create table");
+                return 1;
+            }
+
+            let ok_i1 = db.execute("INSERT INTO items VALUES (1, 'Widget');");
+            let ok_i2 = db.execute("INSERT INTO items VALUES (2, 'Gadget');");
+            if !ok_i1 || !ok_i2 {
+                println("FAIL: insert items");
+                return 1;
+            }
+
+            println("3. Testing statement preparation and queries...");
+            let opt_stmt = db.prepare("SELECT id, name FROM items ORDER BY id;");
+            match opt_stmt {
+                Option.Some(stmt_val) => {
+                    var stmt = stmt_val;
+                    var count = 0;
+                    while stmt.step() {
+                        let id = stmt.column_i64(0);
+                        let name = stmt.column_text(1);
+                        count = count + 1;
+                        if count == 1 && id != 1i64 {
+                            println("FAIL: id mismatch row 1");
+                            return 1;
+                        }
+                    }
+                    if count != 2 {
+                        println("FAIL: expected 2 rows");
+                        return 1;
+                    }
+                    stmt.finalize();
+                },
+                Option.None => {
+                    println("FAIL: prepare statement");
+                    return 1;
+                },
+            }
+
+            db.close();
+        },
+        Option.None => {
+            println("FAIL: open :memory: database");
+            return 1;
+        },
+    }
+
+    println("[PASS] rad-sqlite test suite succeeded!");
+    return 0;
+}

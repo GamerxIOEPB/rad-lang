@@ -73,7 +73,7 @@ An interactive, 60 FPS native desktop graphical application written in 100% pure
 
 ### Prerequisites
 - Linux running Wayland or X11.
-- Self-hosted Rad compiler `bin/radc` (v0.2.4).
+- Self-hosted Rad compiler `bin/radc` (v0.2.5).
 - No external development libraries or headers needed!
 
 ### Build Single Command

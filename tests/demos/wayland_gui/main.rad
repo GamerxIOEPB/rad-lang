@@ -361,7 +361,7 @@ impl AppState {
         win.draw_rect(0, 642, self.width, 1, theme.card_border);
 
         win.draw_text(24, 654, "[ESC/Q] Exit  [SPACE] Inc  [T] Theme  [A] Auto  [S] Shot", theme.text_secondary, 1);
-        win.draw_text(490, 654, "RAD v0.2.4  |  Universal Native GUI  |  100% Pure Rad", theme.text_accent, 1);
+        win.draw_text(490, 654, "RAD v0.2.5  |  Universal Native GUI  |  100% Pure Rad", theme.text_accent, 1);
     }
 }
 

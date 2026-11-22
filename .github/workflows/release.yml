@@ -10,17 +10,17 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release Git Tag (default: 0.2.4)'
+        description: 'Release Git Tag (default: 0.2.5)'
         required: false
-        default: '0.2.4'
+        default: '0.2.5'
       title:
         description: 'Release Title'
         required: false
-        default: 'Rad v0.2.4 — Standard Library Expansion, Ecosystem Libraries & Tooling Improvements'
+        default: 'Rad v0.2.5 — Pure-Rad Ecosystem Sync, Registry CI, and GUI/GPU Toolchain'
       notes:
         description: 'Release Notes / Description'
         required: false
-        default: 'Rad v0.2.4: Comprehensive release introducing pure-Rad ecosystem libraries (JSON, TOML, YAML, TUI, Math, KV, SQLite, Graphics), native benchmarking framework (rad bench), documentation generator (rad doc), asynchronous I/O and process pipelines, package manager expansions (rad check, tree, remove), optimized distribution archives, and extensive standard library improvements with 100% test pass rate.'
+        default: 'Rad v0.2.5: Comprehensive release introducing pure-Rad package registry CI & integrity validation, official test suites for ecosystem libraries (JSON, KV, Log, SQLite, YAML, TUI), live streaming progress bars in toolchain management, pure-Rad Wayland & X11 desktop GUI and Vulkan hardware compute pipelines, optimized distribution packaging (.tar.xz only), and 100% test pass rate across compiler, stdlib, and ecosystem packages.'
 
 concurrency:
   group: release-${{ github.ref }}
@@ -98,16 +98,16 @@ jobs:
         run: |
           ARGS=(--upload --yes)
           TAG="${{ github.event.inputs.tag }}"
-          [ -z "$TAG" ] && TAG="0.2.4"
+          [ -z "$TAG" ] && TAG="0.2.5"
           ARGS+=(--tag "$TAG")
 
           TITLE="${{ github.event.inputs.title }}"
-          [ -z "$TITLE" ] && TITLE="Rad v0.2.4 — Standard Library Expansion, Ecosystem Libraries & Tooling Improvements"
+          [ -z "$TITLE" ] && TITLE="Rad v0.2.5 — Pure-Rad Ecosystem Sync, Registry CI, and GUI/GPU Toolchain"
           ARGS+=(--title "$TITLE")
 
           NOTES="${{ github.event.inputs.notes }}"
           if [ -z "$NOTES" ]; then
-            NOTES="Rad v0.2.4: Comprehensive release introducing pure-Rad ecosystem libraries (JSON, TOML, YAML, TUI, Math, KV, SQLite, Graphics), native benchmarking framework (rad bench), documentation generator (rad doc), asynchronous I/O and process pipelines, package manager expansions (rad check, tree, remove), optimized distribution archives, and extensive standard library improvements with 100% test pass rate."
+            NOTES="Rad v0.2.5: Comprehensive release introducing pure-Rad package registry CI & integrity validation, official test suites for ecosystem libraries (JSON, KV, Log, SQLite, YAML, TUI), live streaming progress bars in toolchain management, pure-Rad Wayland & X11 desktop GUI and Vulkan hardware compute pipelines, optimized distribution packaging (.tar.xz only), and 100% test pass rate across compiler, stdlib, and ecosystem packages."
           fi
           ARGS+=(--notes "$NOTES")
           bash scripts/build_distribution.sh "${ARGS[@]}"

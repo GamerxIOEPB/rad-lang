@@ -1,0 +1,93 @@
+import "../src/lib.rad";
+
+fn main() -> i32 {
+    println("1. Testing JSON DOM construction...");
+    var root = JsonValue.object();
+    root.set("title", JsonValue.string("Rad Project"));
+    root.set("version", JsonValue.number(1.0));
+    root.set("active", JsonValue.bool(true));
+
+    var tags = JsonValue.array();
+    tags.add(JsonValue.string("native"));
+    tags.add(JsonValue.string("systems"));
+    root.set("tags", tags);
+
+    if !root.is_object() {
+        println("FAIL: root should be object");
+        return 1;
+    }
+    let title_opt = root.get("title");
+    match title_opt {
+        Option.Some(t) => {
+            if !str_json_eq(t.as_str(), "Rad Project") {
+                println("FAIL: title mismatch");
+                return 1;
+            }
+        },
+        Option.None => {
+            println("FAIL: title missing");
+            return 1;
+        },
+    }
+
+    println("2. Testing JSON serialization...");
+    let raw = root.stringify();
+    if raw.len() == 0usize {
+        println("FAIL: stringify empty");
+        return 1;
+    }
+
+    println("3. Testing JSON parsing...");
+    let json_text = "{\"name\":\"rad\",\"count\":42,\"fast\":true,\"items\":[\"a\",\"b\"]}";
+    let parse_res = json_parse(json_text);
+    match parse_res {
+        Option.Some(parsed) => {
+            let n = parsed.get("name");
+            match n {
+                Option.Some(nv) => {
+                    if !str_json_eq(nv.as_str(), "rad") {
+                        println("FAIL: parsed name mismatch");
+                        return 1;
+                    }
+                },
+                Option.None => {
+                    println("FAIL: parsed name missing");
+                    return 1;
+                },
+            }
+            let c = parsed.get("count");
+            match c {
+                Option.Some(cv) => {
+                    if cv.as_i64() != 42i64 {
+                        println("FAIL: parsed count mismatch");
+                        return 1;
+                    }
+                },
+                Option.None => {
+                    println("FAIL: parsed count missing");
+                    return 1;
+                },
+            }
+            let f = parsed.get("fast");
+            match f {
+                Option.Some(fv) => {
+                    if !fv.as_bool() {
+                        println("FAIL: parsed fast should be true");
+                        return 1;
+                    }
+                },
+                Option.None => {
+                    println("FAIL: parsed fast missing");
+                    return 1;
+                },
+            }
+        },
+        Option.None => {
+            println("FAIL: json_parse failed");
+            return 1;
+        },
+    }
+
+    println("[PASS] rad-json test suite succeeded!");
+    return 0;
+}

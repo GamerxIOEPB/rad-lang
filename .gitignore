@@ -25,3 +25,8 @@ tests/demos/wayland_gui/*.o
 tests/demos/wayland_gui/*.ll
 tests/demos/wayland_gui/*.bmp
 tests/demos/wayland_gui/rad_wayland_demo
+
+# Python cache
+__pycache__/
+*.pyc
+

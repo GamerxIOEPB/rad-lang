@@ -97,7 +97,22 @@ while IFS= read -r source; do
     package="$(basename "$(dirname "$(dirname "$source")")")"
     name="$(basename "$source" .rad)"
     binary="$TMP_DIR/${package}_$name"
-    if "$RADC" -g -O0 "$source" -o "$binary" >"$TMP_DIR/$name.compile.log" 2>&1; then
+    extra_flags=()
+    if [[ "$package" == "rad-sqlite" ]]; then
+        if ld.lld -m elf_x86_64 -lsqlite3 -o /dev/null 2>/dev/null; then
+            extra_flags=("-lsqlite3")
+        else
+            if "$RADC" --check "$source" >"$TMP_DIR/$name.compile.log" 2>&1; then
+                printf '  [SKIP] %s/%s (typecheck OK; libsqlite3.a not installed for static linking)\n' "$package" "$name"
+            else
+                failed=$((failed + 1))
+                printf '  [FAIL] check %s/%s\n' "$package" "$name"
+                cat "$TMP_DIR/$name.compile.log"
+            fi
+            continue
+        fi
+    fi
+    if "$RADC" -g -O0 "${extra_flags[@]}" "$source" -o "$binary" >"$TMP_DIR/$name.compile.log" 2>&1; then
         INTEGRATION_BINS+=("$binary")
         if "$binary" >"$TMP_DIR/$name.run.log" 2>&1; then
             printf '  [OK] %s/%s\n' "$package" "$name"

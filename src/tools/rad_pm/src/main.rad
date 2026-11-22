@@ -3176,7 +3176,7 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
         println("Rad Toolchain Information")
         println("=========================")
 
-        var t_version = "0.2.4"
+        var t_version = "0.2.5"
         var t_channel = "stable"
         var t_host = "x86_64-unknown-linux-musl (Static PIE)"
         var t_target = "x86_64-unknown-linux-musl"
@@ -3281,7 +3281,8 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
 
     if str_eq(subcmd, "list") {
         println("Available Rad Toolchain Releases:")
-        println("  * 0.2.4 (installed / latest)")
+        println("  * 0.2.5 (installed / latest)")
+        println("  * 0.2.4")
         println("  * 0.2.3")
         println("  * 0.2.2")
         println("  * 0.2.1")
@@ -3296,8 +3297,8 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     if str_eq(subcmd, "update") {
         var is_check = false
         var explicit_version = false
-        var target_version = "0.2.4"
-        let current_version = "0.2.4"
+        var target_version = "0.2.5"
+        let current_version = "0.2.5"
         var i = 3
         while i < argc {
             let arg = argv[i] as str
@@ -3311,7 +3312,7 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
             i = i + 1
         }
 
-        println("\x1b[1;36mRad Toolchain Manager\x1b[0m (active: v0.2.4)")
+        println("\x1b[1;36mRad Toolchain Manager\x1b[0m (active: v0.2.5)")
         render_tui_progress("Checking remote release metadata...", 20)
 
         // Compare target version against active installed version
@@ -3320,7 +3321,7 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
             if cmp <= 0 {
                 render_tui_progress("Toolchain up to date", 100)
                 println("")
-                println("  \x1b[1;32m✓\x1b[0m Rad toolchain is already at the latest release (v0.2.4). No update needed.")
+                println("  \x1b[1;32m✓\x1b[0m Rad toolchain is already at the latest release (v0.2.5). No update needed.")
                 return 0
             }
         }
@@ -3329,7 +3330,7 @@ fn cmd_toolchain(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
             render_tui_progress("Update available", 100)
             println("")
             var check_msg = String.new()
-            check_msg.push_str("  \x1b[1;33m➜\x1b[0m Update available: v0.2.4 -> v")
+            check_msg.push_str("  \x1b[1;33m➜\x1b[0m Update available: v0.2.5 -> v")
             check_msg.push_str(target_version)
             check_msg.push_str(". Run `rad toolchain update` to install.")
             println(check_msg.as_ptr() as str)
@@ -3529,7 +3530,7 @@ fn cmd_verify(argc: i32, argv: *raw *raw u8) -> i32 {
 }
 
 fn cmd_repl() -> i32 {
-    println("Rad Interactive REPL (v0.2.4)")
+    println("Rad Interactive REPL (v0.2.5)")
     println("Type ':help' for commands, ':quit' or Ctrl+D to exit.")
     return 0
 }
@@ -3542,7 +3543,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let argv0 = argv[0] as str
 
     if argc < 2 {
-        println("Rad Package Manager (rad) v0.2.4")
+        println("Rad Package Manager (rad) v0.2.5")
         println("Usage: rad <command> [options]")
         println("")
         println("Project Commands:")
@@ -3579,7 +3580,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     let cmd = argv[1] as str
 
     if str_eq(cmd, "--help") || str_eq(cmd, "-h") || str_eq(cmd, "help") {
-        println("Rad Package Manager (rad) v0.2.4")
+        println("Rad Package Manager (rad) v0.2.5")
         println("Usage: rad <command> [options]")
         println("")
         println("Project Commands:")
@@ -3614,7 +3615,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     }
 
     if str_eq(cmd, "--version") || str_eq(cmd, "-V") || str_eq(cmd, "version") {
-        println("rad 0.2.4 (x86_64-linux)")
+        println("rad 0.2.5 (x86_64-linux)")
         return 0
     }
 
