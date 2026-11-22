@@ -51,5 +51,19 @@ fn main() -> i32 {
     suite.check_eq_i64("from_str len", s2.len() as i64, 12);
     suite.check_eq_str("from_str content", s2.as_ptr() as str, "Rad Language");
 
+    // Repeated String growth exercises allocator reallocation without
+    // importing the separate alloc/string module (which has symbol collisions).
+    var long_text = String.new();
+    var long_i = 0usize;
+    while long_i < 8192usize {
+        long_text.push_str("Rad!");
+        long_i = long_i + 1usize;
+    }
+    suite.check_eq_i64("Long String length after repeated growth", long_text.len() as i64, 32768i64);
+    let long_ptr = long_text.as_ptr() as *raw u8;
+    suite.check_true("Long String first byte retained", long_ptr[0usize] == 82u8);
+    suite.check_true("Long String final byte retained", long_ptr[32767usize] == 33u8);
+    suite.check_true("Long String terminator retained", long_ptr[32768usize] == 0u8);
+
     return suite.print_summary();
 }

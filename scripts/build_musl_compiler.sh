@@ -87,6 +87,11 @@ docker run --rm \
             -o bin/backend_bridge.o
 
         g++ -c -O2 -fPIC -ffunction-sections -fdata-sections \
+            -I/usr/lib/llvm21/include \
+            src/compiler/radc/src/crash_report.cpp \
+            -o bin/crash_report.o
+
+        g++ -c -O2 -fPIC -ffunction-sections -fdata-sections \
             src/compiler/radc/src/llvm_stubs.cpp \
             -o bin/llvm_stubs.o
 
@@ -97,6 +102,7 @@ docker run --rm \
         g++ -static-pie -z text -z noexecstack -Wl,--gc-sections \
             bin/radc_rad.o \
             bin/backend_bridge.o \
+            bin/crash_report.o \
             bin/llvm_stubs.o \
             -L/usr/local/lib/lld \
             -llldELF -llldWasm -llldCommon \

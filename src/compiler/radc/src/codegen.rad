@@ -653,7 +653,7 @@ impl Codegen {
                 var fi = 0usize
                 while fi < self.parser.functions.len {
                     if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, m_name) {
-                        return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                        return self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                     }
                     fi = fi + 1usize
                 }
@@ -668,7 +668,7 @@ impl Codegen {
                     fi = 0usize
                     while fi < self.parser.functions.len {
                         if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_name) {
-                            return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                            return self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                         }
                         fi = fi + 1usize
                     }
@@ -677,7 +677,7 @@ impl Codegen {
             var fi = 0usize
             while fi < self.parser.functions.len {
                 if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, member) {
-                    return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                    return self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                 }
                 fi = fi + 1usize
             }
@@ -692,7 +692,7 @@ impl Codegen {
                 var fi = 0usize
                 while fi < self.parser.functions.len {
                     if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, cname) {
-                        return self.clean_type_name(self.parser.functions.ptr[fi].ret_type.as_ptr() as str)
+                        return self.parser.functions.ptr[fi].ret_type.as_ptr() as str
                     }
                     fi = fi + 1usize
                 }
@@ -3022,6 +3022,23 @@ impl Codegen {
                 if str_eq(type_s, "Vec") && str_eq(member, "from") {
                     callee_name = "vec_from"
                 }
+
+                // Give String.new and Vec.new distinct symbols.
+                if (str_eq(member, "new") && (str_eq(type_s, "String") || str_eq(type_s, "Vec"))) || (str_eq(member, "from_str") && str_eq(type_s, "String")) {
+                    var ctor_name = String.new()
+                    ctor_name.push_str(type_s)
+                    ctor_name.push_str("__new")
+                    ctor_name.push_byte(0u8)
+                    var fi = 0usize
+                    while fi < self.parser.functions.len {
+                        if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, ctor_name.as_ptr() as str) {
+                            callee_name = ctor_name.as_ptr() as str
+                            break
+                        }
+                        fi = fi + 1usize
+                    }
+                }
+
                 let clean_type_s = self.clean_type_name(type_s)
                 if !str_eq(clean_type_s, "String") && !str_eq(clean_type_s, "Vec") {
                     var mangled = String.new()
@@ -4032,10 +4049,17 @@ impl Codegen {
         if str_len(clean) == 0usize || str_eq(clean, "void") || str_eq(clean, "i32") || str_eq(clean, "i64") || str_eq(clean, "bool") || str_eq(clean, "f64") || str_eq(clean, "f32") {
             return false
         }
+        // A prefix match is unsafe here: a generic placeholder such as
+        // "T" must never match an unrelated concrete destructor like
+        // "TcpStream__drop". Match the complete type-specific symbol.
+        var expected_drop = String.new()
+        expected_drop.push_str(clean)
+        expected_drop.push_str("__drop")
+        expected_drop.push_byte(0u8)
         var fi = 0usize
         while fi < self.parser.functions.len {
             let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
-            if str_ends_with(fn_str, "__drop") && str_starts_with(fn_str, clean) {
+            if str_eq(fn_str, expected_drop.as_ptr() as str) {
                 return true
             }
             fi = fi + 1usize
@@ -4059,11 +4083,15 @@ impl Codegen {
                 continue
             }
             let clean = self.clean_type_name(vty)
+            var expected_drop = String.new()
+            expected_drop.push_str(clean)
+            expected_drop.push_str("__drop")
+            expected_drop.push_byte(0u8)
             var drop_fn_name = ""
             var fi = 0usize
             while fi < self.parser.functions.len {
                 let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
-                if str_ends_with(fn_str, "__drop") && str_starts_with(fn_str, clean) {
+                if str_eq(fn_str, expected_drop.as_ptr() as str) {
                     drop_fn_name = fn_str
                     break
                 }

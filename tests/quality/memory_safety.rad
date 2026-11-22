@@ -1,0 +1,208 @@
+// Runtime stress coverage for allocator and pointer-owning library types.
+import alloc/hash;
+import std/arena;
+import std/collections;
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn realloc(ptr: *raw var u8, new_size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn main() -> i32 {
+    var failures = 0i32;
+
+    // C allocator: realloc must preserve the old prefix and allow final-byte access.
+    let raw = malloc(64usize);
+    if (raw as usize) == 0usize {
+        println("FAIL: malloc(64) returned null");
+        failures = failures + 1i32;
+    } else {
+        var i = 0usize;
+        while i < 64usize {
+            raw[i] = ((i * 7usize) & 255usize) as u8;
+            i = i + 1usize;
+        }
+        let grown = realloc(raw, 4096usize);
+        if (grown as usize) == 0usize {
+            println("FAIL: realloc(64 -> 4096) returned null");
+            free(raw);
+            failures = failures + 1i32;
+        } else {
+            i = 0usize;
+            var prefix_ok = true;
+            while i < 64usize {
+                if grown[i] != (((i * 7usize) & 255usize) as u8) {
+                    prefix_ok = false;
+                }
+                i = i + 1usize;
+            }
+            grown[4095usize] = 0xA5u8;
+            if !prefix_ok || grown[4095usize] != 0xA5u8 {
+                println("FAIL: realloc prefix or final-byte integrity");
+                failures = failures + 1i32;
+            }
+            free(grown);
+        }
+    }
+
+    // Vec: repeated capacity growth and retained indexed values.
+    var values: Vec<i64> = Vec.new();
+    var n = 0usize;
+    while n < 10000usize {
+        values.push((n as i64) * 13i64);
+        n = n + 1usize;
+    }
+    if values.len() != 10000usize ||
+       values[0usize] != 0i64 ||
+       values[4096usize] != 53248i64 ||
+       values[9999usize] != 129987i64 {
+        println("FAIL: Vec length/data after repeated growth");
+        failures = failures + 1i32;
+    }
+    values.drop();
+
+    // HashMap: collision-heavy integer keys, multiple resizes, lookup and update.
+    var map: HashMap<i64, i64> = HashMap.new();
+    n = 0usize;
+    while n < 512usize {
+        let _inserted = map.insert_entry((n as i64) * 16i64, ((n as i64) * 5i64) + 1i64);
+        n = n + 1usize;
+    }
+    var map_ok = true;
+    n = 0usize;
+    while n < 512usize {
+        let result = map.get_val((n as i64) * 16i64);
+        match result {
+            Option::Some(value) => { if value != ((n as i64) * 5i64) + 1i64 { map_ok = false; } },
+            Option::None => { map_ok = false; },
+        }
+        n = n + 1usize;
+    }
+    let _replace = map.insert_entry(16i64, 777i64);
+    let replacement = map.get_val(16i64);
+    var replacement_ok = false;
+    match replacement {
+        Option::Some(value) => { replacement_ok = value == 777i64; },
+        Option::None => {},
+    }
+    if !map_ok || !replacement_ok {
+        println("FAIL: HashMap resize/lookup/replacement");
+        failures = failures + 1i32;
+    }
+    map.free_hashmap();
+
+    // HashSet: growth, duplicate insertion, membership and free.
+    var set: HashSet<i64> = HashSet.new();
+    n = 0usize;
+    while n < 128usize {
+        let _inserted = set.insert_item(n as i64);
+        n = n + 1usize;
+    }
+    if !set.contains(127i64) || set.insert_item(127i64) {
+        println("FAIL: HashSet membership/duplicate handling");
+        failures = failures + 1i32;
+    }
+    set.free_hashset();
+
+    // StringHashMap: trigger resizing and verify a late entry.
+    var strings: StringHashMap<i64> = StringHashMap.new();
+    let _s0 = strings.put("alpha", 1i64);
+    let _s1 = strings.put("beta", 2i64);
+    let _s2 = strings.put("gamma", 3i64);
+    let _s3 = strings.put("delta", 4i64);
+    let _s4 = strings.put("epsilon", 5i64);
+    let _s5 = strings.put("zeta", 6i64);
+    let _s6 = strings.put("eta", 7i64);
+    let _s7 = strings.put("theta", 8i64);
+    let _s8 = strings.put("iota", 9i64);
+    let string_value = strings.lookup("iota");
+    var string_map_ok = false;
+    match string_value {
+        Option::Some(value) => { string_map_ok = value == 9i64; },
+        Option::None => {},
+    }
+    if !string_map_ok {
+        println("FAIL: StringHashMap resize/lookup");
+        failures = failures + 1i32;
+    }
+    strings.free_strmap();
+
+    // Arena: zero-size behavior, alignment, chunk growth, reset and teardown.
+    var arena = Arena.with_chunk_size(256usize);
+    let zero = arena.alloc(0usize);
+    if (zero as usize) != 0usize {
+        println("FAIL: Arena.alloc(0) should return null");
+        failures = failures + 1i32;
+    }
+    var addresses: Vec<usize> = Vec.new();
+    n = 0usize;
+    while n < 128usize {
+        let block = arena.alloc(37usize);
+        if (block as usize) == 0usize || ((block as usize) & 7usize) != 0usize {
+            println("FAIL: Arena allocation null or unaligned");
+            failures = failures + 1i32;
+            break;
+        }
+        block[0usize] = (n & 255usize) as u8;
+        block[36usize] = ((n ^ 165usize) & 255usize) as u8;
+        addresses.push(block as usize);
+        n = n + 1usize;
+    }
+    n = 0usize;
+    while n < addresses.len() {
+        let block = addresses[n] as *raw var u8;
+        if block[0usize] != (n & 255usize) as u8 ||
+           block[36usize] != ((n ^ 165usize) & 255usize) as u8 {
+            println("FAIL: Arena allocation contents overlapped/corrupted");
+            failures = failures + 1i32;
+            break;
+        }
+        n = n + 1usize;
+    }
+    addresses.drop();
+    arena.reset();
+    let after_reset = arena.alloc(64usize);
+    if (after_reset as usize) == 0usize {
+        println("FAIL: Arena allocation after reset");
+        failures = failures + 1i32;
+    } else {
+        after_reset[63usize] = 0x5Au8;
+        if after_reset[63usize] != 0x5Au8 {
+            println("FAIL: Arena post-reset boundary write");
+            failures = failures + 1i32;
+        }
+    }
+    arena.destroy();
+
+    // Doubly-linked list: pointer rewiring on insertion/removal and teardown.
+    var list: LinkedList<i64> = LinkedList.new();
+    n = 0usize;
+    while n < 128usize {
+        list.push_back((n as i64) + 1i64);
+        n = n + 1usize;
+    }
+    if list.len() != 128usize {
+        println("FAIL: LinkedList length");
+        failures = failures + 1i32;
+    }
+    let first = list.pop_front();
+    var list_ok = false;
+    match first {
+        Option::Some(value) => { list_ok = value == 1i64; },
+        Option::None => {},
+    }
+    if !list_ok {
+        println("FAIL: LinkedList pop_front");
+        failures = failures + 1i32;
+    }
+    list.destroy();
+
+    if failures == 0i32 {
+        println("Memory-safety stress tests passed");
+        return 0;
+    }
+    print("Memory-safety stress tests failed: ");
+    println(failures);
+    return 1;
+}

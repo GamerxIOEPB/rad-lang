@@ -5,7 +5,7 @@ fn main() -> i32 {
     println("--- Rad Formal SMT Verification & Escape Analysis ---");
 
     // 1. Automated Memory Safety Proofs via SMT Solver (Array Bounds & Overflow)
-    var mem_verifier = MemorySafetyVerifier::new();
+    var mem_verifier: MemorySafetyVerifier = MemorySafetyVerifier::new();
 
     // Prove array bounds: 0 <= i < 100 for loop [0, 99]
     let bounds_ok = mem_verifier.prove_bounds_safety(0i64, 99i64, 100i64);

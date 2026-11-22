@@ -33,7 +33,7 @@ fn print_num(val: i32) {
     }
 }
 
-fn assert_true(cond: bool, msg: str) {
+fn tui_assert_true(cond: bool, msg: str) {
     if !cond {
         print("[FAIL] Assertion failed: ");
         println(msg);
@@ -41,7 +41,7 @@ fn assert_true(cond: bool, msg: str) {
     }
 }
 
-fn assert_eq_i32(actual: i32, expected: i32, msg: str) {
+fn tui_assert_eq_i32(actual: i32, expected: i32, msg: str) {
     if actual != expected {
         print("[FAIL] ");
         println(msg);
@@ -53,19 +53,19 @@ fn test_style_and_colors() {
     println("--- Testing Style & Colors ---");
 
     let c_red = Color.red();
-    assert_eq_i32(c_red.tag, COLOR_ANSI, "Color.red tag is ANSI");
-    assert_eq_i32(c_red.r as i32, 1, "Color.red ANSI code is 1");
+    tui_assert_eq_i32(c_red.tag, COLOR_ANSI, "Color.red tag is ANSI");
+    tui_assert_eq_i32(c_red.r as i32, 1, "Color.red ANSI code is 1");
 
     let c_rgb = Color.rgb(12u8, 34u8, 56u8);
-    assert_eq_i32(c_rgb.tag, COLOR_RGB, "Color.rgb tag is RGB");
-    assert_eq_i32(c_rgb.r as i32, 12, "Color.rgb r is 12");
-    assert_eq_i32(c_rgb.g as i32, 34, "Color.rgb g is 34");
-    assert_eq_i32(c_rgb.b as i32, 56, "Color.rgb b is 56");
+    tui_assert_eq_i32(c_rgb.tag, COLOR_RGB, "Color.rgb tag is RGB");
+    tui_assert_eq_i32(c_rgb.r as i32, 12, "Color.rgb r is 12");
+    tui_assert_eq_i32(c_rgb.g as i32, 34, "Color.rgb g is 34");
+    tui_assert_eq_i32(c_rgb.b as i32, 56, "Color.rgb b is 56");
 
     let s = Style.default().fg(Color.cyan()).bg(Color.black()).bold().underline();
-    assert_eq_i32(s.fg.r as i32, 6, "Style fg is cyan");
-    assert_true((s.modifiers & MOD_BOLD) != 0, "Style has bold modifier");
-    assert_true((s.modifiers & MOD_UNDERLINE) != 0, "Style has underline modifier");
+    tui_assert_eq_i32(s.fg.r as i32, 6, "Style fg is cyan");
+    tui_assert_true((s.modifiers & MOD_BOLD) != 0, "Style has bold modifier");
+    tui_assert_true((s.modifiers & MOD_UNDERLINE) != 0, "Style has underline modifier");
 
     println("[PASS] Style & Colors tests succeeded!");
 }
@@ -74,17 +74,17 @@ fn test_rect_and_layout() {
     println("--- Testing Rect & Layout Solver ---");
 
     let r = Rect.new(10, 20, 100, 50);
-    assert_eq_i32(r.area(), 5000, "Rect area 100x50 = 5000");
-    assert_eq_i32(r.left(), 10, "Rect left = 10");
-    assert_eq_i32(r.right(), 110, "Rect right = 110");
-    assert_eq_i32(r.top(), 20, "Rect top = 20");
-    assert_eq_i32(r.bottom(), 70, "Rect bottom = 70");
+    tui_assert_eq_i32(r.area() as i32, 5000i32, "Rect area 100x50 = 5000");
+    tui_assert_eq_i32(r.left() as i32, 10i32, "Rect left = 10");
+    tui_assert_eq_i32(r.right() as i32, 110i32, "Rect right = 110");
+    tui_assert_eq_i32(r.top() as i32, 20i32, "Rect top = 20");
+    tui_assert_eq_i32(r.bottom() as i32, 70i32, "Rect bottom = 70");
 
     let inner: Rect = r.inner(2, 5);
-    assert_eq_i32(inner.x, 12, "Inner x = 12");
-    assert_eq_i32(inner.y, 25, "Inner y = 25");
-    assert_eq_i32(inner.width, 96, "Inner width = 96");
-    assert_eq_i32(inner.height, 40, "Inner height = 40");
+    tui_assert_eq_i32(inner.x, 12, "Inner x = 12");
+    tui_assert_eq_i32(inner.y, 25, "Inner y = 25");
+    tui_assert_eq_i32(inner.width, 96, "Inner width = 96");
+    tui_assert_eq_i32(inner.height, 40, "Inner height = 40");
 
     // Layout split vertical: Fixed(10), Percentage(50), Fixed(10)
     var layout = Layout.vertical();
@@ -93,20 +93,20 @@ fn test_rect_and_layout() {
     layout.add_constraint(Constraint.fixed(10));
 
     let splits = layout.split(Rect.new(0, 0, 80, 40));
-    assert_true(splits.len == 3usize, "Split produced 3 rects");
+    tui_assert_true(splits.len == 3usize, "Split produced 3 rects");
 
     let r0: Rect = get_rect(splits, 0usize);
     let r1: Rect = get_rect(splits, 1usize);
     let r2: Rect = get_rect(splits, 2usize);
 
-    assert_eq_i32(r0.y, 0, "r0.y = 0");
-    assert_eq_i32(r0.height, 10, "r0.height = 10");
+    tui_assert_eq_i32(r0.y, 0, "r0.y = 0");
+    tui_assert_eq_i32(r0.height, 10, "r0.height = 10");
 
-    assert_eq_i32(r1.y, 10, "r1.y = 10");
-    assert_eq_i32(r1.height, 20, "r1.height = 20 (50% of 40)");
+    tui_assert_eq_i32(r1.y, 10, "r1.y = 10");
+    tui_assert_eq_i32(r1.height, 20, "r1.height = 20 (50% of 40)");
 
-    assert_eq_i32(r2.y, 30, "r2.y = 30");
-    assert_eq_i32(r2.height, 10, "r2.height = 10");
+    tui_assert_eq_i32(r2.y, 30, "r2.y = 30");
+    tui_assert_eq_i32(r2.height, 10, "r2.height = 10");
 
     println("[PASS] Rect & Layout tests succeeded!");
 }
@@ -115,8 +115,8 @@ fn test_buffer_and_widgets() {
     println("--- Testing Buffer & Widgets Rendering ---");
 
     var buf = Buffer.new(80, 24);
-    assert_eq_i32(buf.width, 80, "Buffer width 80");
-    assert_eq_i32(buf.height, 24, "Buffer height 24");
+    tui_assert_eq_i32(buf.width, 80, "Buffer width 80");
+    tui_assert_eq_i32(buf.height, 24, "Buffer height 24");
 
     // Clear buffer
     buf.clear(Style.default());
@@ -132,10 +132,10 @@ fn test_buffer_and_widgets() {
 
     // Inner area of block
     let inner_area: Rect = block.inner_area(area);
-    assert_eq_i32(inner_area.x, 1, "inner_area.x = 1");
-    assert_eq_i32(inner_area.y, 1, "inner_area.y = 1");
-    assert_eq_i32(inner_area.width, 78, "inner_area.width = 78");
-    assert_eq_i32(inner_area.height, 22, "inner_area.height = 22");
+    tui_assert_eq_i32(inner_area.x, 1, "inner_area.x = 1");
+    tui_assert_eq_i32(inner_area.y, 1, "inner_area.y = 1");
+    tui_assert_eq_i32(inner_area.width, 78, "inner_area.width = 78");
+    tui_assert_eq_i32(inner_area.height, 22, "inner_area.height = 22");
 
     // Paragraph widget
     let p = Paragraph.new("Hello RadTUI!\nWelcome to pure Rad terminal interfaces.")

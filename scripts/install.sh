@@ -397,18 +397,22 @@ else
         for cand in "rad-${VERSION}-linux-x86_64.tar.xz" "${ARCHIVE_NAME}" "rad-${VERSION}-linux-x86_64.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-musl.tar.gz" "rad-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"; do
             cand_url="${BASE_URL}/${cand}"
             if command -v curl >/dev/null 2>&1; then
-                if curl -fSL --progress-bar "$cand_url" -o "$TMP_DIR/$cand" 2>/dev/null; then
-                    ARCHIVE_NAME="$cand"
-                    ARCHIVE_PATH="$TMP_DIR/$cand"
-                    DOWNLOAD_OK=1
-                    break
+                if curl -fsI "$cand_url" >/dev/null 2>&1; then
+                    if curl -fSL --progress-bar "$cand_url" -o "$TMP_DIR/$cand"; then
+                        ARCHIVE_NAME="$cand"
+                        ARCHIVE_PATH="$TMP_DIR/$cand"
+                        DOWNLOAD_OK=1
+                        break
+                    fi
                 fi
             elif command -v wget >/dev/null 2>&1; then
-                if wget -q --show-progress "$cand_url" -O "$TMP_DIR/$cand" 2>/dev/null; then
-                    ARCHIVE_NAME="$cand"
-                    ARCHIVE_PATH="$TMP_DIR/$cand"
-                    DOWNLOAD_OK=1
-                    break
+                if wget -q --spider "$cand_url" 2>/dev/null; then
+                    if wget -q --show-progress "$cand_url" -O "$TMP_DIR/$cand"; then
+                        ARCHIVE_NAME="$cand"
+                        ARCHIVE_PATH="$TMP_DIR/$cand"
+                        DOWNLOAD_OK=1
+                        break
+                    fi
                 fi
             fi
         done
