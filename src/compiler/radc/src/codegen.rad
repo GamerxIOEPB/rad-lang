@@ -65,8 +65,106 @@ impl Codegen {
         return id
     }
 
+    fn resolve_type_alias(self, ty: str) -> str {
+        return self.parser.resolve_type_alias(ty)
+    }
+
+    fn extract_tuple_type_element(self, ty: str, target_idx: i64) -> str {
+        let p = ty as *raw u8
+        let tlen = str_len(ty)
+        var i = 0usize
+        if i < tlen && p[i] == 40u8 {
+            i = i + 1usize
+        }
+        var cur_idx = 0i64
+        while i < tlen && cur_idx <= target_idx {
+            while i < tlen && (p[i] == 32u8 || p[i] == 9u8) {
+                i = i + 1usize
+            }
+            let start = i
+            var depth_paren = 0i64
+            var depth_angle = 0i64
+            while i < tlen {
+                let c = p[i]
+                if c == 40u8 { depth_paren = depth_paren + 1i64 }
+                else if c == 41u8 {
+                    if depth_paren == 0i64 { break }
+                    depth_paren = depth_paren - 1i64
+                }
+                else if c == 60u8 { depth_angle = depth_angle + 1i64 }
+                else if c == 62u8 {
+                    if depth_angle > 0i64 { depth_angle = depth_angle - 1i64 }
+                }
+                else if c == 44u8 && depth_paren == 0i64 && depth_angle == 0i64 {
+                    break
+                }
+                i = i + 1usize
+            }
+            if cur_idx == target_idx {
+                var res = String.new()
+                var end = i
+                while end > start && (p[end - 1usize] == 32u8 || p[end - 1usize] == 9u8) {
+                    end = end - 1usize
+                }
+                var k = start
+                while k < end {
+                    res.push_byte(p[k])
+                    k = k + 1usize
+                }
+                res.push_byte(0u8)
+                return res.as_ptr() as str
+            }
+            if i < tlen && p[i] == 44u8 {
+                i = i + 1usize
+            }
+            cur_idx = cur_idx + 1i64
+        }
+        return ""
+    }
+
+    fn get_tuple_elem_type(self, recv_id: usize, elem_idx: i64) -> str {
+        let ep = self.parser.exprs.ptr
+        let k = ep[recv_id].kind
+        if k == EXPR_TUPLE {
+            if elem_idx >= 0i64 && (elem_idx as usize) < ep[recv_id].args.len {
+                let arg_id = ep[recv_id].args.ptr[elem_idx as usize]
+                if self.is_expr_ptr(arg_id) {
+                    return "ptr"
+                }
+                if self.is_expr_float(arg_id) {
+                    return "f64"
+                }
+                return "i64"
+            }
+        }
+        var raw_t = self.get_expr_struct_name(recv_id)
+        if str_len(raw_t) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+            raw_t = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+        }
+        if str_len(raw_t) == 0usize && ep[recv_id].kind == EXPR_CALL {
+            let callee = ep[recv_id].left
+            if ep[callee].kind == EXPR_IDENT {
+                raw_t = self.get_func_ret_type(ep[callee].str_val.as_ptr() as str)
+            }
+        }
+        if str_starts_with(raw_t, "(") {
+            return self.extract_tuple_type_element(raw_t, elem_idx)
+        }
+        return ""
+    }
+
     fn emit_llvm_type(self, ty: str) -> str {
         var t = ty;
+        while str_starts_with(t, " ") {
+            t = (t as usize + 1usize) as str;
+        }
+        if str_starts_with(t, "var ") {
+            t = (t as usize + 4usize) as str;
+            while str_starts_with(t, " ") {
+                t = (t as usize + 1usize) as str;
+            }
+        }
+        t = self.resolve_type_alias(t);
         while str_starts_with(t, " ") {
             t = (t as usize + 1usize) as str;
         }
@@ -79,7 +177,7 @@ impl Codegen {
         if str_eq(t, "void") {
             return "void"
         }
-        if str_starts_with(t, "*") || str_starts_with(t, "&") || str_starts_with(t, "str") || str_starts_with(t, "ptr") || str_eq(t, "Vec") || str_eq(t, "String") || str_starts_with(t, "[]") || str_starts_with(t, "var []") || str_starts_with(t, "[") || str_starts_with(t, "dyn ") || self.is_struct_name(t) {
+        if str_starts_with(t, "(") || str_eq(t, "tuple") || str_starts_with(t, "*") || str_starts_with(t, "&") || str_starts_with(t, "fn") || str_starts_with(t, "str") || str_starts_with(t, "ptr") || str_eq(t, "Vec") || str_eq(t, "String") || str_starts_with(t, "[]") || str_starts_with(t, "var []") || str_starts_with(t, "[") || str_starts_with(t, "dyn ") || self.is_struct_name(t) {
             return "ptr"
         }
         if str_eq(t, "f64") {
@@ -92,6 +190,37 @@ impl Codegen {
             return "i32"
         }
         return "i64"
+    }
+
+    fn get_func_ptr_ret_type(self, fty: str) -> str {
+        if !str_contains(fty, "->") {
+            return "void"
+        }
+        let p = fty as *raw u8
+        let flen = str_len(fty)
+        var i = 0usize
+        while i + 1usize < flen {
+            if p[i] == 45u8 && p[i + 1usize] == 62u8 { // '->'
+                var start = i + 2usize
+                while start < flen && (p[start] == 32u8 || p[start] == 9u8) {
+                    start = start + 1usize
+                }
+                var ret_ty = String.new()
+                var j = start
+                while j < flen {
+                    ret_ty.push_byte(p[j])
+                    j = j + 1usize
+                }
+                ret_ty.push_byte(0u8)
+                let r_str = ret_ty.as_ptr() as str
+                if str_eq(r_str, "void") {
+                    return "void"
+                }
+                return self.emit_llvm_type(r_str)
+            }
+            i = i + 1usize
+        }
+        return "void"
     }
 
     fn find_var_type_in_stmts(self, stmt_id: usize, vname: str) -> str {
@@ -148,6 +277,27 @@ impl Codegen {
                     if self.parser.exprs.ptr[init_e].kind == EXPR_ARRAY_LITERAL {
                         return "[]i64"
                     }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_TUPLE {
+                        var tup_ty = String.new()
+                        tup_ty.push_str("(")
+                        var ai = 0usize
+                        while ai < self.parser.exprs.ptr[init_e].args.len {
+                            let a_id = self.parser.exprs.ptr[init_e].args.ptr[ai]
+                            if self.is_expr_float(a_id) {
+                                tup_ty.push_str("f64")
+                            } else if self.is_expr_ptr(a_id) {
+                                tup_ty.push_str("ptr")
+                            } else {
+                                tup_ty.push_str("i64")
+                            }
+                            if ai + 1usize < self.parser.exprs.ptr[init_e].args.len {
+                                tup_ty.push_str(", ")
+                            }
+                            ai = ai + 1usize
+                        }
+                        tup_ty.push_str(")")
+                        return tup_ty.as_ptr() as str
+                    }
                     if self.parser.exprs.ptr[init_e].kind == EXPR_TRY {
                         let inner_id = self.parser.exprs.ptr[init_e].left
                         var inner_ty = self.get_expr_struct_name(inner_id)
@@ -202,6 +352,14 @@ impl Codegen {
                     if self.parser.exprs.ptr[init_e].kind == EXPR_FIELD_ACCESS {
                         let fname = self.parser.exprs.ptr[init_e].field_name.as_ptr() as str
                         let recv_id = self.parser.exprs.ptr[init_e].left
+                        let fname_p = fname as *raw u8
+                        if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                            let f_idx = parse_int(fname)
+                            let elem_ty = self.get_tuple_elem_type(recv_id, f_idx)
+                            if str_len(elem_ty) > 0usize {
+                                return elem_ty
+                            }
+                        }
                         let parent_struct = self.get_expr_struct_name(recv_id)
                         if str_len(parent_struct) > 0usize {
                             var si = 0usize
@@ -227,6 +385,9 @@ impl Codegen {
                         if str_len(struct_name) > 0usize {
                             if str_eq(member, "new") {
                                 return struct_name
+                            }
+                            if str_eq(struct_name, "Vec") && (str_eq(member, "map") || str_eq(member, "filter")) {
+                                return "Vec"
                             }
                             var mangled = String.new()
                             mangled.push_str(struct_name)
@@ -283,6 +444,17 @@ impl Codegen {
                                     fi = fi + 1usize
                                 }
                             }
+                        }
+                        var fi_std = 0usize
+                        while fi_std < self.parser.functions.len {
+                            if str_eq(self.parser.functions.ptr[fi_std].fn_name.as_ptr() as str, member) {
+                                let raw_r = self.parser.functions.ptr[fi_std].ret_type.as_ptr() as str
+                                if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                    return raw_r
+                                }
+                                break
+                            }
+                            fi_std = fi_std + 1usize
                         }
                         if self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
                             let rname = self.parser.exprs.ptr[recv_id].str_val.as_ptr() as str
@@ -923,6 +1095,20 @@ impl Codegen {
         }
         if k == EXPR_FIELD_ACCESS {
             let fname = ep[id].field_name.as_ptr() as str
+            let fname_p = fname as *raw u8
+            if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                let recv_id = ep[id].left
+                let f_idx = parse_int(fname)
+                let elem_ty = self.get_tuple_elem_type(recv_id, f_idx)
+                if str_len(elem_ty) > 0usize {
+                    let lty = self.emit_llvm_type(elem_ty)
+                    return str_eq(lty, "double") || str_eq(lty, "float")
+                }
+                if ep[recv_id].kind == EXPR_TUPLE && (f_idx as usize) < ep[recv_id].args.len {
+                    return self.is_expr_float(ep[recv_id].args.ptr[f_idx as usize])
+                }
+                return false
+            }
             let recv_id = ep[id].left
             var s_type = self.get_expr_struct_name(recv_id)
             if str_len(s_type) == 0usize && ep[recv_id].kind == EXPR_IDENT {
@@ -1154,10 +1340,10 @@ impl Codegen {
             }
             fi = fi + 1usize
         }
-        if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") || str_eq(fname, "__rad_get_terminal_guard") {
+        if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") || str_eq(fname, "__rad_get_terminal_guard") || str_eq(fname, "map") || str_eq(fname, "Vec__map") || str_eq(fname, "filter") || str_eq(fname, "Vec__filter") {
             return "ptr"
         }
-        if str_starts_with(fname, "__rad_") || str_eq(fname, "panic") || str_eq(fname, "eprintln") {
+        if str_starts_with(fname, "__rad_") || str_eq(fname, "panic") || str_eq(fname, "eprintln") || str_eq(fname, "for_each") || str_eq(fname, "Vec__for_each") {
             return "void"
         }
         if str_eq(fname, "atexit") {
@@ -1188,12 +1374,13 @@ impl Codegen {
     }
 
     fn is_struct_name(self, name: str) -> bool {
-        if str_starts_with(name, "dyn ") {
+        let resolved = self.resolve_type_alias(name)
+        if str_starts_with(resolved, "dyn ") {
             return true
         }
         var si = 0usize
         while si < self.parser.structs.len {
-            if self.match_struct_name(self.parser.structs.ptr[si].struct_name.as_ptr() as str, name) {
+            if self.match_struct_name(self.parser.structs.ptr[si].struct_name.as_ptr() as str, resolved) {
                 return true
             }
             si = si + 1usize
@@ -1438,7 +1625,7 @@ impl Codegen {
     fn is_expr_ptr(self, id: usize) -> bool {
         let ep = self.parser.exprs.ptr
         let k = ep[id].kind
-        if k == EXPR_ARRAY_LITERAL {
+        if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE {
             return true
         }
         if k == EXPR_STR {
@@ -1489,6 +1676,11 @@ impl Codegen {
                 }
                 if str_eq(self.get_func_ret_type(fname), "ptr") {
                     return true
+                }
+                let raw_var = self.get_raw_var_type(fname)
+                if str_len(raw_var) > 0usize && str_contains(raw_var, "->") {
+                    let rty = self.get_func_ptr_ret_type(raw_var)
+                    return str_eq(rty, "ptr")
                 }
             }
             if ep[callee_id].kind == EXPR_FIELD_ACCESS {
@@ -1560,12 +1752,31 @@ impl Codegen {
                     }
                 }
                 if str_len(raw_ty) > 0usize {
+                    let base_ty = self.clean_type_name(raw_ty)
+                    if str_eq(base_ty, "Vec") && (str_eq(member, "map") || str_eq(member, "filter")) {
+                        return true
+                    }
+                    if str_eq(base_ty, "Vec") && str_eq(member, "for_each") {
+                        return false
+                    }
                     var mangled = String.new()
-                    mangled.push_str(raw_ty)
+                    mangled.push_str(base_ty)
                     mangled.push_str("__")
                     mangled.push_str(member)
-                    if str_eq(self.get_func_ret_type(mangled.as_ptr() as str), "ptr") {
-                        return true
+                    var found_m = false
+                    var fi = 0usize
+                    while fi < self.parser.functions.len {
+                        if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, mangled.as_ptr() as str) {
+                            found_m = true
+                            break
+                        }
+                        fi = fi + 1usize
+                    }
+                    if found_m {
+                        let ret_ty = self.get_func_ret_type(mangled.as_ptr() as str)
+                        if str_len(ret_ty) > 0usize && !str_eq(ret_ty, "void") {
+                            return str_eq(ret_ty, "ptr")
+                        }
                     }
                 }
             }
@@ -1594,6 +1805,20 @@ impl Codegen {
             let fname = ep[id].field_name.as_ptr() as str
             if str_eq(fname, "ptr") {
                 return true
+            }
+            let fname_p = fname as *raw u8
+            if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                let recv_id = ep[id].left
+                let f_idx = parse_int(fname)
+                let elem_ty = self.get_tuple_elem_type(recv_id, f_idx)
+                if str_len(elem_ty) > 0usize {
+                    let lty = self.emit_llvm_type(elem_ty)
+                    return str_eq(lty, "ptr") || str_eq(elem_ty, "str") || str_eq(elem_ty, "String")
+                }
+                if ep[recv_id].kind == EXPR_TUPLE && (f_idx as usize) < ep[recv_id].args.len {
+                    return self.is_expr_ptr(ep[recv_id].args.ptr[f_idx as usize])
+                }
+                return false
             }
             let recv_id = ep[id].left
             var s_type = self.get_expr_struct_name(recv_id)
@@ -1885,7 +2110,7 @@ impl Codegen {
             return self.emit_expr(ep[expr_id].left)
         }
 
-        if k == EXPR_ARRAY_LITERAL {
+        if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE {
             let n_elems = ep[expr_id].args.len
             let elem_bytes = n_elems * 8usize
             var alloc_bytes = elem_bytes
@@ -1939,6 +2164,10 @@ impl Codegen {
                 self.ir.push_str(int_to_str(gep).as_ptr() as str)
                 self.ir.push_str(", align 8\n")
                 ei = ei + 1usize
+            }
+
+            if k == EXPR_TUPLE {
+                return buf_reg
             }
 
             let slice_reg = self.alloc_ssa()
@@ -2445,6 +2674,7 @@ impl Codegen {
                 }
                 f_k = f_k + 1usize
             }
+            var is_indirect = false
             if !is_known {
                 if str_eq(callee_name, "puts") || str_eq(callee_name, "printf") || str_eq(callee_name, "println") || str_eq(callee_name, "print") ||
                    str_eq(callee_name, "malloc") || str_eq(callee_name, "free") || str_eq(callee_name, "realloc") ||
@@ -2456,6 +2686,20 @@ impl Codegen {
                    str_eq(callee_name, "sqrt") || str_eq(callee_name, "remove") || str_starts_with(callee_name, "syscall") || self.is_struct_name(callee_name) || str_eq(callee_name, "swap") ||
                    str_eq(callee_name, "atexit") || str_starts_with(callee_name, "__rad_") {
                     is_known = true
+                } else {
+                    var is_alloc = false
+                    var ai = 0usize
+                    while ai < self.allocated_vars.len {
+                        if str_eq(self.allocated_vars.ptr[ai].as_ptr() as str, callee_name) {
+                            is_alloc = true
+                            break
+                        }
+                        ai = ai + 1usize
+                    }
+                    if is_alloc || (ep_sub[callee_id].kind != EXPR_IDENT && ep_sub[callee_id].kind != EXPR_FIELD_ACCESS) {
+                        is_indirect = true
+                        is_known = true
+                    }
                 }
             }
             if !is_known {
@@ -2723,6 +2967,11 @@ impl Codegen {
                 }
             }
 
+            var fptr_reg = 0
+            if is_indirect {
+                fptr_reg = self.emit_expr(callee_id)
+            }
+
             var arg_regs = Vec.new()
             let args_len = ep_sub[expr_id].args.len
             var i = 0usize
@@ -2740,7 +2989,14 @@ impl Codegen {
                         r = self.coerce_to_trait_object(r, a_struct, target_trait)
                     }
                 }
-                var pty: str = self.get_func_param_type(callee_name, i)
+                var pty: str = "i64"
+                if !is_indirect {
+                    pty = self.get_func_param_type(callee_name, i)
+                } else if self.is_expr_ptr(a_expr) {
+                    pty = "ptr"
+                } else if self.is_expr_float(a_expr) {
+                    pty = "double"
+                }
                 var a_is_ptr = self.is_expr_ptr(a_expr)
                 if str_eq(callee_name, "println") || str_eq(callee_name, "print") {
                     if self.is_expr_string_obj(a_expr) {
@@ -2907,7 +3163,15 @@ impl Codegen {
                 self.emit_str(", i32 0, i32 0\n")
             }
 
-            let call_ret_ty = self.get_func_ret_type(callee_name)
+            var call_ret_ty = self.get_func_ret_type(callee_name)
+            if is_indirect {
+                let vty = self.get_raw_var_type(callee_name)
+                if str_len(vty) > 0usize {
+                    call_ret_ty = self.get_func_ptr_ret_type(vty)
+                } else {
+                    call_ret_ty = "i64"
+                }
+            }
             if str_eq(call_ret_ty, "void") {
                 if (str_eq(callee_name, "println") || str_eq(callee_name, "print")) && fmt_gep_reg != 0 {
                     self.emit_str("  call i32 (ptr, ...) @printf(ptr %")
@@ -2977,6 +3241,25 @@ impl Codegen {
                         self.emit_str(int_to_str(flush_reg).as_ptr() as str)
                         self.emit_str(" = call i32 @fflush(ptr null)\n")
                     }
+                } else if is_indirect {
+                    self.emit_str("  call void %")
+                    self.emit_str(int_to_str(fptr_reg).as_ptr() as str)
+                    self.emit_str("(")
+                    var j = 0usize
+                    while j < arg_regs.len {
+                        if j > 0usize { self.emit_str(", ") }
+                        let curr_arg = ep_sub[expr_id].args.ptr[j]
+                        if self.is_expr_ptr(curr_arg) {
+                            self.emit_str("ptr %")
+                        } else if self.is_expr_float(curr_arg) {
+                            self.emit_str("double %")
+                        } else {
+                            self.emit_str("i64 %")
+                        }
+                        self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
+                        j = j + 1usize
+                    }
+                    self.emit_str(")\n")
                 } else {
                     self.emit_str("  call void @")
                     self.emit_str(callee_name)
@@ -3086,6 +3369,25 @@ impl Codegen {
                     self.emit_str(int_to_str(flush_reg).as_ptr() as str)
                     self.emit_str(" = call i32 @fflush(ptr null)\n")
                 }
+            } else if is_indirect {
+                self.emit_str(" %")
+                self.emit_str(int_to_str(fptr_reg).as_ptr() as str)
+                self.emit_str("(")
+                var j = 0usize
+                while j < arg_regs.len {
+                    if j > 0usize { self.emit_str(", ") }
+                    let curr_arg = ep_sub[expr_id].args.ptr[j]
+                    if self.is_expr_ptr(curr_arg) {
+                        self.emit_str("ptr %")
+                    } else if self.is_expr_float(curr_arg) {
+                        self.emit_str("double %")
+                    } else {
+                        self.emit_str("i64 %")
+                    }
+                    self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
+                    j = j + 1usize
+                }
+                self.emit_str(")\n")
             } else {
                 self.emit_str(" @")
                 self.emit_str(callee_name)
@@ -3164,7 +3466,7 @@ impl Codegen {
                 }
 
                 let clean_type_s = self.clean_type_name(type_s)
-                if !str_eq(clean_type_s, "String") && !str_eq(clean_type_s, "Vec") {
+                if true {
                     var mangled = String.new()
                     mangled.push_str(type_s)
                     mangled.push_str("__")
@@ -3349,7 +3651,12 @@ impl Codegen {
                 }
                 var found_mangled = false
                 let clean_raw = self.clean_type_name(raw_ty)
-                if str_len(raw_ty) > 0usize && !str_eq(clean_raw, "String") && !str_eq(clean_raw, "Vec") {
+                let is_builtin_vec_str_op = (str_eq(clean_raw, "String") || str_eq(clean_raw, "Vec")) &&
+                    (str_eq(member, "new") || str_eq(member, "as_ptr") || str_eq(member, "len") ||
+                     str_eq(member, "push") || str_eq(member, "push_byte") || str_eq(member, "pop") ||
+                     str_eq(member, "push_str") || str_eq(member, "from_str") ||
+                     str_eq(member, "map") || str_eq(member, "filter") || str_eq(member, "for_each"))
+                if str_len(raw_ty) > 0usize && !is_builtin_vec_str_op {
                     var mangled = String.new()
                     mangled.push_str(raw_ty)
                     mangled.push_str("__")
@@ -3681,27 +3988,32 @@ impl Codegen {
             }
 
             var f_idx = -1i64
-            let s_type = self.get_expr_struct_name(recv_id)
-            if str_len(s_type) > 0usize {
-                var si = 0usize
-                while si < self.parser.structs.len {
-                    let sdef = self.parser.structs.ptr[si]
-                    if self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
-                        var fi = 0usize
-                        while fi < sdef.field_names.len {
-                            if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
-                                f_idx = fi as i64
-                                break
+            let fname_p = fname as *raw u8
+            if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                f_idx = parse_int(fname)
+            } else {
+                let s_type = self.get_expr_struct_name(recv_id)
+                if str_len(s_type) > 0usize {
+                    var si = 0usize
+                    while si < self.parser.structs.len {
+                        let sdef = self.parser.structs.ptr[si]
+                        if self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                            var fi = 0usize
+                            while fi < sdef.field_names.len {
+                                if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                    f_idx = fi as i64
+                                    break
+                                }
+                                fi = fi + 1usize
                             }
-                            fi = fi + 1usize
+                            break
                         }
-                        break
+                        si = si + 1usize
                     }
-                    si = si + 1usize
                 }
-            }
-            if f_idx < 0i64 {
-                f_idx = self.get_struct_field_idx(fname)
+                if f_idx < 0i64 {
+                    f_idx = self.get_struct_field_idx(fname)
+                }
             }
             if f_idx < 0i64 {
                 var err = String.new()
@@ -4958,27 +5270,32 @@ impl Codegen {
             var val_reg = self.emit_expr(val_expr)
 
             var f_idx = -1i64
-            let s_type = self.get_expr_struct_name(recv_expr)
-            if str_len(s_type) > 0usize {
-                var si = 0usize
-                while si < self.parser.structs.len {
-                    let sdef = self.parser.structs.ptr[si]
-                    if self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
-                        var fi = 0usize
-                        while fi < sdef.field_names.len {
-                            if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
-                                f_idx = fi as i64
-                                break
+            let fname_p = fname as *raw u8
+            if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                f_idx = parse_int(fname)
+            } else {
+                let s_type = self.get_expr_struct_name(recv_expr)
+                if str_len(s_type) > 0usize {
+                    var si = 0usize
+                    while si < self.parser.structs.len {
+                        let sdef = self.parser.structs.ptr[si]
+                        if self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                            var fi = 0usize
+                            while fi < sdef.field_names.len {
+                                if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                    f_idx = fi as i64
+                                    break
+                                }
+                                fi = fi + 1usize
                             }
-                            fi = fi + 1usize
+                            break
                         }
-                        break
+                        si = si + 1usize
                     }
-                    si = si + 1usize
                 }
-            }
-            if f_idx < 0i64 {
-                f_idx = self.get_struct_field_idx(fname)
+                if f_idx < 0i64 {
+                    f_idx = self.get_struct_field_idx(fname)
+                }
             }
             if f_idx < 0i64 {
                 var err = String.new()
@@ -5849,7 +6166,7 @@ impl Codegen {
         } else if k == EXPR_INDEX {
             self.collect_mutations_in_expr(ep[expr_id].left, mutated)
             self.collect_mutations_in_expr(ep[expr_id].right, mutated)
-        } else if k == EXPR_ARRAY_LITERAL {
+        } else if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE {
             var ai = 0usize
             while ai < ep[expr_id].args.len {
                 self.collect_mutations_in_expr(ep[expr_id].args.ptr[ai], mutated)
@@ -6224,6 +6541,30 @@ impl Codegen {
         header.push_str("define i64 @__rad_jit_call2(ptr %fn, i64 %a1, i64 %a2) {\nentry:\n  %res = call i64 %fn(i64 %a1, i64 %a2)\n  ret i64 %res\n}\n\n")
 
         header.push_str("define ptr @vec_from(ptr %slice) {\nentry:\n  %is_null = icmp eq ptr %slice, null\n  br i1 %is_null, label %ret_empty, label %do_copy\nret_empty:\n  %empty_vec = call ptr @new()\n  ret ptr %empty_vec\ndo_copy:\n  %len_ptr = getelementptr inbounds i8, ptr %slice, i64 16\n  %len = load i64, ptr %len_ptr, align 8\n  %obj = call ptr @malloc(i64 24)\n  %cap = shl i64 %len, 1\n  %adj_cap_cond = icmp ult i64 %cap, 16\n  %adj_cap = select i1 %adj_cap_cond, i64 16, i64 %cap\n  %bytes = shl i64 %adj_cap, 3\n  %buf = call ptr @malloc(i64 %bytes)\n  store ptr %buf, ptr %obj, align 8\n  %cap_slot = getelementptr inbounds i8, ptr %obj, i64 8\n  store i64 %adj_cap, ptr %cap_slot, align 8\n  %len_slot = getelementptr inbounds i8, ptr %obj, i64 16\n  store i64 %len, ptr %len_slot, align 8\n  %src_buf = load ptr, ptr %slice, align 8\n  br label %loop\nloop:\n  %i = phi i64 [ 0, %do_copy ], [ %next_i, %body ]\n  %is_done = icmp uge i64 %i, %len\n  br i1 %is_done, label %exit, label %body\nbody:\n  %src_slot = getelementptr inbounds i64, ptr %src_buf, i64 %i\n  %val = load i64, ptr %src_slot, align 8\n  %dst_slot = getelementptr inbounds i64, ptr %buf, i64 %i\n  store i64 %val, ptr %dst_slot, align 8\n  %next_i = add i64 %i, 1\n  br label %loop\nexit:\n  ret ptr %obj\n}\n\n")
+
+        var has_user_for_each = false
+        var has_user_map = false
+        var has_user_filter = false
+        var c_fi = 0usize
+        while c_fi < self.parser.functions.len {
+            let fn_n = self.parser.functions.ptr[c_fi].fn_name.as_ptr() as str
+            if str_eq(fn_n, "for_each") || str_eq(fn_n, "Vec__for_each") { has_user_for_each = true }
+            if str_eq(fn_n, "map") || str_eq(fn_n, "Vec__map") { has_user_map = true }
+            if str_eq(fn_n, "filter") || str_eq(fn_n, "Vec__filter") { has_user_filter = true }
+            c_fi = c_fi + 1usize
+        }
+        if !has_user_for_each {
+            header.push_str("define void @for_each(ptr %vec, ptr %f) {\nentry:\n  %is_null = icmp eq ptr %vec, null\n  br i1 %is_null, label %exit, label %chk_f\nchk_f:\n  %f_null = icmp eq ptr %f, null\n  br i1 %f_null, label %exit, label %load_meta\nload_meta:\n  %buf_slot = getelementptr inbounds i8, ptr %vec, i64 0\n  %buf_ptr = load ptr, ptr %buf_slot, align 8\n  %len_slot = getelementptr inbounds i8, ptr %vec, i64 16\n  %len = load i64, ptr %len_slot, align 8\n  br label %loop\nloop:\n  %i = phi i64 [ 0, %load_meta ], [ %next_i, %body ]\n  %done = icmp uge i64 %i, %len\n  br i1 %done, label %exit, label %body\nbody:\n  %item_slot = getelementptr inbounds i64, ptr %buf_ptr, i64 %i\n  %item = load i64, ptr %item_slot, align 8\n  call void %f(i64 %item)\n  %next_i = add i64 %i, 1\n  br label %loop\nexit:\n  ret void\n}\n\n")
+            header.push_str("define void @Vec__for_each(ptr %vec, ptr %f) {\nentry:\n  call void @for_each(ptr %vec, ptr %f)\n  ret void\n}\n\n")
+        }
+        if !has_user_map {
+            header.push_str("define ptr @map(ptr %vec, ptr %f) {\nentry:\n  %res = call ptr @new()\n  %is_null = icmp eq ptr %vec, null\n  br i1 %is_null, label %exit, label %chk_f\nchk_f:\n  %f_null = icmp eq ptr %f, null\n  br i1 %f_null, label %exit, label %load_meta\nload_meta:\n  %buf_slot = getelementptr inbounds i8, ptr %vec, i64 0\n  %buf_ptr = load ptr, ptr %buf_slot, align 8\n  %len_slot = getelementptr inbounds i8, ptr %vec, i64 16\n  %len = load i64, ptr %len_slot, align 8\n  br label %loop\nloop:\n  %i = phi i64 [ 0, %load_meta ], [ %next_i, %body ]\n  %done = icmp uge i64 %i, %len\n  br i1 %done, label %exit, label %body\nbody:\n  %item_slot = getelementptr inbounds i64, ptr %buf_ptr, i64 %i\n  %item = load i64, ptr %item_slot, align 8\n  %mapped = call i64 %f(i64 %item)\n  call void @push(ptr %res, i64 %mapped)\n  %next_i = add i64 %i, 1\n  br label %loop\nexit:\n  ret ptr %res\n}\n\n")
+            header.push_str("define ptr @Vec__map(ptr %vec, ptr %f) {\nentry:\n  %r = call ptr @map(ptr %vec, ptr %f)\n  ret ptr %r\n}\n\n")
+        }
+        if !has_user_filter {
+            header.push_str("define ptr @filter(ptr %vec, ptr %f) {\nentry:\n  %res = call ptr @new()\n  %is_null = icmp eq ptr %vec, null\n  br i1 %is_null, label %exit, label %chk_f\nchk_f:\n  %f_null = icmp eq ptr %f, null\n  br i1 %f_null, label %exit, label %load_meta\nload_meta:\n  %buf_slot = getelementptr inbounds i8, ptr %vec, i64 0\n  %buf_ptr = load ptr, ptr %buf_slot, align 8\n  %len_slot = getelementptr inbounds i8, ptr %vec, i64 16\n  %len = load i64, ptr %len_slot, align 8\n  br label %loop\nloop:\n  %i = phi i64 [ 0, %load_meta ], [ %next_i, %l_next ]\n  %done = icmp uge i64 %i, %len\n  br i1 %done, label %exit, label %body\nbody:\n  %item_slot = getelementptr inbounds i64, ptr %buf_ptr, i64 %i\n  %item = load i64, ptr %item_slot, align 8\n  %keep = call i64 %f(i64 %item)\n  %keep_b = icmp ne i64 %keep, 0\n  br i1 %keep_b, label %do_push, label %l_next\ndo_push:\n  call void @push(ptr %res, i64 %item)\n  br label %l_next\nl_next:\n  %next_i = add i64 %i, 1\n  br label %loop\nexit:\n  ret ptr %res\n}\n\n")
+            header.push_str("define ptr @Vec__filter(ptr %vec, ptr %f) {\nentry:\n  %r = call ptr @filter(ptr %vec, ptr %f)\n  ret ptr %r\n}\n\n")
+        }
 
         var fn_ir = String.new()
         var f_idx = 0usize

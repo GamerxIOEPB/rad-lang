@@ -121,4 +121,34 @@ impl<T> Vec<T> {
             self.len = 0usize
         }
     }
+
+    pub fn for_each(self, f: fn(T)) {
+        var i = 0usize
+        while i < self.len {
+            f(self.ptr[i])
+            i = i + 1usize
+        }
+    }
+
+    pub fn map<U>(self, f: fn(T) -> U) -> Vec<U> {
+        var res = Vec.new()
+        var i = 0usize
+        while i < self.len {
+            res.push(f(self.ptr[i]))
+            i = i + 1usize
+        }
+        return res
+    }
+
+    pub fn filter(self, f: fn(T) -> bool) -> Vec<T> {
+        var res = Vec.new()
+        var i = 0usize
+        while i < self.len {
+            if f(self.ptr[i]) {
+                res.push(self.ptr[i])
+            }
+            i = i + 1usize
+        }
+        return res
+    }
 }

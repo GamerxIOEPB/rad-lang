@@ -68,4 +68,32 @@ impl Result<T, E> {
         }
         return Option.None;
     }
+
+    pub fn map<U>(res: Result<T, E>, f: fn(T) -> U) -> Result<U, E> {
+        if res.tag == 1i64 {
+            return Result.Ok(f(res.val as T));
+        }
+        return Result.Err(res.val as E);
+    }
+
+    pub fn map_err<F>(res: Result<T, E>, f: fn(E) -> F) -> Result<T, F> {
+        if res.tag == 0i64 {
+            return Result.Err(f(res.val as E));
+        }
+        return Result.Ok(res.val as T);
+    }
+
+    pub fn and_then<U>(res: Result<T, E>, f: fn(T) -> Result<U, E>) -> Result<U, E> {
+        if res.tag == 1i64 {
+            return f(res.val as T);
+        }
+        return Result.Err(res.val as E);
+    }
+
+    pub fn unwrap_or_else(res: Result<T, E>, f: fn(E) -> T) -> T {
+        if res.tag == 1i64 {
+            return res.val as T;
+        }
+        return f(res.val as E);
+    }
 }

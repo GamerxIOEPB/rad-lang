@@ -1,0 +1,9 @@
+pair: 10, rad
+coords: 42, 84
+triple: 1, 2, 3
+mut_pair: 999, 200
+msg: resource missing
+code 200: OK
+code 500: Server Error
+code 123: Unknown
+block_res: 25

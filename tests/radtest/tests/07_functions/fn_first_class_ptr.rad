@@ -1,0 +1,71 @@
+// Test: First-class function pointers and combinators on Option, Result, and Vec
+import core/option;
+import core/result;
+
+fn double_val(x: i64) -> i64 {
+    return x * 2i64;
+}
+
+fn is_even(x: i64) -> bool {
+    return (x % 2i64) == 0i64;
+}
+
+fn fallback_val() -> i64 {
+    return 999i64;
+}
+
+fn print_item(x: i64) {
+    printf("Item: %ld\n", x);
+}
+
+fn apply_op(val: i64, op: fn(i64) -> i64) -> i64 {
+    return op(val);
+}
+
+fn double_opt(x: i64) -> Option<i64> {
+    return Option.Some(x * 2i64);
+}
+
+fn main() -> i32 {
+    // 1. Direct function pointer variable
+    let f: fn(i64) -> i64 = double_val;
+    printf("f(15) = %ld\n", f(15i64));
+
+    // 2. Passing function pointer as parameter
+    let applied = apply_op(50i64, double_val);
+    printf("applied = %ld\n", applied);
+
+    // 3. Option combinators
+    let some_val = Option.Some(10i64);
+    let mapped_opt = some_val.map(double_val);
+    printf("mapped_opt = %ld\n", mapped_opt.unwrap());
+
+    let chained_opt = some_val.and_then(double_opt);
+    printf("chained_opt = %ld\n", chained_opt.unwrap());
+
+    let none_val: Option<i64> = Option.None;
+    let def_val = none_val.unwrap_or_else(fallback_val);
+    printf("def_val = %ld\n", def_val);
+
+    // 4. Result combinators
+    let ok_res = Result.Ok(25i64);
+    let mapped_res = ok_res.map(double_val);
+    printf("mapped_res = %ld\n", mapped_res.unwrap());
+
+    // 5. Vec combinators
+    var nums = Vec.new();
+    nums.push(1i64);
+    nums.push(2i64);
+    nums.push(3i64);
+    nums.push(4i64);
+
+    let doubled_nums = nums.map(double_val);
+    printf("doubled_nums len = %lu, [0]=%ld, [3]=%ld\n", doubled_nums.len, doubled_nums.ptr[0usize], doubled_nums.ptr[3usize]);
+
+    let evens = nums.filter(is_even);
+    printf("evens len = %lu, [0]=%ld, [1]=%ld\n", evens.len, evens.ptr[0usize], evens.ptr[1usize]);
+
+    nums.for_each(print_item);
+
+    return 0;
+}

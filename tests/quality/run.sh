@@ -40,10 +40,6 @@ for source in "$ROOT_DIR"/lib/rad/core/src/*.rad; do
     [[ -f "$source" ]] || continue
     module="$(basename "$source" .rad)"
     [[ "$module" == "lib" ]] && continue
-    if [[ "$module" == "ffi" ]]; then
-        echo "  [SKIP] core/ffi (type aliases are not supported by the current parser)"
-        continue
-    fi
     check_import "core/$module"
 done
 
@@ -99,7 +95,7 @@ while IFS= read -r source; do
     binary="$TMP_DIR/${package}_$name"
     extra_flags=()
     if [[ "$package" == "rad-sqlite" ]]; then
-        if ld.lld -m elf_x86_64 -lsqlite3 -o /dev/null 2>/dev/null; then
+        if [[ -f "$ROOT_DIR/lib/targets/x86_64-unknown-linux-musl/lib/libsqlite3.a" || -f "$HOME/.rad/lib/targets/x86_64-unknown-linux-musl/lib/libsqlite3.a" ]] || ld.lld -m elf_x86_64 -L"$ROOT_DIR/lib/targets/x86_64-unknown-linux-musl/lib" -lsqlite3 -o /dev/null 2>/dev/null; then
             extra_flags=("-lsqlite3")
         else
             if "$RADC" --check "$source" >"$TMP_DIR/$name.compile.log" 2>&1; then

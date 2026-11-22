@@ -1,0 +1,60 @@
+fn get_coords() -> (i64, i64) {
+    return (42, 84);
+}
+
+fn describe_code(code: i64) -> str {
+    return match code {
+        200 => "OK",
+        404 => "Not Found",
+        500 => "Server Error",
+        _ => "Unknown",
+    };
+}
+
+fn main() {
+    // 1. Tuple literal and field access
+    let pair = (10, "rad");
+    println(f"pair: {pair.0}, {pair.1}");
+
+    // 2. Tuple return and destructuring
+    let (cx, cy) = get_coords();
+    println(f"coords: {cx}, {cy}");
+
+    // 3. Tuple 3-element destructuring
+    let (a, b, c) = (1, 2, 3);
+    println(f"triple: {a}, {b}, {c}");
+
+    // 4. Mutable tuple field assignment
+    var mut_pair = (100, 200);
+    mut_pair.0 = 999;
+    println(f"mut_pair: {mut_pair.0}, {mut_pair.1}");
+
+    // 5. Match expression assignment
+    let status = 404;
+    let msg = match status {
+        200 => "success",
+        404 => "resource missing",
+        _ => "other",
+    };
+    println(f"msg: {msg}");
+
+    // 6. Match expression return
+    let d1 = describe_code(200);
+    let d2 = describe_code(500);
+    let d3 = describe_code(123);
+    println(f"code 200: {d1}");
+    println(f"code 500: {d2}");
+    println(f"code 123: {d3}");
+
+    // 7. Match expression with block
+    let num = 2;
+    let block_res = match num {
+        1 => 10,
+        2 => {
+            let temp = 20;
+            temp + 5
+        },
+        _ => 0,
+    };
+    println(f"block_res: {block_res}");
+}

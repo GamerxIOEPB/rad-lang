@@ -55,4 +55,25 @@ impl Option<T> {
             Option.None => { return Result.Err(err); },
         }
     }
+
+    pub fn map<U>(opt: Option<T>, f: fn(T) -> U) -> Option<U> {
+        match opt {
+            Option.Some(val) => { return Option.Some(f(val)); },
+            Option.None => { return Option.None; },
+        }
+    }
+
+    pub fn and_then<U>(opt: Option<T>, f: fn(T) -> Option<U>) -> Option<U> {
+        match opt {
+            Option.Some(val) => { return f(val); },
+            Option.None => { return Option.None; },
+        }
+    }
+
+    pub fn unwrap_or_else(opt: Option<T>, f: fn() -> T) -> T {
+        match opt {
+            Option.Some(val) => { return val; },
+            Option.None => { return f(); },
+        }
+    }
 }

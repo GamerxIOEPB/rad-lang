@@ -21,11 +21,11 @@ on:
       title:
         description: 'Release Title'
         required: false
-        default: 'Rad v0.2.5 — Pure-Rad Ecosystem Sync, Registry CI, and GUI/GPU Toolchain'
+        default: 'Rad v0.2.5 — Type Aliases, Function Pointers, Match Expressions, Tuples & Static SQLite'
       notes:
         description: 'Release Notes / Description'
         required: false
-        default: 'Rad v0.2.5: Comprehensive release introducing pure-Rad package registry CI & integrity validation, official test suites for ecosystem libraries (JSON, KV, Log, SQLite, YAML, TUI), live streaming progress bars in toolchain management, pure-Rad Wayland & X11 desktop GUI and Vulkan hardware compute pipelines, optimized distribution packaging (.tar.xz only), and 100% test pass rate across compiler, stdlib, and ecosystem packages.'
+        default: 'Rad v0.2.5: Comprehensive release introducing Type Aliases (type Alias = TargetType;) unlocking core/ffi, First-Class Function Pointers (fn(...) -> Ret) and FP combinators on Option, Result, and Vec, Match Expression Ergonomics and First-Class Tuple Types with pattern destructuring, static vendored SQLite3 engine with zero test skips, pure-Rad package registry CI & integrity validation, and 100% test pass rate across compiler, stdlib, memory safety, and ecosystem suites.'
 
 concurrency:
   group: ci-release-${{ github.ref }}
@@ -174,12 +174,12 @@ jobs:
           ARGS+=(--tag "$TAG")
 
           TITLE="${{ github.event.inputs.title }}"
-          [ -z "$TITLE" ] && TITLE="Rad v0.2.5 — Pure-Rad Ecosystem Sync, Registry CI, and GUI/GPU Toolchain"
+          [ -z "$TITLE" ] && TITLE="Rad v0.2.5 — Type Aliases, Function Pointers, Match Expressions, Tuples & Static SQLite"
           ARGS+=(--title "$TITLE")
 
           NOTES="${{ github.event.inputs.notes }}"
           if [ -z "$NOTES" ]; then
-            NOTES="Rad v0.2.5: Comprehensive release introducing pure-Rad package registry CI & integrity validation, official test suites for ecosystem libraries (JSON, KV, Log, SQLite, YAML, TUI), live streaming progress bars in toolchain management, pure-Rad Wayland & X11 desktop GUI and Vulkan hardware compute pipelines, optimized distribution packaging (.tar.xz only), and 100% test pass rate across compiler, stdlib, and ecosystem packages."
+            NOTES="Rad v0.2.5: Comprehensive release introducing Type Aliases (type Alias = TargetType;) unlocking core/ffi, First-Class Function Pointers (fn(...) -> Ret) and FP combinators on Option, Result, and Vec, Match Expression Ergonomics and First-Class Tuple Types with pattern destructuring, static vendored SQLite3 engine with zero test skips, pure-Rad package registry CI & integrity validation, and 100% test pass rate across compiler, stdlib, memory safety, and ecosystem suites."
           fi
           ARGS+=(--notes "$NOTES")
           bash scripts/build_distribution.sh "${ARGS[@]}"

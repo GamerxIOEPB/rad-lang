@@ -1,0 +1,30 @@
+// Test: Top-level type aliases and C FFI primitive type definitions
+import core/ffi;
+
+type Integer = i64;
+type Byte = u8;
+type CInt = c_int;
+
+struct Stats {
+    id: Integer,
+    code: CInt,
+}
+
+fn calculate(x: Integer, y: CInt) -> Integer {
+    return x + (y as Integer);
+}
+
+fn main() -> i32 {
+    let a: Integer = 100i64;
+    let b: CInt = 25i32;
+    let total = calculate(a, b);
+    printf("Total: %ld\n", total);
+
+    let s = Stats { id: 42i64, code: 7i32 };
+    printf("Stats ID: %ld, Code: %d\n", s.id, s.code);
+
+    let ch: c_char = 65i8;
+    let sz: size_t = 1024usize;
+    printf("Char: %d, Size: %lu\n", ch as i32, sz);
+    return 0;
+}

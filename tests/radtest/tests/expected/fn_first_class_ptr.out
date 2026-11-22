@@ -1,0 +1,12 @@
+f(15) = 30
+applied = 100
+mapped_opt = 20
+chained_opt = 20
+def_val = 999
+mapped_res = 50
+doubled_nums len = 4, [0]=2, [3]=8
+evens len = 2, [0]=2, [1]=4
+Item: 1
+Item: 2
+Item: 3
+Item: 4

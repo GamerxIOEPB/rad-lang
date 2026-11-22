@@ -59,6 +59,7 @@ const TOK_RESUME: i32 = 79     // resume
 const TOK_WITH: i32 = 80       // with
 const TOK_REQUIRES: i32 = 81   // requires
 const TOK_ENSURES: i32 = 82    // ensures
+const TOK_TYPE: i32 = 83       // type
 
 // Operators
 const TOK_PLUS: i32 = 50      // +
@@ -326,6 +327,8 @@ fn lex_source(src: String) -> Vec<Token> {
                     k = TOK_REQUIRES
                 } else if str_eq(s, "ensures") {
                     k = TOK_ENSURES
+                } else if str_eq(s, "type") {
+                    k = TOK_TYPE
                 }
 
                 let tok_len = (cur_col - tok_col) as i64

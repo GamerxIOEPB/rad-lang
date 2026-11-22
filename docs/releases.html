@@ -20,7 +20,7 @@
             <a href="index.html" class="brand">
                 <span class="brand-logo">⚡</span>
                 <span class="brand-name">Rad</span>
-                <span class="brand-badge">v0.2.3</span>
+                <span class="brand-badge">v0.2.5</span>
             </a>
             <nav class="nav-links">
                 <a href="index.html#features">Features</a>
@@ -45,12 +45,60 @@
                 <p>All official versions of the self-contained Rad toolchain, direct standalone archive downloads, SHA256 checksums, and version-specific install commands.</p>
             </div>
 
-            <!-- Version 0.2.3 (Latest) -->
-            <article class="release-card latest-card" id="v0.2.3">
+            <!-- Version 0.2.5 (Latest) -->
+            <article class="release-card latest-card" id="v0.2.5">
+                <div class="release-card-header">
+                    <div class="release-title-group">
+                        <span class="release-version">Rad v0.2.5</span>
+                        <span class="release-badge-pill release-badge-latest">Latest Stable</span>
+                        <span class="release-date">Released November 22, 2026</span>
+                    </div>
+                    <a href="https://github.com/GamerxIOEPB/rad-lang/releases/tag/0.2.5" target="_blank" rel="noopener" class="github-release-btn">
+                        <span>View on GitHub ↗</span>
+                    </a>
+                </div>
+
+                <div class="release-section-title">Quick Install (v0.2.5)</div>
+                <div class="release-install-box">
+                    <code id="cmd-0-2-5">curl -fsSL https://raw.githubusercontent.com/GamerxIOEPB/rad-lang/main/install.sh | sh -s -- --version 0.2.5</code>
+                    <button class="copy-btn" onclick="copySnippet('cmd-0-2-5', this)">Copy</button>
+                </div>
+
+                <div class="release-highlights">
+                    <div class="release-section-title">Key Improvements & Features</div>
+                    <ul>
+                        <li><strong>Type Aliases (<code>type Alias = TargetType;</code>):</strong> Full compiler and AST support for arbitrary type aliases, unlocking standard C FFI definitions in <code>core/ffi</code> with zero compiler skips.</li>
+                        <li><strong>First-Class Function Pointers (<code>fn(...) -> Ret</code>):</strong> Complete language support for function pointer types in variables, struct fields, and signatures, enabling high-performance indirect calls in LLVM IR.</li>
+                        <li><strong>Functional Combinators on <code>Option</code>, <code>Result</code>, and <code>Vec</code>:</strong> Idiomatic functional chaining: <code>Option.map</code>, <code>Option.and_then</code>, <code>Option.unwrap_or_else</code>, <code>Result.map</code>, <code>Result.map_err</code>, <code>Result.and_then</code>, and built-in vector methods (<code>nums.map(...)</code>, <code>nums.filter(...)</code>, <code>nums.for_each(...)</code>).</li>
+                        <li><strong>Match Expression Ergonomics:</strong> Match constructs can now be directly assigned to variables (<code>let x = match val { ... };</code>) and used in return statements (<code>return match val { ... };</code>).</li>
+                        <li><strong>First-Class Tuple Types & Destructuring:</strong> Comprehensive support for tuple return types (<code>fn f() -> (i64, String)</code>), literals (<code>(10, "rad")</code>), indexed field access (<code>pair.0</code>, <code>pair.1</code>), and pattern destructuring (<code>let (a, b) = expr;</code>).</li>
+                        <li><strong>Vendored Static SQLite Engine (<code>libsqlite3.a</code>):</strong> Pure-Rad static linking for <code>rad-sqlite</code> against musl target libraries without host library dependencies, achieving zero skips across the entire quality and ecosystem test suites.</li>
+                        <li><strong>Zero-Dependency Static-PIE Distribution:</strong> Fully self-contained Linux x86_64 toolchain with 100% test pass rate across compiler, standard library, and ecosystem packages.</li>
+                    </ul>
+                </div>
+
+                <div class="release-assets-box">
+                    <div class="release-section-title">Standalone Package & Checksums</div>
+                    <div class="release-asset-item">
+                        <div class="asset-info">
+                            <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.5/rad-0.2.5-linux-x86_64.tar.xz" class="asset-name">
+                                rad-0.2.5-linux-x86_64.tar.xz (33.0 MB)
+                            </a>
+                            <span class="asset-hash">Official standalone static-PIE Linux x86_64 distribution</span>
+                        </div>
+                        <a href="https://github.com/GamerxIOEPB/rad-lang/releases/download/0.2.5/rad-0.2.5-linux-x86_64.tar.xz" class="btn-download">
+                            Download ↓
+                        </a>
+                    </div>
+                </div>
+            </article>
+
+            <!-- Version 0.2.3 (Previous) -->
+            <article class="release-card" id="v0.2.3">
                 <div class="release-card-header">
                     <div class="release-title-group">
                         <span class="release-version">Rad v0.2.3</span>
-                        <span class="release-badge-pill release-badge-latest">Latest Stable</span>
+                        <span class="release-badge-pill" style="background:var(--border-subtle); color:var(--text-muted);">Previous</span>
                         <span class="release-date">Released November 10, 2026</span>
                     </div>
                     <a href="https://github.com/GamerxIOEPB/rad-lang/releases/tag/0.2.3" target="_blank" rel="noopener" class="github-release-btn">
