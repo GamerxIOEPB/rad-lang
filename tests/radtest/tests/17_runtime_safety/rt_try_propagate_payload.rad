@@ -1,0 +1,31 @@
+fn inner() -> Result<i64, str> {
+    return Result.Err("inner-fail");
+}
+
+fn outer() -> Result<i64, str> {
+    let x = inner()?;
+    return Result.Ok(x + 1);
+}
+
+fn inner_int_err() -> Result<i64, i64> {
+    return Result.Err(404);
+}
+
+fn outer_int_err() -> Result<i64, i64> {
+    let y = inner_int_err()?;
+    return Result.Ok(y + 1);
+}
+
+fn main() {
+    let res = outer();
+    match res {
+        Result.Ok(v) => println(f"BUG: outer succeeded with {v}"),
+        Result.Err(e) => println(f"outer failed with: {e as str}"),
+    }
+
+    let res2 = outer_int_err();
+    match res2 {
+        Result.Ok(v) => println(f"BUG: outer_int_err succeeded with {v}"),
+        Result.Err(code) => println(f"outer_int_err failed with code: {code}"),
+    }
+}

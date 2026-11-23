@@ -1,0 +1,11 @@
+pick3(1) -> one-two-four
+pick3(2) -> one-two-four
+pick3(4) -> one-two-four
+pick3(7) -> other
+pick3(0) -> other
+pick_multi(10) -> 1
+pick_multi(20) -> 1
+pick_multi(30) -> 1
+pick_multi(40) -> 2
+pick_multi(50) -> 2
+pick_multi(60) -> 3

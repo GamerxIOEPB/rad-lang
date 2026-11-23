@@ -1905,6 +1905,93 @@ impl Parser {
         return String.from_str("i64")
     }
 
+    fn collect_or_patterns(self, expr_id: usize, var out: Vec<usize>) {
+        if expr_id == 0usize || expr_id >= self.exprs.len {
+            return
+        }
+        let ep = self.exprs.ptr
+        if ep[expr_id].kind == EXPR_BINARY && ep[expr_id].op == TOK_PIPE {
+            self.collect_or_patterns(ep[expr_id].left, out)
+            self.collect_or_patterns(ep[expr_id].right, out)
+        } else {
+            out.push(expr_id)
+        }
+    }
+
+    fn build_match_alt_cond(var self, alt_expr: usize, target_expr: usize, arm_l: i64, arm_c: i64) -> usize {
+        let pep = self.exprs.ptr
+        if (pep[alt_expr].kind == EXPR_METHOD_CALL && pep[alt_expr].args.len == 0usize && str_eq(pep[alt_expr].str_val.as_ptr() as str, "None")) ||
+           (pep[alt_expr].kind == EXPR_FIELD_ACCESS && str_eq(pep[alt_expr].field_name.as_ptr() as str, "None")) ||
+           (pep[alt_expr].kind == EXPR_IDENT && (str_eq(pep[alt_expr].str_val.as_ptr() as str, "None") || str_eq(pep[alt_expr].str_val.as_ptr() as str, "Option::None"))) {
+            var args_c = Vec.new()
+            args_c.push(target_expr)
+            let call_is_some = self.add_expr(Expr {
+                kind: EXPR_CALL,
+                op: 0,
+                int_val: 0i64,
+                str_val: String.new(),
+                target_type: String.from_str("i64"),
+                left: self.add_expr(Expr {
+                    kind: EXPR_IDENT,
+                    op: 0,
+                    int_val: 0i64,
+                    str_val: String.from_str("__rad_is_some"),
+                    target_type: String.new(),
+                    left: 0usize,
+                    right: 0usize,
+                    args: Vec.new(),
+                    field_name: String.new(),
+                    expr_line: arm_l,
+                    expr_col: arm_c,
+                }),
+                right: 0usize,
+                args: args_c,
+                field_name: String.new(),
+                expr_line: arm_l,
+                expr_col: arm_c,
+            })
+            let zero_expr = self.add_expr(Expr {
+                kind: EXPR_INT,
+                op: 0,
+                int_val: 0i64,
+                str_val: String.from_str("0"),
+                target_type: String.from_str("i64"),
+                left: 0usize,
+                right: 0usize,
+                args: Vec.new(),
+                field_name: String.new(),
+                expr_line: arm_l,
+                expr_col: arm_c,
+            })
+            return self.add_expr(Expr {
+                kind: EXPR_BINARY,
+                op: TOK_EQEQ,
+                int_val: 0i64,
+                str_val: String.new(),
+                target_type: String.from_str("bool"),
+                left: call_is_some,
+                right: zero_expr,
+                args: Vec.new(),
+                field_name: String.new(),
+                expr_line: arm_l,
+                expr_col: arm_c,
+            })
+        }
+        return self.add_expr(Expr {
+            kind: EXPR_BINARY,
+            op: TOK_EQEQ,
+            int_val: 0i64,
+            str_val: String.new(),
+            target_type: String.from_str("bool"),
+            left: target_expr,
+            right: alt_expr,
+            args: Vec.new(),
+            field_name: String.new(),
+            expr_line: arm_l,
+            expr_col: arm_c,
+        })
+    }
+
     fn parse_match_to_stmts(var self, target_var: String, is_return: bool) -> usize {
         let tok_l = self.cur_tok_line()
         let tok_c = self.cur_tok_col()
@@ -2241,19 +2328,37 @@ impl Parser {
                     }
                     cond_id = tuple_cond
                 } else {
-                    cond_id = self.add_expr(Expr {
-                        kind: EXPR_BINARY,
-                        op: TOK_EQEQ,
-                        int_val: 0i64,
-                        str_val: String.new(),
-                        target_type: String.from_str("bool"),
-                        left: target_expr,
-                        right: pat_expr,
-                        args: Vec.new(),
-                        field_name: String.new(),
-                        expr_line: self.cur_tok_line(),
-                        expr_col: self.cur_tok_col(),
-                    })
+                    var or_alts = Vec.new()
+                    self.collect_or_patterns(pat_expr, or_alts)
+                    if or_alts.len > 1usize {
+                        var combined_cond = 0usize
+                        var oi = 0usize
+                        while oi < or_alts.len {
+                            let alt_expr = or_alts.ptr[oi]
+                            let alt_cmp = self.build_match_alt_cond(alt_expr, target_expr, arm_l, arm_c)
+                            if combined_cond == 0usize {
+                                combined_cond = alt_cmp
+                            } else {
+                                combined_cond = self.add_expr(Expr {
+                                    kind: EXPR_BINARY,
+                                    op: TOK_OROR,
+                                    int_val: 0i64,
+                                    str_val: String.new(),
+                                    target_type: String.from_str("bool"),
+                                    left: combined_cond,
+                                    right: alt_cmp,
+                                    args: Vec.new(),
+                                    field_name: String.new(),
+                                    expr_line: arm_l,
+                                    expr_col: arm_c,
+                                })
+                            }
+                            oi = oi + 1usize
+                        }
+                        cond_id = combined_cond
+                    } else {
+                        cond_id = self.build_match_alt_cond(pat_expr, target_expr, arm_l, arm_c)
+                    }
                 }
             }
             if self.peek_kind() == TOK_FAT_ARROW {

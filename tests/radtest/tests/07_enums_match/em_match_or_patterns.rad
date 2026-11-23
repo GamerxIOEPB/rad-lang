@@ -1,0 +1,29 @@
+fn pick3(n: i64) -> str {
+    match n {
+        1 | 2 | 4 => return "one-two-four",
+        _ => return "other",
+    }
+}
+
+fn pick_multi(n: i64) -> i64 {
+    match n {
+        10 | 20 | 30 => return 1,
+        40 | 50 => return 2,
+        _ => return 3,
+    }
+}
+
+fn main() {
+    println(f"pick3(1) -> {pick3(1)}");
+    println(f"pick3(2) -> {pick3(2)}");
+    println(f"pick3(4) -> {pick3(4)}");
+    println(f"pick3(7) -> {pick3(7)}");
+    println(f"pick3(0) -> {pick3(0)}");
+
+    println(f"pick_multi(10) -> {pick_multi(10)}");
+    println(f"pick_multi(20) -> {pick_multi(20)}");
+    println(f"pick_multi(30) -> {pick_multi(30)}");
+    println(f"pick_multi(40) -> {pick_multi(40)}");
+    println(f"pick_multi(50) -> {pick_multi(50)}");
+    println(f"pick_multi(60) -> {pick_multi(60)}");
+}
