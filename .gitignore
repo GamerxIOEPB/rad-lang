@@ -30,3 +30,8 @@ tests/demos/wayland_gui/rad_wayland_demo
 __pycache__/
 *.pyc
 
+# Core dumps
+vgcore*
+core
+core.*
+
