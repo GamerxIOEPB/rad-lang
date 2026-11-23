@@ -54,10 +54,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p "$HOME/.rad" /tmp/rad-bootstrap
-          (gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap || \
-           gh release download 0.2.5 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap || \
+          (gh release download 0.2.5 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap || \
            gh release download 0.2.4 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap || \
-           gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap) || true
+           gh release download 0.2.3 --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap || \
+           gh release download --repo GamerxIOEPB/rad-lang --pattern "rad-*.tar.xz" --dir /tmp/rad-bootstrap) || true
           ARCHIVE="$(find /tmp/rad-bootstrap -maxdepth 1 -type f -name 'rad-*.tar.xz' | head -n 1)"
           if [ -z "$ARCHIVE" ]; then
             echo "error: unable to download a bootstrap Rad release archive" >&2

@@ -1,0 +1,43 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+fn test_try_zero() -> i64 {
+    let r: Result<i64, i64> = Result.Ok(0);
+    let val = r?;
+    return val + 10;
+}
+
+fn main() {
+    // 1. Some(0) vs None
+    let s0 = Option.Some(0);
+    match s0 {
+        Option.Some(v) => println(f"Some(0) matched Some: {v}"),
+        Option.None => println("BUG: Some(0) matched None"),
+    }
+
+    let n = Option.None;
+    match n {
+        Option.Some(v) => println("BUG: None matched Some"),
+        Option.None => println("None matched None"),
+    }
+
+    // 2. Ok(0) try operator
+    let res_try = test_try_zero();
+    println(f"test_try_zero: {res_try}");
+
+    // 3. Option method calls
+    let opt_some = Option.Some(0);
+    let opt_none: Option<i64> = Option.None;
+    println(f"opt_some.is_some: {opt_some.is_some()}");
+    println(f"opt_none.is_none: {opt_none.is_none()}");
+    println(f"opt_none.unwrap_or: {opt_none.unwrap_or(99)}");
+    println(f"opt_some.unwrap_or: {opt_some.unwrap_or(99)}");
+
+    // 4. Address-of comparison on two stack structs with equal contents
+    let p1 = Point { x: 10, y: 20 };
+    let p2 = Point { x: 10, y: 20 };
+    let eq = (&p1 == &p2);
+    println(f"&p1 == &p2: {eq}");
+}
