@@ -1,0 +1,16 @@
+test_opt(Some(0)): some-zero
+test_opt(Some(1)): some-one
+test_opt(Some(-1)): some-neg-one
+test_opt(Some(42)): some-other
+test_opt(None): none
+test_res(Ok(0)): ok-zero
+test_res(Ok(99)): ok-other
+test_res(Err(io)): err-io
+test_res(Err(timeout)): err-timeout
+test_res(Err(not-found)): err-other
+test_or_payload(Ok(10)): ten-or-twenty
+test_or_payload(Ok(20)): ten-or-twenty
+test_or_payload(Ok(30)): other-ok
+test_or_payload(Err(bad)): bad-or-fatal
+test_or_payload(Err(fatal)): bad-or-fatal
+test_or_payload(Err(other)): wildcard

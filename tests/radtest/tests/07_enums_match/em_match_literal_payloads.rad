@@ -1,0 +1,52 @@
+fn test_opt(opt: Option<i64>) -> str {
+    match opt {
+        Option.Some(0) => return "some-zero",
+        Option.Some(1) => return "some-one",
+        Option.Some(-1) => return "some-neg-one",
+        Option.Some(v) => return "some-other",
+        Option.None => return "none",
+    }
+}
+
+fn test_res(res: Result<i64, str>) -> str {
+    match res {
+        Result.Ok(0) => return "ok-zero",
+        Result.Ok(v) => return "ok-other",
+        Result.Err("io") => return "err-io",
+        Result.Err("timeout") => return "err-timeout",
+        Result.Err(e) => return "err-other",
+    }
+}
+
+fn test_or_payload(res: Result<i64, str>) -> str {
+    match res {
+        Result.Ok(10) | Result.Ok(20) => return "ten-or-twenty",
+        Result.Ok(v) => return "other-ok",
+        Result.Err("bad") | Result.Err("fatal") => return "bad-or-fatal",
+        _ => return "wildcard",
+    }
+}
+
+fn main() {
+    // 1. Option literal payloads
+    println(f"test_opt(Some(0)): {test_opt(Option.Some(0))}");
+    println(f"test_opt(Some(1)): {test_opt(Option.Some(1))}");
+    println(f"test_opt(Some(-1)): {test_opt(Option.Some(-1))}");
+    println(f"test_opt(Some(42)): {test_opt(Option.Some(42))}");
+    println(f"test_opt(None): {test_opt(Option.None)}");
+
+    // 2. Result literal payloads
+    println(f"test_res(Ok(0)): {test_res(Result.Ok(0))}");
+    println(f"test_res(Ok(99)): {test_res(Result.Ok(99))}");
+    println(f"test_res(Err(io)): {test_res(Result.Err(\"io\"))}");
+    println(f"test_res(Err(timeout)): {test_res(Result.Err(\"timeout\"))}");
+    println(f"test_res(Err(not-found)): {test_res(Result.Err(\"not-found\"))}");
+
+    // 3. Or-pattern payload arms
+    println(f"test_or_payload(Ok(10)): {test_or_payload(Result.Ok(10))}");
+    println(f"test_or_payload(Ok(20)): {test_or_payload(Result.Ok(20))}");
+    println(f"test_or_payload(Ok(30)): {test_or_payload(Result.Ok(30))}");
+    println(f"test_or_payload(Err(bad)): {test_or_payload(Result.Err(\"bad\"))}");
+    println(f"test_or_payload(Err(fatal)): {test_or_payload(Result.Err(\"fatal\"))}");
+    println(f"test_or_payload(Err(other)): {test_or_payload(Result.Err(\"other\"))}");
+}

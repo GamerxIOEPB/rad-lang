@@ -3096,6 +3096,23 @@ impl Codegen {
                 }
             }
 
+            if ep[left_id].kind == EXPR_CALL {
+                let callee = ep[left_id].left
+                if ep[callee].kind == EXPR_IDENT && str_eq(ep[callee].str_val.as_ptr() as str, "__rad_get_val") {
+                    if is_right_str {
+                        is_left_str = true
+                    }
+                }
+            }
+            if ep[right_id].kind == EXPR_CALL {
+                let callee = ep[right_id].left
+                if ep[callee].kind == EXPR_IDENT && str_eq(ep[callee].str_val.as_ptr() as str, "__rad_get_val") {
+                    if is_left_str {
+                        is_right_str = true
+                    }
+                }
+            }
+
             if (bin_op == TOK_EQEQ || bin_op == TOK_NEQ) && is_left_str && is_right_str {
                 var l_str_reg = left_reg
                 if !self.is_expr_ptr(left_id) {
