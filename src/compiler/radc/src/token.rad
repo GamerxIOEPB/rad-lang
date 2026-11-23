@@ -399,6 +399,34 @@ fn lex_source(src: String) -> Vec<Token> {
                             cur_col = cur_col + 1i64
                         }
                     }
+                    if i < len && (p[i] == 101u8 || p[i] == 69u8) {
+                        var has_exp_digits = false
+                        var exp_peek = i + 1usize
+                        if exp_peek < len && (p[exp_peek] == 43u8 || p[exp_peek] == 45u8) {
+                            exp_peek = exp_peek + 1usize
+                        }
+                        if exp_peek < len && is_digit(p[exp_peek]) {
+                            has_exp_digits = true
+                        }
+                        if has_exp_digits {
+                            is_float = true
+                            num_str.push_byte(p[i])
+                            i = i + 1usize
+                            cur_col = cur_col + 1i64
+                            if i < len && (p[i] == 43u8 || p[i] == 45u8) {
+                                num_str.push_byte(p[i])
+                                i = i + 1usize
+                                cur_col = cur_col + 1i64
+                            }
+                            while i < len && (is_digit(p[i]) || p[i] == 95u8) {
+                                if p[i] != 95u8 {
+                                    num_str.push_byte(p[i])
+                                }
+                                i = i + 1usize
+                                cur_col = cur_col + 1i64
+                            }
+                        }
+                    }
                     if !is_float {
                         tok_val = parse_int(num_str.as_ptr() as str)
                     }

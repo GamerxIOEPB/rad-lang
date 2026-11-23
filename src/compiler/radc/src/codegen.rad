@@ -20,6 +20,7 @@ struct Codegen {
     loop_cond_labels: Vec<i32>,
     loop_end_labels: Vec<i32>,
     loop_drop_stack: Vec<usize>,
+    loop_defer_stack: Vec<usize>,
     current_func_idx: usize,
     active_defers: Vec<usize>,
     active_drops_var: Vec<String>,
@@ -177,7 +178,7 @@ impl Codegen {
         if str_eq(t, "void") {
             return "void"
         }
-        if str_starts_with(t, "(") || str_eq(t, "tuple") || str_starts_with(t, "*") || str_starts_with(t, "&") || str_starts_with(t, "fn") || str_starts_with(t, "str") || str_starts_with(t, "ptr") || str_eq(t, "Vec") || str_eq(t, "String") || str_starts_with(t, "[]") || str_starts_with(t, "var []") || str_starts_with(t, "[") || str_starts_with(t, "dyn ") || self.is_struct_name(t) {
+        if str_starts_with(t, "(") || str_eq(t, "tuple") || str_starts_with(t, "*") || str_starts_with(t, "&") || str_starts_with(t, "fn") || str_starts_with(t, "str") || str_starts_with(t, "ptr") || str_eq(t, "Vec") || str_eq(t, "String") || str_starts_with(t, "[]") || str_starts_with(t, "var []") || str_starts_with(t, "[") || str_starts_with(t, "dyn ") || str_starts_with(t, "Option") || str_starts_with(t, "Result") || self.is_struct_name(t) {
             return "ptr"
         }
         if str_eq(t, "f64") {
@@ -235,9 +236,13 @@ impl Codegen {
                 let init_e = sp[stmt_id].expr_id
                 if init_e != 0usize {
                     if sp[stmt_id].index_expr == 1usize {
-                        var inner_ty = self.get_expr_struct_name(init_e)
-                        if str_len(inner_ty) == 0usize && self.parser.exprs.ptr[init_e].kind == EXPR_IDENT {
-                            inner_ty = self.get_raw_var_type(self.parser.exprs.ptr[init_e].str_val.as_ptr() as str)
+                        var opt_expr_id = init_e
+                        if self.parser.exprs.ptr[init_e].kind == EXPR_CALL && self.parser.exprs.ptr[init_e].args.len > 0usize {
+                            opt_expr_id = self.parser.exprs.ptr[init_e].args.ptr[0usize]
+                        }
+                        var inner_ty = self.get_expr_struct_name(opt_expr_id)
+                        if str_len(inner_ty) == 0usize && self.parser.exprs.ptr[opt_expr_id].kind == EXPR_IDENT {
+                            inner_ty = self.get_raw_var_type(self.parser.exprs.ptr[opt_expr_id].str_val.as_ptr() as str)
                         }
                         if str_starts_with(inner_ty, "Option<") {
                             let plen = str_len(inner_ty)
@@ -267,7 +272,7 @@ impl Codegen {
                                 return inner.as_ptr() as str
                             }
                         }
-                        if str_len(inner_ty) > 0usize {
+                        if str_len(inner_ty) > 0usize && !str_eq(inner_ty, "Option") && !str_eq(inner_ty, "Result") {
                             return inner_ty
                         }
                     }
@@ -275,6 +280,12 @@ impl Codegen {
                         return "f64"
                     }
                     if self.parser.exprs.ptr[init_e].kind == EXPR_ARRAY_LITERAL {
+                        if self.parser.exprs.ptr[init_e].args.len > 0usize {
+                            let first_arg = self.parser.exprs.ptr[init_e].args.ptr[0usize]
+                            if self.is_expr_float(first_arg) {
+                                return "[]f64"
+                            }
+                        }
                         return "[]i64"
                     }
                     if self.parser.exprs.ptr[init_e].kind == EXPR_FSTRING {
@@ -341,6 +352,9 @@ impl Codegen {
                     }
                     if self.parser.exprs.ptr[init_e].kind == EXPR_IDENT {
                         let id_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        if str_eq(id_name, "None") || str_eq(id_name, "Option::None") {
+                            return "Option"
+                        }
                         let raw_t = self.get_raw_var_type(id_name)
                         if str_len(raw_t) > 0usize {
                             return raw_t
@@ -364,6 +378,12 @@ impl Codegen {
                             }
                         }
                         let parent_struct = self.get_expr_struct_name(recv_id)
+                        if str_eq(parent_struct, "Option") {
+                            return "Option"
+                        }
+                        if str_eq(parent_struct, "Result") {
+                            return "Result"
+                        }
                         if str_len(parent_struct) > 0usize {
                             var si = 0usize
                             while si < self.parser.structs.len {
@@ -386,6 +406,80 @@ impl Codegen {
                         let member = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
                         let clean_m = self.clean_type_name(member)
                         let struct_name = self.get_expr_struct_name(recv_id)
+                        if str_starts_with(struct_name, "Option") {
+                            if str_eq(clean_m, "is_some") || str_eq(clean_m, "is_none") {
+                                return "bool"
+                            }
+                            if str_eq(clean_m, "unwrap") || str_eq(clean_m, "unwrap_or") {
+                                if str_starts_with(struct_name, "Option<") {
+                                    let plen = str_len(struct_name)
+                                    if plen > 8usize {
+                                        var inner = String.new()
+                                        let cp = struct_name as *raw u8
+                                        var ci = 7usize
+                                        while ci < plen && cp[ci] != 62u8 {
+                                            inner.push_byte(cp[ci])
+                                            ci = ci + 1usize
+                                        }
+                                        inner.push_byte(0u8)
+                                        return inner.as_ptr() as str
+                                    }
+                                }
+                                return "i64"
+                            }
+                            if str_starts_with(struct_name, "Option<") {
+                                let plen = str_len(struct_name)
+                                if plen > 8usize {
+                                    var inner = String.new()
+                                    let cp = struct_name as *raw u8
+                                    var ci = 7usize
+                                    while ci < plen && cp[ci] != 62u8 {
+                                        inner.push_byte(cp[ci])
+                                        ci = ci + 1usize
+                                    }
+                                    inner.push_byte(0u8)
+                                    let inner_ty = inner.as_ptr() as str
+                                    var m_try = String.new()
+                                    m_try.push_str(inner_ty)
+                                    m_try.push_str("__")
+                                    m_try.push_str(clean_m)
+                                    m_try.push_byte(0u8)
+                                    var fi_opt = 0usize
+                                    while fi_opt < self.parser.functions.len {
+                                        if str_eq(self.parser.functions.ptr[fi_opt].fn_name.as_ptr() as str, m_try.as_ptr() as str) {
+                                            let raw_r = self.parser.functions.ptr[fi_opt].ret_type.as_ptr() as str
+                                            if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                                return raw_r
+                                            }
+                                        }
+                                        fi_opt = fi_opt + 1usize
+                                    }
+                                }
+                            }
+                            return "Option"
+                        }
+                        if str_eq(struct_name, "Result") {
+                            return "Result"
+                        }
+                        if (str_eq(clean_m, "get") || str_eq(clean_m, "pop")) && (str_eq(struct_name, "Vec") || str_starts_with(struct_name, "Vec<")) {
+                            if str_starts_with(struct_name, "Vec<") {
+                                let plen = str_len(struct_name)
+                                if plen > 5usize {
+                                    var opt_t = String.new()
+                                    opt_t.push_str("Option<")
+                                    let cp = struct_name as *raw u8
+                                    var ci = 4usize
+                                    while ci < plen && cp[ci] != 62u8 {
+                                        opt_t.push_byte(cp[ci])
+                                        ci = ci + 1usize
+                                    }
+                                    opt_t.push_byte(62u8) // '>'
+                                    opt_t.push_byte(0u8)
+                                    return opt_t.as_ptr() as str
+                                }
+                            }
+                            return "Option"
+                        }
                         if str_len(struct_name) > 0usize {
                             if str_eq(clean_m, "new") {
                                 return struct_name
@@ -462,7 +556,11 @@ impl Codegen {
                         }
                         if self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
                             let rname = self.parser.exprs.ptr[recv_id].str_val.as_ptr() as str
-                            if str_eq(rname, "Vec") {
+                            let rty = self.get_raw_var_type(rname)
+                            if str_eq(rname, "Vec") || str_starts_with(rty, "Vec") {
+                                if str_eq(clean_m, "get") || str_eq(clean_m, "pop") {
+                                    return "Option"
+                                }
                                 return "Vec"
                             }
                             if str_eq(rname, "String") {
@@ -515,6 +613,12 @@ impl Codegen {
                         let callee = self.parser.exprs.ptr[init_e].left
                         if self.parser.exprs.ptr[callee].kind == EXPR_IDENT {
                             let cname = self.parser.exprs.ptr[callee].str_val.as_ptr() as str
+                            if str_eq(cname, "Some") || str_eq(cname, "None") {
+                                return "Option"
+                            }
+                            if str_eq(cname, "Ok") || str_eq(cname, "Err") {
+                                return "Result"
+                            }
                             if str_eq(cname, "input") {
                                 return "String"
                             }
@@ -654,6 +758,14 @@ impl Codegen {
                 let coll_id = sp[stmt_id].expr_id
                 if coll_id != 0usize && coll_id < self.parser.exprs.len {
                     let ep = self.parser.exprs.ptr
+                    if ep[coll_id].kind == EXPR_ARRAY_LITERAL {
+                        if ep[coll_id].args.len > 0usize {
+                            let first_arg = ep[coll_id].args.ptr[0usize]
+                            if self.is_expr_float(first_arg) {
+                                return "f64"
+                            }
+                        }
+                    }
                     if ep[coll_id].kind == EXPR_IDENT {
                         let cname = ep[coll_id].str_val.as_ptr() as str
                         let raw_coll_ty = self.get_raw_var_type(cname)
@@ -899,6 +1011,9 @@ impl Codegen {
             let recv_id = ep[expr_id].left
             let parent_struct = self.get_expr_struct_name(recv_id)
             let fname = ep[expr_id].field_name.as_ptr() as str
+            if str_eq(parent_struct, "Option") && str_eq(fname, "None") {
+                return "Option"
+            }
             if str_starts_with(parent_struct, "Vec<") && str_eq(fname, "ptr") {
                 return ""
             }
@@ -930,6 +1045,23 @@ impl Codegen {
             if str_len(parent_struct) == 0usize && ep[recv_id].kind == EXPR_IDENT {
                 parent_struct = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
             }
+            if str_starts_with(parent_struct, "Option<") {
+                let clean_m = self.clean_type_name(member)
+                if !str_eq(clean_m, "unwrap") && !str_eq(clean_m, "unwrap_or") && !str_eq(clean_m, "is_some") && !str_eq(clean_m, "is_none") && !str_eq(clean_m, "ok_or") && !str_eq(clean_m, "expect") {
+                    let plen = str_len(parent_struct)
+                    if plen > 8usize {
+                        var inner = String.new()
+                        let cp = parent_struct as *raw u8
+                        var ci = 7usize
+                        while ci < plen && cp[ci] != 62u8 {
+                            inner.push_byte(cp[ci])
+                            ci = ci + 1usize
+                        }
+                        inner.push_byte(0u8)
+                        parent_struct = inner.as_ptr() as str
+                    }
+                }
+            }
             if str_starts_with(parent_struct, "dyn ") {
                 let trait_name = (parent_struct as usize + 4usize) as str
                 var ti = 0usize
@@ -946,8 +1078,27 @@ impl Codegen {
                     ti = ti + 1usize
                 }
             }
+            let clean_m = self.clean_type_name(member)
+            if (str_eq(clean_m, "get") || str_eq(clean_m, "pop")) && (str_eq(parent_struct, "Vec") || str_starts_with(parent_struct, "Vec<")) {
+                if str_starts_with(parent_struct, "Vec<") {
+                    let plen = str_len(parent_struct)
+                    if plen > 5usize {
+                        var opt_t = String.new()
+                        opt_t.push_str("Option<")
+                        let cp = parent_struct as *raw u8
+                        var ci = 4usize
+                        while ci < plen && cp[ci] != 62u8 {
+                            opt_t.push_byte(cp[ci])
+                            ci = ci + 1usize
+                        }
+                        opt_t.push_byte(62u8) // '>'
+                        opt_t.push_byte(0u8)
+                        return opt_t.as_ptr() as str
+                    }
+                }
+                return "Option"
+            }
             if str_len(parent_struct) > 0usize {
-                let clean_m = self.clean_type_name(member)
                 var mangled = String.new()
                 mangled.push_str(parent_struct)
                 mangled.push_str("__")
@@ -990,6 +1141,12 @@ impl Codegen {
             let callee_id = ep[expr_id].left
             if ep[callee_id].kind == EXPR_IDENT {
                 let cname = ep[callee_id].str_val.as_ptr() as str
+                if str_eq(cname, "Some") || str_eq(cname, "None") {
+                    return "Option"
+                }
+                if str_eq(cname, "Ok") || str_eq(cname, "Err") {
+                    return "Result"
+                }
                 if self.is_struct_name(cname) {
                     return cname
                 }
@@ -1339,6 +1496,9 @@ impl Codegen {
             }
             fi = fi + 1usize
         }
+        if str_eq(fname, "__rad_is_some") || str_eq(fname, "__rad_get_val") || str_starts_with(fname, "Option__") || str_starts_with(fname, "Result__") {
+            if param_idx == 0usize { return "ptr" }
+        }
         if str_eq(fname, "puts") || str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "system") || str_eq(fname, "free") || str_eq(fname, "fclose") || str_eq(fname, "ftell") || str_eq(fname, "getenv") || (str_eq(fname, "printf") && param_idx == 0usize) || str_eq(fname, "atexit") || str_eq(fname, "panic") || str_eq(fname, "__rad_register_panic_hook") {
             return "ptr"
         }
@@ -1386,8 +1546,11 @@ impl Codegen {
             }
             fi = fi + 1usize
         }
-        if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") || str_eq(fname, "__rad_get_terminal_guard") || str_eq(fname, "map") || str_eq(fname, "Vec__map") || str_eq(fname, "filter") || str_eq(fname, "Vec__filter") {
+        if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") || str_eq(fname, "__rad_get_terminal_guard") || str_eq(fname, "map") || str_eq(fname, "Vec__map") || str_eq(fname, "filter") || str_eq(fname, "Vec__filter") || str_eq(fname, "Some") || str_eq(fname, "None") || str_eq(fname, "Ok") || str_eq(fname, "Err") || str_eq(fname, "get") || str_eq(fname, "Vec__get") || str_eq(fname, "pop") || str_eq(fname, "Vec__pop") {
             return "ptr"
+        }
+        if str_eq(fname, "__rad_is_some") || str_eq(fname, "__rad_get_val") {
+            return "i64"
         }
         if str_starts_with(fname, "__rad_") || str_eq(fname, "panic") || str_eq(fname, "eprintln") || str_eq(fname, "for_each") || str_eq(fname, "Vec__for_each") {
             return "void"
@@ -1679,6 +1842,9 @@ impl Codegen {
         }
         if k == EXPR_IDENT {
             let vname = ep[id].str_val.as_ptr() as str
+            if str_eq(vname, "None") || str_eq(vname, "Option::None") {
+                return true
+            }
             var is_alloc = false
             var ai = 0usize
             while ai < self.allocated_vars.len {
@@ -1710,7 +1876,45 @@ impl Codegen {
             let target_ty = self.emit_llvm_type(ep[id].target_type.as_ptr() as str)
             return str_eq(target_ty, "ptr")
         }
-        if k == EXPR_TRY || k == EXPR_AWAIT {
+        if k == EXPR_TRY {
+            let left_id = ep[id].left
+            var inner_ty = self.get_expr_struct_name(left_id)
+            if str_len(inner_ty) == 0usize && ep[left_id].kind == EXPR_IDENT {
+                inner_ty = self.get_raw_var_type(ep[left_id].str_val.as_ptr() as str)
+            }
+            if str_starts_with(inner_ty, "Option<") {
+                let plen = str_len(inner_ty)
+                if plen > 8usize {
+                    var inner = String.new()
+                    let cp = inner_ty as *raw u8
+                    var ci = 7usize
+                    while ci < plen && cp[ci] != 62u8 {
+                        inner.push_byte(cp[ci])
+                        ci = ci + 1usize
+                    }
+                    inner.push_byte(0u8)
+                    let elem_t = inner.as_ptr() as str
+                    return str_eq(self.emit_llvm_type(elem_t), "ptr")
+                }
+            }
+            if str_starts_with(inner_ty, "Result<") {
+                let plen = str_len(inner_ty)
+                if plen > 8usize {
+                    var inner = String.new()
+                    let cp = inner_ty as *raw u8
+                    var ci = 7usize
+                    while ci < plen && cp[ci] != 44u8 && cp[ci] != 62u8 {
+                        inner.push_byte(cp[ci])
+                        ci = ci + 1usize
+                    }
+                    inner.push_byte(0u8)
+                    let elem_t = inner.as_ptr() as str
+                    return str_eq(self.emit_llvm_type(elem_t), "ptr")
+                }
+            }
+            return false
+        }
+        if k == EXPR_AWAIT {
             return self.is_expr_ptr(ep[id].left)
         }
         if k == EXPR_CALL {
@@ -1818,7 +2022,7 @@ impl Codegen {
                 }
                 if str_len(raw_ty) > 0usize {
                     let base_ty = self.clean_type_name(raw_ty)
-                    if str_eq(base_ty, "Vec") && (str_eq(clean_m, "map") || str_eq(clean_m, "filter")) {
+                    if str_eq(base_ty, "Vec") && (str_eq(clean_m, "map") || str_eq(clean_m, "filter") || str_eq(clean_m, "get") || str_eq(clean_m, "pop")) {
                         return true
                     }
                     if str_eq(base_ty, "Vec") && str_eq(clean_m, "for_each") {
@@ -1867,7 +2071,14 @@ impl Codegen {
             }
         }
         if k == EXPR_FIELD_ACCESS {
+            let recv_id = ep[id].left
             let fname = ep[id].field_name.as_ptr() as str
+            if ep[recv_id].kind == EXPR_IDENT {
+                let rec_name = ep[recv_id].str_val.as_ptr() as str
+                if str_eq(rec_name, "Option") && str_eq(fname, "None") {
+                    return true
+                }
+            }
             if str_eq(fname, "ptr") {
                 return true
             }
@@ -2281,9 +2492,28 @@ impl Codegen {
             self.ir.push_str(int_to_str(res).as_ptr() as str)
             self.ir.push_str(" = fadd double 0.0, ")
             let f_raw = ep[expr_id].str_val.as_ptr() as str
-            self.ir.push_str(f_raw)
-            if !str_contains(f_raw, ".") {
-                self.ir.push_str(".0")
+            if str_contains(f_raw, "e") || str_contains(f_raw, "E") {
+                if !str_contains(f_raw, ".") {
+                    let flen = str_len(f_raw)
+                    let fp = f_raw as *raw u8
+                    var ei = 0usize
+                    while ei < flen && fp[ei] != 101u8 && fp[ei] != 69u8 {
+                        self.ir.push_byte(fp[ei])
+                        ei = ei + 1usize
+                    }
+                    self.ir.push_str(".0")
+                    while ei < flen {
+                        self.ir.push_byte(fp[ei])
+                        ei = ei + 1usize
+                    }
+                } else {
+                    self.ir.push_str(f_raw)
+                }
+            } else {
+                self.ir.push_str(f_raw)
+                if !str_contains(f_raw, ".") {
+                    self.ir.push_str(".0")
+                }
             }
             self.ir.push_str("\n")
             return res
@@ -2464,6 +2694,13 @@ impl Codegen {
         }
         if k == EXPR_IDENT {
             let vname = ep[expr_id].str_val.as_ptr() as str
+            if str_eq(vname, "None") || str_eq(vname, "Option::None") {
+                let call_none = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(call_none).as_ptr() as str)
+                self.ir.push_str(" = call ptr @None()\n")
+                return call_none
+            }
 
             var ci = 0usize
             var is_const = false
@@ -2652,14 +2889,127 @@ impl Codegen {
                 }
             }
 
-            if (bin_op == TOK_EQEQ || bin_op == TOK_NEQ) && self.is_expr_ptr(left_id) && self.is_expr_ptr(right_id) {
+            var is_left_str = self.is_expr_string_obj(left_id)
+            var is_right_str = self.is_expr_string_obj(right_id)
+            if ep[left_id].kind == EXPR_STR || ep[left_id].kind == EXPR_FSTRING {
+                is_left_str = true
+            }
+            if ep[right_id].kind == EXPR_STR || ep[right_id].kind == EXPR_FSTRING {
+                is_right_str = true
+            }
+            if ep[left_id].kind == EXPR_CAST {
+                let tgt = ep[left_id].target_type.as_ptr() as str
+                if str_eq(tgt, "str") || str_eq(tgt, "String") {
+                    is_left_str = true
+                }
+            }
+            if ep[right_id].kind == EXPR_CAST {
+                let tgt = ep[right_id].target_type.as_ptr() as str
+                if str_eq(tgt, "str") || str_eq(tgt, "String") {
+                    is_right_str = true
+                }
+            }
+            if ep[left_id].kind == EXPR_IDENT {
+                let rty = self.get_raw_var_type(ep[left_id].str_val.as_ptr() as str)
+                if str_eq(rty, "str") || str_eq(rty, "String") {
+                    is_left_str = true
+                }
+            }
+            if ep[right_id].kind == EXPR_IDENT {
+                let rty = self.get_raw_var_type(ep[right_id].str_val.as_ptr() as str)
+                if str_eq(rty, "str") || str_eq(rty, "String") {
+                    is_right_str = true
+                }
+            }
+            if ep[left_id].kind == EXPR_FIELD_ACCESS {
+                let s_type = self.get_expr_struct_name(ep[left_id].left)
+                let fname = ep[left_id].field_name.as_ptr() as str
+                var si = 0usize
+                while si < self.parser.structs.len {
+                    let sdef = self.parser.structs.ptr[si]
+                    if self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                        var fi = 0usize
+                        while fi < sdef.field_names.len {
+                            if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                                if str_eq(fty, "str") || str_eq(fty, "String") {
+                                    is_left_str = true
+                                }
+                                break
+                            }
+                            fi = fi + 1usize
+                        }
+                        break
+                    }
+                    si = si + 1usize
+                }
+            }
+            if ep[right_id].kind == EXPR_FIELD_ACCESS {
+                let s_type = self.get_expr_struct_name(ep[right_id].left)
+                let fname = ep[right_id].field_name.as_ptr() as str
+                var si = 0usize
+                while si < self.parser.structs.len {
+                    let sdef = self.parser.structs.ptr[si]
+                    if self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                        var fi = 0usize
+                        while fi < sdef.field_names.len {
+                            if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                                if str_eq(fty, "str") || str_eq(fty, "String") {
+                                    is_right_str = true
+                                }
+                                break
+                            }
+                            fi = fi + 1usize
+                        }
+                        break
+                    }
+                    si = si + 1usize
+                }
+            }
+            if ep[left_id].kind == EXPR_METHOD_CALL {
+                let mname = ep[left_id].str_val.as_ptr() as str
+                let clean_m = self.clean_type_name(mname)
+                if str_eq(clean_m, "as_str") || str_eq(clean_m, "to_string") {
+                    is_left_str = true
+                }
+            }
+            if ep[right_id].kind == EXPR_METHOD_CALL {
+                let mname = ep[right_id].str_val.as_ptr() as str
+                let clean_m = self.clean_type_name(mname)
+                if str_eq(clean_m, "as_str") || str_eq(clean_m, "to_string") {
+                    is_right_str = true
+                }
+            }
+
+            if (bin_op == TOK_EQEQ || bin_op == TOK_NEQ) && is_left_str && is_right_str {
+                var l_str_reg = left_reg
+                if !self.is_expr_ptr(left_id) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = inttoptr i64 %")
+                    self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                    self.ir.push_str(" to ptr\n")
+                    l_str_reg = cvt
+                }
+                var r_str_reg = right_reg
+                if !self.is_expr_ptr(right_id) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = inttoptr i64 %")
+                    self.ir.push_str(int_to_str(right_reg).as_ptr() as str)
+                    self.ir.push_str(" to ptr\n")
+                    r_str_reg = cvt
+                }
                 let cmp_reg = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(cmp_reg).as_ptr() as str)
                 self.ir.push_str(" = call i32 @strcmp(ptr %")
-                self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                self.ir.push_str(int_to_str(l_str_reg).as_ptr() as str)
                 self.ir.push_str(", ptr %")
-                self.ir.push_str(int_to_str(right_reg).as_ptr() as str)
+                self.ir.push_str(int_to_str(r_str_reg).as_ptr() as str)
                 self.ir.push_str(")\n")
                 let test_reg = self.alloc_ssa()
                 self.ir.push_str("  %")
@@ -2678,26 +3028,74 @@ impl Codegen {
                 self.ir.push_str(int_to_str(test_reg).as_ptr() as str)
                 self.ir.push_str(" to i64\n")
                 return res
+            } else if (bin_op == TOK_EQEQ || bin_op == TOK_NEQ) && self.is_expr_ptr(left_id) && self.is_expr_ptr(right_id) {
+                let test_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(test_reg).as_ptr() as str)
+                if bin_op == TOK_EQEQ {
+                    self.ir.push_str(" = icmp eq ptr %")
+                } else {
+                    self.ir.push_str(" = icmp ne ptr %")
+                }
+                self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                self.ir.push_str(", %")
+                self.ir.push_str(int_to_str(right_reg).as_ptr() as str)
+                self.ir.push_str("\n")
+                let res = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(res).as_ptr() as str)
+                self.ir.push_str(" = zext i1 %")
+                self.ir.push_str(int_to_str(test_reg).as_ptr() as str)
+                self.ir.push_str(" to i64\n")
+                return res
             }
 
             if bin_op == TOK_EQEQ || bin_op == TOK_NEQ || bin_op == TOK_LT || bin_op == TOK_LEQ || bin_op == TOK_GT || bin_op == TOK_GEQ {
                 if self.is_expr_ptr(left_id) {
-                    let cvt = self.alloc_ssa()
-                    self.ir.push_str("  %")
-                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
-                    self.ir.push_str(" = ptrtoint ptr %")
-                    self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
-                    self.ir.push_str(" to i64\n")
-                    left_reg = cvt
+                    var l_ty = self.get_expr_struct_name(left_id)
+                    if str_len(l_ty) == 0usize && ep[left_id].kind == EXPR_IDENT {
+                        l_ty = self.get_raw_var_type(ep[left_id].str_val.as_ptr() as str)
+                    }
+                    if str_eq(l_ty, "Option") || str_starts_with(l_ty, "Option<") || str_eq(l_ty, "Result") || str_starts_with(l_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        left_reg = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        left_reg = cvt
+                    }
                 }
                 if self.is_expr_ptr(right_id) {
-                    let cvt = self.alloc_ssa()
-                    self.ir.push_str("  %")
-                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
-                    self.ir.push_str(" = ptrtoint ptr %")
-                    self.ir.push_str(int_to_str(right_reg).as_ptr() as str)
-                    self.ir.push_str(" to i64\n")
-                    right_reg = cvt
+                    var r_ty = self.get_expr_struct_name(right_id)
+                    if str_len(r_ty) == 0usize && ep[right_id].kind == EXPR_IDENT {
+                        r_ty = self.get_raw_var_type(ep[right_id].str_val.as_ptr() as str)
+                    }
+                    if str_eq(r_ty, "Option") || str_starts_with(r_ty, "Option<") || str_eq(r_ty, "Result") || str_starts_with(r_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(right_reg).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        right_reg = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(right_reg).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        right_reg = cvt
+                    }
                 }
                 let cmp_reg = self.alloc_ssa()
                 self.ir.push_str("  %")
@@ -2754,17 +3152,40 @@ impl Codegen {
                     self.ir.push_str(":\n")
                 }
 
+                if bin_op == TOK_SHL || bin_op == TOK_SHR {
+                    let mask_reg = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(mask_reg).as_ptr() as str)
+                    self.ir.push_str(" = and i64 %")
+                    self.ir.push_str(int_to_str(right_reg).as_ptr() as str)
+                    self.ir.push_str(", 63\n")
+                    let res = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(res).as_ptr() as str)
+                    self.ir.push_str(" = ")
+                    if bin_op == TOK_SHL {
+                        self.ir.push_str("shl i64 %")
+                    } else {
+                        self.ir.push_str("ashr i64 %")
+                    }
+                    self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                    self.ir.push_str(", %")
+                    self.ir.push_str(int_to_str(mask_reg).as_ptr() as str)
+                    self.ir.push_str("\n")
+                    return res
+                }
+
                 let res = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(res).as_ptr() as str)
                 self.ir.push_str(" = ")
 
                 if bin_op == TOK_PLUS {
-                    self.ir.push_str("add nsw i64 %")
+                    self.ir.push_str("add i64 %")
                 } else if bin_op == TOK_MINUS {
-                    self.ir.push_str("sub nsw i64 %")
+                    self.ir.push_str("sub i64 %")
                 } else if bin_op == TOK_STAR {
-                    self.ir.push_str("mul nsw i64 %")
+                    self.ir.push_str("mul i64 %")
                 } else if bin_op == TOK_SLASH {
                     self.ir.push_str("sdiv i64 %")
                 } else if bin_op == TOK_PERCENT {
@@ -2775,10 +3196,6 @@ impl Codegen {
                     self.ir.push_str("or i64 %")
                 } else if bin_op == TOK_CARET {
                     self.ir.push_str("xor i64 %")
-                } else if bin_op == TOK_SHL {
-                    self.ir.push_str("shl i64 %")
-                } else if bin_op == TOK_SHR {
-                    self.ir.push_str("ashr i64 %")
                 }
 
                 self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
@@ -3268,14 +3685,43 @@ impl Codegen {
                     self.emit_str(int_to_str(r).as_ptr() as str)
                     self.emit_str(" to ptr\n")
                     r = cvt
-                } else if str_eq(pty, "i64") && a_is_ptr {
-                    let cvt = self.alloc_ssa()
-                    self.emit_str("  %")
-                    self.emit_str(int_to_str(cvt).as_ptr() as str)
-                    self.emit_str(" = ptrtoint ptr %")
-                    self.emit_str(int_to_str(r).as_ptr() as str)
-                    self.emit_str(" to i64\n")
-                    r = cvt
+                } else if (str_eq(pty, "i64") || str_eq(pty, "i32")) && a_is_ptr {
+                    var is_opt = false
+                    if !str_starts_with(callee_name, "__rad_") && !str_starts_with(callee_name, "Option__") && !str_starts_with(callee_name, "Result__") {
+                        var a_opt_ty = self.get_expr_struct_name(a_expr)
+                        if str_len(a_opt_ty) == 0usize && self.parser.exprs.ptr[a_expr].kind == EXPR_IDENT {
+                            a_opt_ty = self.get_raw_var_type(self.parser.exprs.ptr[a_expr].str_val.as_ptr() as str)
+                        }
+                        if str_eq(a_opt_ty, "Option") || str_starts_with(a_opt_ty, "Option<") || str_eq(a_opt_ty, "Result") || str_starts_with(a_opt_ty, "Result<") {
+                            is_opt = true
+                        }
+                    }
+                    if is_opt {
+                        let unwrapped = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.emit_str(" = call i64 @__rad_get_val(ptr %")
+                        self.emit_str(int_to_str(r).as_ptr() as str)
+                        self.emit_str(")\n")
+                        r = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = ptrtoint ptr %")
+                        self.emit_str(int_to_str(r).as_ptr() as str)
+                        self.emit_str(" to i64\n")
+                        r = cvt
+                    }
+                    if str_eq(pty, "i32") {
+                        let tr = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(tr).as_ptr() as str)
+                        self.emit_str(" = trunc i64 %")
+                        self.emit_str(int_to_str(r).as_ptr() as str)
+                        self.emit_str(" to i32\n")
+                        r = tr
+                    }
                 } else if str_eq(pty, "i32") && !a_is_ptr {
                     let cvt = self.alloc_ssa()
                     self.emit_str("  %")
@@ -3756,6 +4202,24 @@ impl Codegen {
                         raw_ty = vty
                     }
                 }
+                var is_option_auto_unwrap = false
+                if str_starts_with(raw_ty, "Option<") {
+                    if !str_eq(clean_member, "unwrap") && !str_eq(clean_member, "unwrap_or") && !str_eq(clean_member, "is_some") && !str_eq(clean_member, "is_none") && !str_eq(clean_member, "ok_or") && !str_eq(clean_member, "expect") && !str_eq(clean_member, "map") && !str_eq(clean_member, "and_then") && !str_eq(clean_member, "unwrap_or_else") {
+                        let plen = str_len(raw_ty)
+                        if plen > 8usize {
+                            var inner = String.new()
+                            let cp = raw_ty as *raw u8
+                            var ci = 7usize
+                            while ci < plen && cp[ci] != 62u8 {
+                                inner.push_byte(cp[ci])
+                                ci = ci + 1usize
+                            }
+                            inner.push_byte(0u8)
+                            raw_ty = inner.as_ptr() as str
+                            is_option_auto_unwrap = true
+                        }
+                    }
+                }
                 if str_starts_with(raw_ty, "dyn ") {
                     let trait_name = (raw_ty as usize + 4usize) as str
                     var tr_idx = 0usize
@@ -3937,6 +4401,26 @@ impl Codegen {
                         }
                     }
                 }
+                if !found_mangled && str_eq(clean_raw, "Option") {
+                    if str_eq(clean_member, "unwrap") || str_eq(clean_member, "unwrap_or") || str_eq(clean_member, "is_some") || str_eq(clean_member, "is_none") || str_eq(clean_member, "ok_or") || str_eq(clean_member, "expect") || str_eq(clean_member, "map") || str_eq(clean_member, "and_then") || str_eq(clean_member, "unwrap_or_else") {
+                        var mangled_opt = String.new()
+                        mangled_opt.push_str("Option__")
+                        mangled_opt.push_str(clean_member)
+                        mangled_opt.push_byte(0u8)
+                        callee_name = mangled_opt.as_ptr() as str
+                        found_mangled = true
+                    }
+                }
+                if !found_mangled && str_eq(clean_raw, "Result") {
+                    if str_eq(clean_member, "unwrap") || str_eq(clean_member, "unwrap_or") || str_eq(clean_member, "is_ok") || str_eq(clean_member, "is_err") || str_eq(clean_member, "expect") || str_eq(clean_member, "unwrap_err") || str_eq(clean_member, "ok") || str_eq(clean_member, "err") || str_eq(clean_member, "map") || str_eq(clean_member, "and_then") || str_eq(clean_member, "unwrap_or_else") {
+                        var mangled_res = String.new()
+                        mangled_res.push_str("Result__")
+                        mangled_res.push_str(clean_member)
+                        mangled_res.push_byte(0u8)
+                        callee_name = mangled_res.as_ptr() as str
+                        found_mangled = true
+                    }
+                }
                 if !found_mangled {
                     var standalone_found = false
                     var fi = 0usize
@@ -3977,9 +4461,24 @@ impl Codegen {
             var arg_is_ptrs = Vec.new()
             if !is_static {
                 var r_reg = self.emit_expr(recv_id)
+                if is_option_auto_unwrap {
+                    let unwrapped = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(unwrapped).as_ptr() as str)
+                    self.emit_str(" = call i64 @__rad_get_val(ptr %")
+                    self.emit_str(int_to_str(r_reg).as_ptr() as str)
+                    self.emit_str(")\n")
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = inttoptr i64 %")
+                    self.emit_str(int_to_str(unwrapped).as_ptr() as str)
+                    self.emit_str(" to ptr\n")
+                    r_reg = cvt
+                }
                 let p0_ty = self.get_func_param_type(callee_name, 0usize)
                 if str_eq(p0_ty, "i64") {
-                    if self.is_expr_ptr(recv_id) {
+                    if self.is_expr_ptr(recv_id) && !is_option_auto_unwrap {
                         let cvt = self.alloc_ssa()
                         self.emit_str("  %")
                         self.emit_str(int_to_str(cvt).as_ptr() as str)
@@ -3991,7 +4490,7 @@ impl Codegen {
                     arg_regs.push(r_reg)
                     arg_is_ptrs.push(0)
                 } else {
-                    if !self.is_expr_ptr(recv_id) {
+                    if !self.is_expr_ptr(recv_id) && !is_option_auto_unwrap {
                         let cvt = self.alloc_ssa()
                         self.emit_str("  %")
                         self.emit_str(int_to_str(cvt).as_ptr() as str)
@@ -4047,6 +4546,7 @@ impl Codegen {
                 var cur_r = arg_regs.ptr[j]
                 let is_p = arg_is_ptrs.ptr[j]
                 var is_flt = false
+                var cur_a_id = 0usize
                 if !is_static && j == 0usize {
                     if str_len(pty) == 0usize {
                         pty = "ptr"
@@ -4054,8 +4554,8 @@ impl Codegen {
                 } else {
                     var ai = j
                     if !is_static { ai = j - 1usize }
-                    let a_id = ep[expr_id].args.ptr[ai]
-                    is_flt = self.is_expr_float(a_id)
+                    cur_a_id = ep[expr_id].args.ptr[ai]
+                    is_flt = self.is_expr_float(cur_a_id)
                 }
 
                 if str_eq(pty, "float") {
@@ -4115,14 +4615,47 @@ impl Codegen {
                     self.emit_str(" to ptr\n")
                     cur_r = cvt
                 } else if (str_eq(pty, "i64") || str_eq(pty, "i32")) && is_p == 1 {
-                    let cvt = self.alloc_ssa()
-                    self.emit_str("  %")
-                    self.emit_str(int_to_str(cvt).as_ptr() as str)
-                    self.emit_str(" = ptrtoint ptr %")
-                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
-                    self.emit_str(" to i64\n")
-                    cur_r = cvt
-                    pty = "i64"
+                    var is_opt = false
+                    if !str_starts_with(callee_name, "__rad_") && !str_starts_with(callee_name, "Option__") && !str_starts_with(callee_name, "Result__") {
+                        if (!is_static && j > 0usize) || (is_static && j < ep[expr_id].args.len) {
+                            var a_opt_ty = self.get_expr_struct_name(cur_a_id)
+                            if str_len(a_opt_ty) == 0usize && ep[cur_a_id].kind == EXPR_IDENT {
+                                a_opt_ty = self.get_raw_var_type(ep[cur_a_id].str_val.as_ptr() as str)
+                            }
+                            if str_eq(a_opt_ty, "Option") || str_starts_with(a_opt_ty, "Option<") || str_eq(a_opt_ty, "Result") || str_starts_with(a_opt_ty, "Result<") {
+                                is_opt = true
+                            }
+                        }
+                    }
+                    if is_opt {
+                        let unwrapped = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.emit_str(" = call i64 @__rad_get_val(ptr %")
+                        self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                        self.emit_str(")\n")
+                        cur_r = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = ptrtoint ptr %")
+                        self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                        self.emit_str(" to i64\n")
+                        cur_r = cvt
+                    }
+                    if str_eq(pty, "i32") {
+                        let tr = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(tr).as_ptr() as str)
+                        self.emit_str(" = trunc i64 %")
+                        self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                        self.emit_str(" to i32\n")
+                        cur_r = tr
+                        pty = "i32"
+                    } else {
+                        pty = "i64"
+                    }
                 } else if is_p == 1 {
                     pty = "ptr"
                 } else if str_eq(pty, "i32") && is_p == 0 {
@@ -4228,8 +4761,18 @@ impl Codegen {
         }
         if k == EXPR_FIELD_ACCESS {
             let recv_id = ep[expr_id].left
-            var r_reg = self.emit_expr(recv_id)
             let fname = ep[expr_id].field_name.as_ptr() as str
+            if ep[recv_id].kind == EXPR_IDENT {
+                let rec_name = ep[recv_id].str_val.as_ptr() as str
+                if str_eq(rec_name, "Option") && str_eq(fname, "None") {
+                    let call_none = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(call_none).as_ptr() as str)
+                    self.emit_str(" = call ptr @None()\n")
+                    return call_none
+                }
+            }
+            var r_reg = self.emit_expr(recv_id)
             if str_eq(fname, "ptr") {
                 if !self.is_expr_ptr(recv_id) {
                     let cvt = self.alloc_ssa()
@@ -4652,12 +5195,33 @@ impl Codegen {
                 self.ir.push_str(" to i64\n")
                 return cvt
             }
+            var cur_left = left_reg
+            if src_is_ptr {
+                let opt_ty = self.get_expr_struct_name(left_id)
+                if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                    let unwrapped = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                    self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    cur_left = unwrapped
+                } else if !str_eq(target_ty, "ptr") {
+                    let ext = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(ext).as_ptr() as str)
+                    self.ir.push_str(" = ptrtoint ptr %")
+                    self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                    self.ir.push_str(" to i64\n")
+                    cur_left = ext
+                }
+            }
             if str_eq(target_raw, "u8") || str_eq(target_raw, "i8") {
                 let trunc_reg = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
                 self.ir.push_str(" = trunc i64 %")
-                self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                self.ir.push_str(int_to_str(cur_left).as_ptr() as str)
                 self.ir.push_str(" to i8\n")
 
                 let ext_reg = self.alloc_ssa()
@@ -4667,6 +5231,26 @@ impl Codegen {
                     self.ir.push_str(" = zext i8 %")
                 } else {
                     self.ir.push_str(" = sext i8 %")
+                }
+                self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
+                self.ir.push_str(" to i64\n")
+                return ext_reg
+            }
+            if str_eq(target_raw, "u32") || str_eq(target_raw, "i32") {
+                let trunc_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
+                self.ir.push_str(" = trunc i64 %")
+                self.ir.push_str(int_to_str(cur_left).as_ptr() as str)
+                self.ir.push_str(" to i32\n")
+
+                let ext_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(ext_reg).as_ptr() as str)
+                if str_eq(target_raw, "u32") {
+                    self.ir.push_str(" = zext i32 %")
+                } else {
+                    self.ir.push_str(" = sext i32 %")
                 }
                 self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
                 self.ir.push_str(" to i64\n")
@@ -4684,33 +5268,29 @@ impl Codegen {
                 self.ir.push_str(" to ptr\n")
                 return ptr_reg
             }
-            if str_eq(target_ty, "i64") {
-                if src_is_ptr {
-                    let ext = self.alloc_ssa()
-                    self.ir.push_str("  %")
-                    self.ir.push_str(int_to_str(ext).as_ptr() as str)
-                    self.ir.push_str(" = ptrtoint ptr %")
-                    self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
-                    self.ir.push_str(" to i64\n")
-                    return ext
-                }
-                return left_reg
-            }
-            return left_reg
+            return cur_left
         }
         if k == EXPR_TRY {
             let inner_id = ep[expr_id].left
             let inner_reg = self.emit_expr(inner_id)
             let is_ptr = self.is_expr_ptr(inner_id)
 
-            let cond_reg = self.alloc_ssa()
+            var cond_reg = 0
             if is_ptr {
+                let is_ok_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(is_ok_reg).as_ptr() as str)
+                self.ir.push_str(" = call i64 @__rad_is_some(ptr %")
+                self.ir.push_str(int_to_str(inner_reg).as_ptr() as str)
+                self.ir.push_str(")\n")
+                cond_reg = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(cond_reg).as_ptr() as str)
-                self.ir.push_str(" = icmp eq ptr %")
-                self.ir.push_str(int_to_str(inner_reg).as_ptr() as str)
-                self.ir.push_str(", null\n")
+                self.ir.push_str(" = icmp eq i64 %")
+                self.ir.push_str(int_to_str(is_ok_reg).as_ptr() as str)
+                self.ir.push_str(", 0\n")
             } else {
+                cond_reg = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(cond_reg).as_ptr() as str)
                 self.ir.push_str(" = icmp eq i64 %")
@@ -4754,6 +5334,15 @@ impl Codegen {
             self.ir.push_str("try.cont.")
             self.ir.push_str(int_to_str(continue_lbl).as_ptr() as str)
             self.ir.push_str(":\n")
+            if is_ptr {
+                let unwrap_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(unwrap_reg).as_ptr() as str)
+                self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                self.ir.push_str(int_to_str(inner_reg).as_ptr() as str)
+                self.ir.push_str(")\n")
+                return unwrap_reg
+            }
 
             return inner_reg
         }
@@ -5028,19 +5617,51 @@ impl Codegen {
                     self.ir.push_str(" to ptr\n")
                     r = cvt
                 } else if str_eq(llvm_ty, "i64") && init_is_ptr {
-                    let cvt = self.alloc_ssa()
-                    self.ir.push_str("  %")
-                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
-                    self.ir.push_str(" = ptrtoint ptr %")
-                    self.ir.push_str(int_to_str(r).as_ptr() as str)
-                    self.ir.push_str(" to i64\n")
-                    r = cvt
-                } else if str_eq(llvm_ty, "i32") && !init_is_ptr {
+                    let opt_ty = self.get_expr_struct_name(init_expr)
+                    if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        r = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        r = cvt
+                    }
+                } else if str_eq(llvm_ty, "i32") {
+                    var cur_r = r
+                    if init_is_ptr {
+                        let opt_ty = self.get_expr_struct_name(init_expr)
+                        if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                            let unwrapped = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            cur_r = unwrapped
+                        } else {
+                            let cvt = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                            self.ir.push_str(" = ptrtoint ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(" to i64\n")
+                            cur_r = cvt
+                        }
+                    }
                     let cvt = self.alloc_ssa()
                     self.ir.push_str("  %")
                     self.ir.push_str(int_to_str(cvt).as_ptr() as str)
                     self.ir.push_str(" = trunc i64 %")
-                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(int_to_str(cur_r).as_ptr() as str)
                     self.ir.push_str(" to i32\n")
                     r = cvt
                 }
@@ -5173,19 +5794,51 @@ impl Codegen {
                 self.ir.push_str(" to ptr\n")
                 r = cvt
             } else if str_eq(llvm_ty, "i64") && init_is_ptr {
-                let cvt = self.alloc_ssa()
-                self.ir.push_str("  %")
-                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
-                self.ir.push_str(" = ptrtoint ptr %")
-                self.ir.push_str(int_to_str(r).as_ptr() as str)
-                self.ir.push_str(" to i64\n")
-                r = cvt
-            } else if str_eq(llvm_ty, "i32") && !init_is_ptr {
+                let opt_ty = self.get_expr_struct_name(init_expr)
+                if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                    let unwrapped = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    r = unwrapped
+                } else {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = ptrtoint ptr %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(" to i64\n")
+                    r = cvt
+                }
+            } else if str_eq(llvm_ty, "i32") {
+                var cur_r = r
+                if init_is_ptr {
+                    let opt_ty = self.get_expr_struct_name(init_expr)
+                    if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        cur_r = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        cur_r = cvt
+                    }
+                }
                 let cvt = self.alloc_ssa()
                 self.ir.push_str("  %")
                 self.ir.push_str(int_to_str(cvt).as_ptr() as str)
                 self.ir.push_str(" = trunc i64 %")
-                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                self.ir.push_str(int_to_str(cur_r).as_ptr() as str)
                 self.ir.push_str(" to i32\n")
                 r = cvt
             }
@@ -5509,13 +6162,24 @@ impl Codegen {
                 self.ir.push_str("\n")
 
                 if self.is_expr_ptr(val_expr) {
-                    let cvt = self.alloc_ssa()
-                    self.ir.push_str("  %")
-                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
-                    self.ir.push_str(" = ptrtoint ptr %")
-                    self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
-                    self.ir.push_str(" to i64\n")
-                    val_reg = cvt
+                    let opt_ty = self.get_expr_struct_name(val_expr)
+                    if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        val_reg = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        val_reg = cvt
+                    }
                 }
 
                 self.ir.push_str("  store i64 %")
@@ -5635,13 +6299,24 @@ impl Codegen {
                 self.ir.push_str(", align 8\n")
             } else {
                 if self.is_expr_ptr(val_expr) {
-                    let cvt = self.alloc_ssa()
-                    self.ir.push_str("  %")
-                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
-                    self.ir.push_str(" = ptrtoint ptr %")
-                    self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
-                    self.ir.push_str(" to i64\n")
-                    val_reg = cvt
+                    let opt_ty = self.get_expr_struct_name(val_expr)
+                    if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        val_reg = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        val_reg = cvt
+                    }
                 }
 
                 self.ir.push_str("  store i64 %")
@@ -5821,6 +6496,7 @@ impl Codegen {
             let prev_defers_while = self.active_defers.len
             let prev_drops_while = self.active_drops_var.len
             self.loop_drop_stack.push(prev_drops_while)
+            self.loop_defer_stack.push(prev_defers_while)
             var i = 0usize
             var body_terminates = false
             while i < sp[stmt_id].body_stmts.len {
@@ -5852,6 +6528,7 @@ impl Codegen {
             let _pop_cond = self.loop_cond_labels.pop()
             let _pop_end = self.loop_end_labels.pop()
             let _pop_drops = self.loop_drop_stack.pop()
+            let _pop_defers = self.loop_defer_stack.pop()
         } else if k == STMT_FOR_RANGE {
             let vname = sp[stmt_id].name.as_ptr() as str
             let range_expr = sp[stmt_id].expr_id
@@ -5909,6 +6586,7 @@ impl Codegen {
             let prev_defers_for = self.active_defers.len
             let prev_drops_for = self.active_drops_var.len
             self.loop_drop_stack.push(prev_drops_for)
+            self.loop_defer_stack.push(prev_defers_for)
             var bi = 0usize
             var body_terminates = false
             while bi < sp[stmt_id].body_stmts.len {
@@ -5964,6 +6642,7 @@ impl Codegen {
             let _pop_c = self.loop_cond_labels.pop()
             let _pop_e = self.loop_end_labels.pop()
             let _pop_d = self.loop_drop_stack.pop()
+            let _pop_def_r = self.loop_defer_stack.pop()
         } else if k == STMT_FOR_IN {
             let vname = sp[stmt_id].name.as_ptr() as str
             let coll_expr = sp[stmt_id].expr_id
@@ -6043,6 +6722,7 @@ impl Codegen {
             self.ir.push_str(":\n")
             let elem_ty = self.get_var_type(vname)
             let is_ptr = str_eq(elem_ty, "ptr")
+            let is_fl = str_eq(elem_ty, "double")
             let buf_ptr = self.alloc_ssa()
             self.ir.push_str("  %")
             self.ir.push_str(int_to_str(buf_ptr).as_ptr() as str)
@@ -6054,6 +6734,8 @@ impl Codegen {
             self.ir.push_str(int_to_str(elem_gep).as_ptr() as str)
             if is_ptr {
                 self.ir.push_str(" = getelementptr inbounds ptr, ptr %")
+            } else if is_fl {
+                self.ir.push_str(" = getelementptr inbounds double, ptr %")
             } else {
                 self.ir.push_str(" = getelementptr inbounds i64, ptr %")
             }
@@ -6066,6 +6748,8 @@ impl Codegen {
             self.ir.push_str(int_to_str(elem_val).as_ptr() as str)
             if is_ptr {
                 self.ir.push_str(" = load ptr, ptr %")
+            } else if is_fl {
+                self.ir.push_str(" = load double, ptr %")
             } else {
                 self.ir.push_str(" = load i64, ptr %")
             }
@@ -6073,6 +6757,8 @@ impl Codegen {
             self.ir.push_str(", align 8\n")
             if is_ptr {
                 self.ir.push_str("  store ptr %")
+            } else if is_fl {
+                self.ir.push_str("  store double %")
             } else {
                 self.ir.push_str("  store i64 %")
             }
@@ -6084,6 +6770,7 @@ impl Codegen {
             let prev_defers_for_in = self.active_defers.len
             let prev_drops_for_in = self.active_drops_var.len
             self.loop_drop_stack.push(prev_drops_for_in)
+            self.loop_defer_stack.push(prev_defers_for_in)
             var bi = 0usize
             var body_terminates = false
             while bi < sp[stmt_id].body_stmts.len {
@@ -6139,8 +6826,13 @@ impl Codegen {
             let _pop_c = self.loop_cond_labels.pop()
             let _pop_e = self.loop_end_labels.pop()
             let _pop_d = self.loop_drop_stack.pop()
+            let _pop_def_r = self.loop_defer_stack.pop()
         } else if k == STMT_BREAK {
             if self.loop_end_labels.len > 0usize {
+                if self.loop_defer_stack.len > 0usize {
+                    let loop_def_base = self.loop_defer_stack.ptr[self.loop_defer_stack.len - 1usize]
+                    self.emit_defers_from(loop_def_base)
+                }
                 if self.loop_drop_stack.len > 0usize {
                     let loop_base = self.loop_drop_stack.ptr[self.loop_drop_stack.len - 1usize]
                     self.emit_drops_from(loop_base, "")
@@ -6152,6 +6844,10 @@ impl Codegen {
             }
         } else if k == STMT_CONTINUE {
             if self.loop_cond_labels.len > 0usize {
+                if self.loop_defer_stack.len > 0usize {
+                    let loop_def_base = self.loop_defer_stack.ptr[self.loop_defer_stack.len - 1usize]
+                    self.emit_defers_from(loop_def_base)
+                }
                 if self.loop_drop_stack.len > 0usize {
                     let loop_base = self.loop_drop_stack.ptr[self.loop_drop_stack.len - 1usize]
                     self.emit_drops_from(loop_base, "")
@@ -6199,11 +6895,32 @@ impl Codegen {
                 if str_eq(ret_ty, "void") {
                     self.ir.push_str("  ret void\n")
                 } else if str_eq(ret_ty, "i32") {
+                    var cur_r = r + 0
+                    if self.is_expr_ptr(sp[stmt_id].expr_id) {
+                        let opt_ty = self.get_expr_struct_name(sp[stmt_id].expr_id)
+                        if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                            let unwrapped = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            cur_r = unwrapped
+                        } else {
+                            let cvt = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                            self.ir.push_str(" = ptrtoint ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(" to i64\n")
+                            cur_r = cvt
+                        }
+                    }
                     let tr = self.alloc_ssa()
                     self.ir.push_str("  %")
                     self.ir.push_str(int_to_str(tr).as_ptr() as str)
                     self.ir.push_str(" = trunc i64 %")
-                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(int_to_str(cur_r).as_ptr() as str)
                     self.ir.push_str(" to i32\n")
                     self.ir.push_str("  ret i32 %")
                     self.ir.push_str(int_to_str(tr).as_ptr() as str)
@@ -6269,13 +6986,24 @@ impl Codegen {
                 } else {
                     var final_reg = r + 0
                     if self.is_expr_ptr(sp[stmt_id].expr_id) {
-                        let cvt = self.alloc_ssa()
-                        self.ir.push_str("  %")
-                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
-                        self.ir.push_str(" = ptrtoint ptr %")
-                        self.ir.push_str(int_to_str(r).as_ptr() as str)
-                        self.ir.push_str(" to i64\n")
-                        final_reg = cvt
+                        let opt_ty = self.get_expr_struct_name(sp[stmt_id].expr_id)
+                        if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                            let unwrapped = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            final_reg = unwrapped
+                        } else {
+                            let cvt = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                            self.ir.push_str(" = ptrtoint ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(" to i64\n")
+                            final_reg = cvt
+                        }
                     } else if self.is_expr_float(sp[stmt_id].expr_id) {
                         let cvt = self.alloc_ssa()
                         self.ir.push_str("  %")
@@ -6707,7 +7435,7 @@ impl Codegen {
 
         header.push_str("define void @push(ptr %obj, i64 %item) {\nentry:\n  %is_null = icmp eq ptr %obj, null\n  br i1 %is_null, label %exit, label %do_push\ndo_push:\n  %buf_slot = getelementptr inbounds i8, ptr %obj, i64 0\n  %cap_slot = getelementptr inbounds i8, ptr %obj, i64 8\n  %len_slot = getelementptr inbounds i8, ptr %obj, i64 16\n  %buf = load ptr, ptr %buf_slot, align 8\n  %cap = load i64, ptr %cap_slot, align 8\n  %len = load i64, ptr %len_slot, align 8\n  %needs_grow = icmp uge i64 %len, %cap\n  br i1 %needs_grow, label %grow, label %write_item\ngrow:\n  %new_cap = shl i64 %cap, 1\n  %adj_cap_cond = icmp ult i64 %new_cap, 64\n  %adj_cap = select i1 %adj_cap_cond, i64 64, i64 %new_cap\n  %bytes = shl i64 %adj_cap, 3\n  %new_buf = call ptr @realloc(ptr %buf, i64 %bytes)\n  store ptr %new_buf, ptr %buf_slot, align 8\n  store i64 %adj_cap, ptr %cap_slot, align 8\n  br label %write_item\nwrite_item:\n  %cur_buf = phi ptr [ %buf, %do_push ], [ %new_buf, %grow ]\n  %slot = getelementptr inbounds i64, ptr %cur_buf, i64 %len\n  store i64 %item, ptr %slot, align 8\n  %new_len = add i64 %len, 1\n  store i64 %new_len, ptr %len_slot, align 8\n  br label %exit\nexit:\n  ret void\n}\n\n")
 
-        header.push_str("define i64 @pop(ptr %obj) {\nentry:\n  %is_null = icmp eq ptr %obj, null\n  br i1 %is_null, label %exit_zero, label %do_pop\ndo_pop:\n  %len_slot = getelementptr inbounds i8, ptr %obj, i64 16\n  %len = load i64, ptr %len_slot, align 8\n  %is_empty = icmp eq i64 %len, 0\n  br i1 %is_empty, label %exit_zero, label %do_dec\ndo_dec:\n  %new_len = sub i64 %len, 1\n  store i64 %new_len, ptr %len_slot, align 8\n  %buf_slot = getelementptr inbounds i8, ptr %obj, i64 0\n  %buf = load ptr, ptr %buf_slot, align 8\n  %slot = getelementptr inbounds i64, ptr %buf, i64 %new_len\n  %val = load i64, ptr %slot, align 8\n  ret i64 %val\nexit_zero:\n  ret i64 0\n}\n\n")
+        header.push_str("define ptr @pop(ptr %obj) {\nentry:\n  %is_null = icmp eq ptr %obj, null\n  br i1 %is_null, label %exit_zero, label %do_pop\ndo_pop:\n  %len_slot = getelementptr inbounds i8, ptr %obj, i64 16\n  %len = load i64, ptr %len_slot, align 8\n  %is_empty = icmp sle i64 %len, 0\n  br i1 %is_empty, label %exit_zero, label %do_dec\ndo_dec:\n  %new_len = sub i64 %len, 1\n  store i64 %new_len, ptr %len_slot, align 8\n  %buf_slot = getelementptr inbounds i8, ptr %obj, i64 0\n  %buf = load ptr, ptr %buf_slot, align 8\n  %slot = getelementptr inbounds i64, ptr %buf, i64 %new_len\n  %val = load i64, ptr %slot, align 8\n  %res = call ptr @Some(i64 %val)\n  ret ptr %res\nexit_zero:\n  ret ptr null\n}\n\n")
 
         header.push_str("define void @push_str(ptr %obj, ptr %src) {\nentry:\n  %is_null = icmp eq ptr %src, null\n  br i1 %is_null, label %exit, label %loop\nloop:\n  %i = phi i64 [ 0, %entry ], [ %next_i, %body ]\n  %char_ptr = getelementptr inbounds i8, ptr %src, i64 %i\n  %ch = load i8, ptr %char_ptr, align 1\n  %is_end = icmp eq i8 %ch, 0\n  br i1 %is_end, label %exit, label %body\nbody:\n  %ch_i64 = zext i8 %ch to i64\n  call void @push_byte(ptr %obj, i64 %ch_i64)\n  %next_i = add i64 %i, 1\n  br label %loop\nexit:\n  ret void\n}\n\n")
 
@@ -6736,7 +7464,7 @@ impl Codegen {
             fi_chk = fi_chk + 1usize
         }
         if !has_user_get {
-            header.push_str("define i64 @get(ptr %obj, i64 %idx) {\nentry:\n  %buf_slot = getelementptr inbounds i8, ptr %obj, i64 0\n  %buf = load ptr, ptr %buf_slot, align 8\n  %slot = getelementptr inbounds i64, ptr %buf, i64 %idx\n  %val = load i64, ptr %slot, align 8\n  ret i64 %val\n}\n\n")
+            header.push_str("define ptr @get(ptr %obj, i64 %idx) {\nentry:\n  %is_null = icmp eq ptr %obj, null\n  br i1 %is_null, label %exit_null, label %check_bounds\ncheck_bounds:\n  %len_slot = getelementptr inbounds i8, ptr %obj, i64 16\n  %len = load i64, ptr %len_slot, align 8\n  %is_neg = icmp slt i64 %idx, 0\n  %is_oob = icmp sge i64 %idx, %len\n  %bad = or i1 %is_neg, %is_oob\n  br i1 %bad, label %exit_null, label %do_get\ndo_get:\n  %buf_slot = getelementptr inbounds i8, ptr %obj, i64 0\n  %buf = load ptr, ptr %buf_slot, align 8\n  %slot = getelementptr inbounds i64, ptr %buf, i64 %idx\n  %val = load i64, ptr %slot, align 8\n  %res = call ptr @Some(i64 %val)\n  ret ptr %res\nexit_null:\n  ret ptr null\n}\n\n")
         }
 
         header.push_str("define void @insert(ptr %obj, ptr %key, i64 %val) {\nentry:\n  ret void\n}\n\n")
@@ -6756,17 +7484,52 @@ impl Codegen {
 
         header.push_str("define i64 @now() {\nentry:\n  ret i64 0\n}\n\n")
 
-        header.push_str("define i64 @Some(i64 %v) {\nentry:\n  ret i64 %v\n}\n\n")
+        header.push_str("%struct.Option = type { i64, i64 }\n")
+        header.push_str("%struct.Result = type { i64, i64 }\n\n")
 
-        header.push_str("define i64 @None() {\nentry:\n  ret i64 0\n}\n\n")
+        header.push_str("define ptr @Some(i64 %v) {\nentry:\n  %p = call ptr @malloc(i64 16)\n  %tp = getelementptr inbounds %struct.Option, ptr %p, i32 0, i32 0\n  store i64 1, ptr %tp, align 8\n  %vp = getelementptr inbounds %struct.Option, ptr %p, i32 0, i32 1\n  store i64 %v, ptr %vp, align 8\n  ret ptr %p\n}\n\n")
 
-        header.push_str("define i64 @Ok(i64 %v) {\nentry:\n  ret i64 %v\n}\n\n")
+        header.push_str("define ptr @None() {\nentry:\n  ret ptr null\n}\n\n")
 
-        header.push_str("define i64 @Err(i64 %v) {\nentry:\n  ret i64 %v\n}\n\n")
+        header.push_str("define ptr @Ok(i64 %v) {\nentry:\n  %p = call ptr @malloc(i64 16)\n  %tp = getelementptr inbounds %struct.Result, ptr %p, i32 0, i32 0\n  store i64 1, ptr %tp, align 8\n  %vp = getelementptr inbounds %struct.Result, ptr %p, i32 0, i32 1\n  store i64 %v, ptr %vp, align 8\n  ret ptr %p\n}\n\n")
+
+        header.push_str("define ptr @Err(i64 %v) {\nentry:\n  %p = call ptr @malloc(i64 16)\n  %tp = getelementptr inbounds %struct.Result, ptr %p, i32 0, i32 0\n  store i64 0, ptr %tp, align 8\n  %vp = getelementptr inbounds %struct.Result, ptr %p, i32 0, i32 1\n  store i64 %v, ptr %vp, align 8\n  ret ptr %p\n}\n\n")
 
         header.push_str("define i64 @On(i64 %v) {\nentry:\n  ret i64 %v\n}\n\n")
 
         header.push_str("define i64 @Just(i64 %v) {\nentry:\n  ret i64 %v\n}\n\n")
+
+        header.push_str("define i64 @__rad_is_some(ptr %p) {\nentry:\n  %is_null = icmp eq ptr %p, null\n  br i1 %is_null, label %null_ret, label %tag_chk\ntag_chk:\n  %tp = getelementptr inbounds %struct.Option, ptr %p, i32 0, i32 0\n  %tag = load i64, ptr %tp, align 8\n  %is_one = icmp eq i64 %tag, 1\n  %res = zext i1 %is_one to i64\n  ret i64 %res\nnull_ret:\n  ret i64 0\n}\n\n")
+
+        header.push_str("define i64 @__rad_get_val(ptr %p) {\nentry:\n  %is_null = icmp eq ptr %p, null\n  br i1 %is_null, label %null_ret, label %val_load\nval_load:\n  %vp = getelementptr inbounds %struct.Option, ptr %p, i32 0, i32 1\n  %val = load i64, ptr %vp, align 8\n  ret i64 %val\nnull_ret:\n  ret i64 0\n}\n\n")
+
+        header.push_str("@.opt_unwrap_panic = private unnamed_addr constant [39 x i8] c\"called Option.unwrap() on a None value\\00\", align 1\n")
+
+        var has_user_opt_unwrap = false
+        var has_user_opt_unwrap_or = false
+        var has_user_opt_is_some = false
+        var has_user_opt_is_none = false
+        var fi_opt = 0usize
+        while fi_opt < self.parser.functions.len {
+            let fn_name_s = self.parser.functions.ptr[fi_opt].fn_name.as_ptr() as str
+            if str_eq(fn_name_s, "Option__unwrap") { has_user_opt_unwrap = true }
+            if str_eq(fn_name_s, "Option__unwrap_or") { has_user_opt_unwrap_or = true }
+            if str_eq(fn_name_s, "Option__is_some") { has_user_opt_is_some = true }
+            if str_eq(fn_name_s, "Option__is_none") { has_user_opt_is_none = true }
+            fi_opt = fi_opt + 1usize
+        }
+        if !has_user_opt_is_some {
+            header.push_str("define i64 @Option__is_some(ptr %opt) {\nentry:\n  %res = call i64 @__rad_is_some(ptr %opt)\n  ret i64 %res\n}\n\n")
+        }
+        if !has_user_opt_is_none {
+            header.push_str("define i64 @Option__is_none(ptr %opt) {\nentry:\n  %res = call i64 @__rad_is_some(ptr %opt)\n  %is_none = icmp eq i64 %res, 0\n  %z = zext i1 %is_none to i64\n  ret i64 %z\n}\n\n")
+        }
+        if !has_user_opt_unwrap {
+            header.push_str("define i64 @Option__unwrap(ptr %opt) {\nentry:\n  %is_s = call i64 @__rad_is_some(ptr %opt)\n  %chk = icmp eq i64 %is_s, 0\n  br i1 %chk, label %panic_arm, label %val_arm\npanic_arm:\n  %fmt = getelementptr inbounds [39 x i8], ptr @.opt_unwrap_panic, i32 0, i32 0\n  call void @panic(ptr %fmt)\n  ret i64 0\nval_arm:\n  %val = call i64 @__rad_get_val(ptr %opt)\n  ret i64 %val\n}\n\n")
+        }
+        if !has_user_opt_unwrap_or {
+            header.push_str("define i64 @Option__unwrap_or(ptr %opt, i64 %def) {\nentry:\n  %is_s = call i64 @__rad_is_some(ptr %opt)\n  %chk = icmp eq i64 %is_s, 0\n  br i1 %chk, label %ret_def, label %ret_val\nret_def:\n  ret i64 %def\nret_val:\n  %val = call i64 @__rad_get_val(ptr %opt)\n  ret i64 %val\n}\n\n")
+        }
 
         header.push_str("@.eprint_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n")
         header.push_str("define void @eprintln(ptr %msg) {\nentry:\n  %fmt = getelementptr inbounds [4 x i8], ptr @.eprint_fmt, i32 0, i32 0\n  call i32 (i32, ptr, ...) @dprintf(i32 2, ptr %fmt, ptr %msg)\n  ret void\n}\n\n")

@@ -734,6 +734,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         stmts: Vec.new(),
         functions: Vec.new(),
         structs: Vec.new(),
+        enum_names: Vec.new(),
         traits: Vec.new(),
         trait_impls: Vec.new(),
         const_names: Vec.new(),
@@ -758,14 +759,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         extra_stmts: Vec.new(),
         tup_tmp_counter: 0i64,
     }
-    parser.const_names.push(String.from_str("Option::None"))
-    parser.const_values.push(0i64)
-    parser.const_names.push(String.from_str("Option::Some"))
-    parser.const_values.push(1i64)
-    parser.const_names.push(String.from_str("Result::Ok"))
-    parser.const_values.push(0i64)
-    parser.const_names.push(String.from_str("Result::Err"))
-    parser.const_values.push(1i64)
+    parser.enum_names.push(String.from_str("Option"))
+    parser.enum_names.push(String.from_str("Result"))
     // Reserve index 0 as sentinel NULL_EXPR and NULL_STMT so expr_id/stmt_id > 0
     parser.exprs.push(Expr {
         kind: 0,
@@ -925,6 +920,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         loop_cond_labels: Vec.new(),
         loop_end_labels: Vec.new(),
         loop_drop_stack: Vec.new(),
+        loop_defer_stack: Vec.new(),
         current_func_idx: 0usize,
         active_defers: Vec.new(),
         active_drops_var: Vec.new(),

@@ -167,11 +167,14 @@ install: all
 		fi; \
 		echo "    [✓] All ecosystem libraries installed from $$RAD_LIB_PKGS"; \
 	else \
-		echo "==> Local rad-lib not found. Installing missing ecosystem packages using bin/rad..."; \
+		echo "==> Local rad-lib not found. Checking installed packages using rad package list -g..."; \
+		INSTALLED=$$($(PREFIX)/bin/rad package list -g 2>/dev/null || $(BIN_DIR)/rad package list -g 2>/dev/null); \
 		for pkg in $$ALL_PKGS; do \
-			if [ ! -d "$(PREFIX)/lib/rad/$$pkg" ]; then \
-				echo "    Installing $$pkg via bin/rad install..."; \
-				$(BIN_DIR)/rad install "$$pkg" || true; \
+			if echo "$$INSTALLED" | grep -q "$$pkg"; then \
+				echo "    [✓] $$pkg already installed"; \
+			else \
+				echo "    Installing missing package $$pkg via rad package install..."; \
+				$(PREFIX)/bin/rad package install "$$pkg" || $(BIN_DIR)/rad package install "$$pkg" || true; \
 			fi; \
 		done; \
 	fi

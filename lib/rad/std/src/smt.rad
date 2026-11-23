@@ -2,6 +2,7 @@
 // Rad Standard Library: SMT-LIB2 Generator & Contract Verification (std::smt)
 // Formal verification, invariant proofs, QF_AUFLIA logic & bounds checking.
 // Zero external C dynamic dependencies.
+// NOTE: This module is an architectural software simulation model / reference implementation in pure Rad, not a hardware binding.
 // ==============================================================================
 
 fn smt_str_len(s: str) -> usize {

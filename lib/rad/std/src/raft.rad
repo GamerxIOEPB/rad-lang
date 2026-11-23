@@ -2,6 +2,7 @@
 // Rad Standard Library: Raft Distributed Consensus Protocol (std::raft)
 // Leader election, term validation, replicated log, state machine commits.
 // Zero external C dynamic dependencies.
+// NOTE: This module is an architectural software simulation model / reference implementation in pure Rad, not a hardware binding.
 // ==============================================================================
 
 pub const RAFT_ROLE_FOLLOWER: i32  = 0

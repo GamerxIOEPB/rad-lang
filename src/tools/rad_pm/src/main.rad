@@ -1836,55 +1836,154 @@ fn cmd_update_pkg(argc: i32, argv: *raw *raw u8) -> i32 {
     return res
 }
 
-fn cmd_list() -> i32 {
-    let toml = read_file_str("rad.toml")
-    if toml.len() == 0usize {
-        println("error: could not find `rad.toml` in current directory")
+fn cmd_list(is_global: bool) -> i32 {
+    if !is_global {
+        let toml = read_file_str("rad.toml")
+        if toml.len() == 0usize {
+            println("error: could not find `rad.toml` in current directory")
+            return 1
+        }
+
+        let lines = split_source_lines(toml)
+        var in_dep = false
+        var dep_count = 0
+        println("\x1b[1;36mDeclared Dependencies:\x1b[0m")
+
+        var li = 0usize
+        while li < lines.len {
+            let l = lines.ptr[li].as_ptr() as str
+            let trimmed = trim_line_start(l)
+            if str_starts_with(trimmed, "[dependencies]") {
+                in_dep = true
+            } else if str_starts_with(trimmed, "[") {
+                in_dep = false
+            } else if in_dep && str_len(trimmed) > 0usize && !str_starts_with(trimmed, "#") {
+                let dep_name = parse_dep_name(l)
+                let dep_ver = parse_dep_version(l)
+                if dep_name.len() > 0usize {
+                    dep_count = dep_count + 1
+                    var out = String.new()
+                    out.push_str("  * \x1b[1;32m")
+                    out.push_str(dep_name.as_ptr() as str)
+                    out.push_str("\x1b[0m = \"")
+                    out.push_str(dep_ver.as_ptr() as str)
+                    out.push_str("\"")
+
+                    var chk_path = String.new()
+                    chk_path.push_str("packages/")
+                    chk_path.push_str(dep_name.as_ptr() as str)
+                    chk_path.push_str("/src/lib.rad")
+                    if file_exists(chk_path.as_ptr() as str) {
+                        out.push_str(" \x1b[90m[installed]\x1b[0m")
+                    } else {
+                        out.push_str(" \x1b[33m[missing: run `rad install`]\x1b[0m")
+                    }
+                    println(out.as_ptr() as str)
+                }
+            }
+            li = li + 1usize
+        }
+
+        if dep_count == 0 {
+            println("  (no dependencies configured)")
+        }
+        return 0
+    }
+
+    var global_dir = String.new()
+    let env_rad = getenv("RAD_HOME")
+    if (env_rad as usize) != 0usize && str_len(env_rad as str) > 0usize {
+        global_dir.push_str(env_rad as str)
+        global_dir.push_str("/lib/rad")
+    } else {
+        let env_home = getenv("HOME")
+        if (env_home as usize) != 0usize {
+            global_dir.push_str(env_home as str)
+            global_dir.push_str("/.rad/lib/rad")
+        } else {
+            global_dir.push_str("/usr/local/lib/rad")
+        }
+    }
+
+    if !file_exists(global_dir.as_ptr() as str) {
+        println("error: global library directory not found")
         return 1
     }
 
-    let lines = split_source_lines(toml)
-    var in_dep = false
-    var dep_count = 0
-    println("\x1b[1;36mDeclared Dependencies:\x1b[0m")
+    var tmp_file = String.new()
+    tmp_file.push_str("/tmp/.rad_global_pkgs_")
+    let pid = getpid()
+    let pid_str = int_to_str(pid)
+    tmp_file.push_str(pid_str.as_ptr() as str)
+    tmp_file.push_str(".txt")
 
+    var cmd = String.new()
+    cmd.push_str("find -L \"")
+    cmd.push_str(global_dir.as_ptr() as str)
+    cmd.push_str("\" -maxdepth 1 -mindepth 1 -type d > \"")
+    cmd.push_str(tmp_file.as_ptr() as str)
+    cmd.push_str("\" 2>/dev/null")
+    let _s = system(cmd.as_ptr() as str)
+
+    let out_content = read_file_str(tmp_file.as_ptr() as str)
+    var rm_cmd = String.new()
+    rm_cmd.push_str("rm -f \"")
+    rm_cmd.push_str(tmp_file.as_ptr() as str)
+    rm_cmd.push_str("\"")
+    let _rm = system(rm_cmd.as_ptr() as str)
+
+    println("\x1b[1;36mGlobally Installed Packages:\x1b[0m")
+    let lines = split_source_lines(out_content)
+    var count = 0
     var li = 0usize
     while li < lines.len {
-        let l = lines.ptr[li].as_ptr() as str
-        let trimmed = trim_line_start(l)
-        if str_starts_with(trimmed, "[dependencies]") {
-            in_dep = true
-        } else if str_starts_with(trimmed, "[") {
-            in_dep = false
-        } else if in_dep && str_len(trimmed) > 0usize && !str_starts_with(trimmed, "#") {
-            let dep_name = parse_dep_name(l)
-            let dep_ver = parse_dep_version(l)
-            if dep_name.len() > 0usize {
-                dep_count = dep_count + 1
+        let p = lines.ptr[li].as_ptr() as str
+        let trimmed = trim_line_start(p)
+        if str_len(trimmed) > 0usize {
+            let base = path_basename(trimmed)
+            let b_str = base.as_ptr() as str
+            if !str_eq(b_str, "core") &&
+               !str_eq(b_str, "alloc") &&
+               !str_eq(b_str, "std") &&
+               !str_eq(b_str, "targets") &&
+               !str_eq(b_str, "git") &&
+               !str_eq(b_str, "bin") &&
+               !str_eq(b_str, "lib") {
+                var pkg_toml = String.new()
+                pkg_toml.push_str(trimmed)
+                pkg_toml.push_str("/rad.toml")
+                var ver = String.new()
+                if file_exists(pkg_toml.as_ptr() as str) {
+                    let toml_str = read_file_str(pkg_toml.as_ptr() as str)
+                    let tlines = split_source_lines(toml_str)
+                    var tli = 0usize
+                    while tli < tlines.len {
+                        let tl = tlines.ptr[tli].as_ptr() as str
+                        let t_trim = trim_line_start(tl)
+                        if str_starts_with(t_trim, "version") {
+                            ver = parse_dep_version(t_trim)
+                        }
+                        tli = tli + 1usize
+                    }
+                }
                 var out = String.new()
                 out.push_str("  * \x1b[1;32m")
-                out.push_str(dep_name.as_ptr() as str)
-                out.push_str("\x1b[0m = \"")
-                out.push_str(dep_ver.as_ptr() as str)
-                out.push_str("\"")
-
-                var chk_path = String.new()
-                chk_path.push_str("packages/")
-                chk_path.push_str(dep_name.as_ptr() as str)
-                chk_path.push_str("/src/lib.rad")
-                if file_exists(chk_path.as_ptr() as str) {
-                    out.push_str(" \x1b[90m[installed]\x1b[0m")
-                } else {
-                    out.push_str(" \x1b[33m[missing: run `rad install`]\x1b[0m")
+                out.push_str(b_str)
+                out.push_str("\x1b[0m")
+                if ver.len() > 0usize {
+                    out.push_str(" (v")
+                    out.push_str(ver.as_ptr() as str)
+                    out.push_str(")")
                 }
                 println(out.as_ptr() as str)
+                count = count + 1
             }
         }
         li = li + 1usize
     }
 
-    if dep_count == 0 {
-        println("  (no dependencies configured)")
+    if count == 0 {
+        println("  (no global packages installed)")
     }
     return 0
 }
@@ -2390,7 +2489,7 @@ fn cmd_package(argc: i32, argv: *raw *raw u8) -> i32 {
         println("  publish          Validate and publish package to the official registry")
         println("  search <query>   Search packages in the official rad-lib registry")
         println("  info <pkg>       Display package metadata, versions, and license")
-        println("  list             List declared and installed dependencies")
+        println("  list [-g]        List declared dependencies or globally installed packages (-g, --global)")
         println("  tree             Display project dependency tree")
         println("  outdated         Check for outdated dependencies in the registry")
         println("  add <pkg>        Add a library dependency to rad.toml and install it")
@@ -2451,7 +2550,8 @@ fn cmd_package(argc: i32, argv: *raw *raw u8) -> i32 {
     }
 
     if str_eq(subcmd, "list") {
-        return cmd_list()
+        let is_global = has_flag(argc, argv, "-g") || has_flag(argc, argv, "--global")
+        return cmd_list(is_global)
     }
 
     if str_eq(subcmd, "tree") {
@@ -3793,7 +3893,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
     }
 
     if str_eq(cmd, "list") {
-        return cmd_list()
+        let is_global = has_flag(argc, argv, "-g") || has_flag(argc, argv, "--global")
+        return cmd_list(is_global)
     }
 
     if str_eq(cmd, "tree") {

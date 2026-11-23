@@ -2,6 +2,7 @@
 // Rad Standard Library: Zero-Knowledge Proofs & zk-SNARK Engine (std::zk)
 // Finite field arithmetic, elliptic curve scalar multiplication, R1CS circuits, Groth16.
 // Zero external C dynamic dependencies.
+// NOTE: This module is an architectural software simulation model / reference implementation in pure Rad, not a hardware binding.
 // ==============================================================================
 
 // Prime modulus: Mersenne prime p = 2^31 - 1 = 2147483647

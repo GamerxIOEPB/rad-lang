@@ -2,6 +2,7 @@
 // Rad Standard Library: Embedded WebAssembly Micro-VM & WASI Runtime (std::wasm_vm)
 // Bytecode interpreter, 64KB paged linear memory, gas metering, capability sandbox.
 // Zero external C dynamic dependencies.
+// NOTE: This module is an architectural software simulation model / reference implementation in pure Rad, not a hardware binding.
 // ==============================================================================
 
 pub const WASM_MAGIC_0: u8 = 0x00u8

@@ -26,8 +26,13 @@ cd "$SCRIPT_DIR/.."   # radtest root
 if [ -z "${RADC:-}" ]; then
     if [ -x "$RAD_ROOT/bin/radc" ]; then
         RADC="$RAD_ROOT/bin/radc"
-    else
+    elif [ -x "$HOME/.rad/bin/radc" ]; then
         RADC="$HOME/.rad/bin/radc"
+    elif command -v radc >/dev/null 2>&1; then
+        RADC="$(command -v radc)"
+    else
+        echo "error: radc compiler not found. Checked \$RAD_ROOT/bin/radc, \$HOME/.rad/bin/radc, and PATH." >&2
+        exit 1
     fi
 fi
 TDIR="tests"

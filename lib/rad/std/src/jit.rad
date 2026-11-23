@@ -3,6 +3,7 @@
 // x86-64 machine code assembler, mmap executable memory, dynamic execution,
 // and state-preserving live function hot-reloader.
 // Zero external C dynamic dependencies.
+// NOTE: This module is an architectural software simulation model / reference implementation in pure Rad, not a hardware binding.
 // ==============================================================================
 
 fn jit_str_len(s: str) -> usize {
