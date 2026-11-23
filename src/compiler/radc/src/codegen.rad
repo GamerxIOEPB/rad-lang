@@ -484,6 +484,9 @@ impl Codegen {
                             if str_eq(clean_m, "new") {
                                 return struct_name
                             }
+                            if str_eq(struct_name, "String") && (str_eq(clean_m, "to_int") || str_eq(clean_m, "parse_int")) {
+                                return "i64"
+                            }
                             if str_eq(struct_name, "Vec") && (str_eq(clean_m, "map") || str_eq(clean_m, "filter")) {
                                 return "Vec"
                             }
@@ -564,6 +567,9 @@ impl Codegen {
                                 return "Vec"
                             }
                             if str_eq(rname, "String") {
+                                if str_eq(clean_m, "to_int") || str_eq(clean_m, "parse_int") {
+                                    return "i64"
+                                }
                                 return "String"
                             }
                             if str_eq(rname, "Option") {
@@ -621,6 +627,9 @@ impl Codegen {
                             }
                             if str_eq(cname, "input") {
                                 return "String"
+                            }
+                            if str_eq(cname, "parse_int") || str_eq(cname, "String__to_int") || str_eq(cname, "String__parse_int") {
+                                return "i64"
                             }
                             if self.is_struct_name(cname) {
                                 return cname
@@ -1499,6 +1508,9 @@ impl Codegen {
         if str_eq(fname, "__rad_is_some") || str_eq(fname, "__rad_get_val") || str_starts_with(fname, "Option__") || str_starts_with(fname, "Result__") {
             if param_idx == 0usize { return "ptr" }
         }
+        if str_eq(fname, "parse_int") || str_eq(fname, "String__to_int") || str_eq(fname, "String__parse_int") || str_eq(fname, "to_int") {
+            if param_idx == 0usize { return "ptr" }
+        }
         if str_eq(fname, "puts") || str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "system") || str_eq(fname, "free") || str_eq(fname, "fclose") || str_eq(fname, "ftell") || str_eq(fname, "getenv") || (str_eq(fname, "printf") && param_idx == 0usize) || str_eq(fname, "atexit") || str_eq(fname, "panic") || str_eq(fname, "__rad_register_panic_hook") {
             return "ptr"
         }
@@ -1545,6 +1557,9 @@ impl Codegen {
                 return self.emit_llvm_type(rty)
             }
             fi = fi + 1usize
+        }
+        if str_eq(fname, "parse_int") || str_eq(fname, "String__to_int") || str_eq(fname, "String__parse_int") || str_eq(fname, "to_int") {
+            return "i64"
         }
         if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") || str_eq(fname, "__rad_get_terminal_guard") || str_eq(fname, "map") || str_eq(fname, "Vec__map") || str_eq(fname, "filter") || str_eq(fname, "Vec__filter") || str_eq(fname, "Some") || str_eq(fname, "None") || str_eq(fname, "Ok") || str_eq(fname, "Err") || str_eq(fname, "get") || str_eq(fname, "Vec__get") || str_eq(fname, "pop") || str_eq(fname, "Vec__pop") {
             return "ptr"
@@ -2188,6 +2203,102 @@ impl Codegen {
             }
         }
         return false
+    }
+
+    fn is_expr_str_type(self, expr_id: usize) -> bool {
+        if expr_id == 0usize || expr_id >= self.parser.exprs.len {
+            return false
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if k == EXPR_STR {
+            return true
+        }
+        if k == EXPR_IDENT {
+            let vname = ep[expr_id].str_val.as_ptr() as str
+            let raw_ty = self.get_raw_var_type(vname)
+            return str_eq(raw_ty, "str")
+        }
+        if k == EXPR_CAST {
+            let tgt = ep[expr_id].target_type.as_ptr() as str
+            return str_eq(tgt, "str")
+        }
+        if k == EXPR_METHOD_CALL {
+            let mname = ep[expr_id].str_val.as_ptr() as str
+            let clean_m = self.clean_type_name(mname)
+            return str_eq(clean_m, "as_str") || str_eq(clean_m, "to_str")
+        }
+        return false
+    }
+
+    fn get_bin_op_str(self, op: i32) -> str {
+        if op == TOK_PLUS { return "+" }
+        if op == TOK_MINUS { return "-" }
+        if op == TOK_STAR { return "*" }
+        if op == TOK_SLASH { return "/" }
+        if op == TOK_PERCENT { return "%" }
+        if op == TOK_AMP { return "&" }
+        if op == TOK_PIPE { return "|" }
+        if op == TOK_CARET { return "^" }
+        if op == TOK_SHL { return "<<" }
+        if op == TOK_SHR { return ">>" }
+        if op == TOK_ANDAND { return "&&" }
+        if op == TOK_OROR { return "||" }
+        return "binary op"
+    }
+
+    fn get_expr_type_name(self, expr_id: usize) -> str {
+        if expr_id == 0usize || expr_id >= self.parser.exprs.len {
+            return "unknown"
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if self.is_expr_float(expr_id) {
+            if self.is_expr_f32(expr_id) {
+                return "f32"
+            }
+            return "f64"
+        }
+        if self.is_expr_string_obj(expr_id) {
+            return "String"
+        }
+        if k == EXPR_STR {
+            return "str"
+        }
+        if k == EXPR_BOOL {
+            return "bool"
+        }
+        if k == EXPR_INT {
+            return "i64"
+        }
+        if k == EXPR_IDENT {
+            let vname = ep[expr_id].str_val.as_ptr() as str
+            let raw = self.get_raw_var_type(vname)
+            if str_len(raw) > 0usize {
+                return raw
+            }
+        }
+        if k == EXPR_CALL {
+            let callee = ep[expr_id].left
+            if ep[callee].kind == EXPR_IDENT {
+                let cname = ep[callee].str_val.as_ptr() as str
+                if str_eq(cname, "input") {
+                    return "String"
+                }
+                let raw_r = self.get_func_ret_type(cname)
+                if str_len(raw_r) > 0usize && !str_eq(raw_r, "ptr") {
+                    return raw_r
+                }
+            }
+        }
+        let s_ty = self.get_expr_struct_name(expr_id)
+        if str_len(s_ty) > 0usize {
+            return s_ty
+        }
+        if self.is_expr_ptr(expr_id) {
+            return "ptr"
+        }
+        return "i64"
     }
 
     fn stmt_terminates(self, stmt_id: usize) -> bool {
@@ -3127,6 +3238,30 @@ impl Codegen {
                 self.ir.push_str(" to i64\n")
                 return res
             } else {
+                if self.is_expr_ptr(left_id) || self.is_expr_ptr(right_id) {
+                    var l_ty = self.get_expr_type_name(left_id)
+                    var r_ty = self.get_expr_type_name(right_id)
+                    var err = String.new()
+                    err.push_str("mismatched types: cannot apply operator '")
+                    err.push_str(self.get_bin_op_str(bin_op))
+                    err.push_str("' to types '")
+                    err.push_str(l_ty)
+                    err.push_str("' and '")
+                    err.push_str(r_ty)
+                    err.push_str("'")
+                    let diag_source_id_bin = self.parser.expr_source_ids.ptr[expr_id]
+                    var span_len = 1i64
+                    if ep[left_id].kind == EXPR_IDENT {
+                        span_len = str_len(ep[left_id].str_val.as_ptr() as str) as i64
+                    }
+                    self.parser.report_error_span_for_source(diag_source_id_bin, "E0023", err.as_ptr() as str, ep[expr_id].expr_line, ep[expr_id].expr_col, span_len)
+                    let dummy = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(dummy).as_ptr() as str)
+                    self.ir.push_str(" = add i64 0, 0\n")
+                    return dummy
+                }
+
                 if bin_op == TOK_SLASH || bin_op == TOK_PERCENT {
                     let chk_zero = self.alloc_ssa()
                     self.ir.push_str("  %")
@@ -3323,6 +3458,7 @@ impl Codegen {
                    str_eq(chk_callee, "fread") || str_eq(chk_callee, "fwrite") || str_eq(chk_callee, "fseek") ||
                    str_eq(chk_callee, "ftell") || str_eq(chk_callee, "getenv") || str_eq(chk_callee, "strcmp") ||
                    str_eq(chk_callee, "isatty") || str_eq(chk_callee, "input") ||
+                   str_eq(chk_callee, "parse_int") || str_eq(chk_callee, "String__to_int") || str_eq(chk_callee, "String__parse_int") ||
                    str_eq(chk_callee, "dprintf") || str_eq(chk_callee, "eprintln") || str_eq(chk_callee, "panic") || str_eq(chk_callee, "system") ||
                    str_eq(chk_callee, "sqrt") || str_eq(chk_callee, "remove") || str_starts_with(chk_callee, "syscall") || self.is_struct_name(chk_callee) || str_eq(chk_callee, "swap") ||
                    str_eq(chk_callee, "atexit") || str_starts_with(chk_callee, "__rad_") {
@@ -3640,7 +3776,7 @@ impl Codegen {
                     pty = "double"
                 }
                 var a_is_ptr = self.is_expr_ptr(a_expr)
-                if str_eq(callee_name, "println") || str_eq(callee_name, "print") {
+                if str_eq(callee_name, "println") || str_eq(callee_name, "print") || str_eq(callee_name, "parse_int") {
                     if self.is_expr_string_obj(a_expr) {
                         let str_buf = self.alloc_ssa()
                         self.emit_str("  %")
@@ -4418,6 +4554,16 @@ impl Codegen {
                         mangled_res.push_str(clean_member)
                         mangled_res.push_byte(0u8)
                         callee_name = mangled_res.as_ptr() as str
+                        found_mangled = true
+                    }
+                }
+                if !found_mangled && str_eq(clean_raw, "String") {
+                    if str_eq(clean_member, "to_int") || str_eq(clean_member, "parse_int") {
+                        var mangled_str = String.new()
+                        mangled_str.push_str("String__")
+                        mangled_str.push_str(clean_member)
+                        mangled_str.push_byte(0u8)
+                        callee_name = mangled_str.as_ptr() as str
                         found_mangled = true
                     }
                 }
@@ -5206,6 +5352,22 @@ impl Codegen {
                     self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
                     self.ir.push_str(")\n")
                     cur_left = unwrapped
+                } else if self.is_expr_string_obj(left_id) && (str_eq(target_raw, "int") || str_eq(target_raw, "i64") || str_eq(target_raw, "i32")) {
+                    let parsed = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                    self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    cur_left = parsed
+                } else if self.is_expr_str_type(left_id) && (str_eq(target_raw, "int") || str_eq(target_raw, "i64") || str_eq(target_raw, "i32")) {
+                    let parsed = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @parse_int(ptr %")
+                    self.ir.push_str(int_to_str(left_reg).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    cur_left = parsed
                 } else if !str_eq(target_ty, "ptr") {
                     let ext = self.alloc_ssa()
                     self.ir.push_str("  %")
@@ -5486,7 +5648,7 @@ impl Codegen {
                     err.push_str(vname)
                     err.push_str("'")
                     let diag_source_id_5 = self.parser.stmt_source_ids.ptr[stmt_id]
-                    self.parser.report_error_for_source(diag_source_id_5, "E0021", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+                    self.parser.report_error_for_source(diag_source_id_5, "E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
                 }
                 var r = self.emit_expr(init_expr)
                 if str_starts_with(raw_ty, "dyn ") {
@@ -5626,6 +5788,22 @@ impl Codegen {
                         self.ir.push_str(int_to_str(r).as_ptr() as str)
                         self.ir.push_str(")\n")
                         r = unwrapped
+                    } else if (str_eq(raw_ty, "int") || str_eq(raw_ty, "i64")) && self.is_expr_string_obj(init_expr) {
+                        let parsed = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        r = parsed
+                    } else if (str_eq(raw_ty, "int") || str_eq(raw_ty, "i64")) && self.is_expr_str_type(init_expr) {
+                        let parsed = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @parse_int(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        r = parsed
                     } else {
                         let cvt = self.alloc_ssa()
                         self.ir.push_str("  %")
@@ -5647,6 +5825,22 @@ impl Codegen {
                             self.ir.push_str(int_to_str(r).as_ptr() as str)
                             self.ir.push_str(")\n")
                             cur_r = unwrapped
+                        } else if (str_eq(raw_ty, "i32") || str_eq(raw_ty, "u32")) && self.is_expr_string_obj(init_expr) {
+                            let parsed = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            cur_r = parsed
+                        } else if (str_eq(raw_ty, "i32") || str_eq(raw_ty, "u32")) && self.is_expr_str_type(init_expr) {
+                            let parsed = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @parse_int(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            cur_r = parsed
                         } else {
                             let cvt = self.alloc_ssa()
                             self.ir.push_str("  %")
@@ -5794,6 +5988,7 @@ impl Codegen {
                 self.ir.push_str(" to ptr\n")
                 r = cvt
             } else if str_eq(llvm_ty, "i64") && init_is_ptr {
+                let raw_ty = self.get_raw_var_type(vname)
                 let opt_ty = self.get_expr_struct_name(init_expr)
                 if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
                     let unwrapped = self.alloc_ssa()
@@ -5803,6 +5998,22 @@ impl Codegen {
                     self.ir.push_str(int_to_str(r).as_ptr() as str)
                     self.ir.push_str(")\n")
                     r = unwrapped
+                } else if (str_eq(raw_ty, "int") || str_eq(raw_ty, "i64")) && self.is_expr_string_obj(init_expr) {
+                    let parsed = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    r = parsed
+                } else if (str_eq(raw_ty, "int") || str_eq(raw_ty, "i64")) && self.is_expr_str_type(init_expr) {
+                    let parsed = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @parse_int(ptr %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    r = parsed
                 } else {
                     let cvt = self.alloc_ssa()
                     self.ir.push_str("  %")
@@ -5813,6 +6024,7 @@ impl Codegen {
                     r = cvt
                 }
             } else if str_eq(llvm_ty, "i32") {
+                let raw_ty = self.get_raw_var_type(vname)
                 var cur_r = r
                 if init_is_ptr {
                     let opt_ty = self.get_expr_struct_name(init_expr)
@@ -5824,6 +6036,22 @@ impl Codegen {
                         self.ir.push_str(int_to_str(r).as_ptr() as str)
                         self.ir.push_str(")\n")
                         cur_r = unwrapped
+                    } else if (str_eq(raw_ty, "i32") || str_eq(raw_ty, "u32")) && self.is_expr_string_obj(init_expr) {
+                        let parsed = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        cur_r = parsed
+                    } else if (str_eq(raw_ty, "i32") || str_eq(raw_ty, "u32")) && self.is_expr_str_type(init_expr) {
+                        let parsed = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @parse_int(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        cur_r = parsed
                     } else {
                         let cvt = self.alloc_ssa()
                         self.ir.push_str("  %")
@@ -7317,7 +7545,8 @@ impl Codegen {
         header.push_str("declare i32 @getchar()\n")
         header.push_str("declare i32 @fflush(ptr)\n")
         header.push_str("declare i32 @atexit(ptr)\n")
-        header.push_str("declare i32 @snprintf(ptr, i64, ptr, ...)\n\n")
+        header.push_str("declare i32 @snprintf(ptr, i64, ptr, ...)\n")
+        header.push_str("declare i64 @strtoll(ptr, ptr, i32)\n\n")
 
         // Emit extern function declarations
         var ext_i = 0usize
@@ -7332,6 +7561,8 @@ impl Codegen {
                    !str_eq(fname, "getenv") && !str_eq(fname, "strcmp") && !str_eq(fname, "exit") &&
                    !str_eq(fname, "dprintf") && !str_eq(fname, "sqrt") && !str_eq(fname, "remove") &&
                    !str_eq(fname, "getchar") && !str_eq(fname, "fflush") && !str_eq(fname, "input") &&
+                   !str_eq(fname, "strtoll") && !str_eq(fname, "parse_int") && !str_eq(fname, "String__to_int") &&
+                   !str_eq(fname, "String__parse_int") &&
                    !str_starts_with(fname, "__rad_") && !str_eq(fname, "atexit") &&
                    !str_starts_with(fname, "atomic_") &&
                    !str_starts_with(fname, "syscall") {
@@ -7452,6 +7683,34 @@ impl Codegen {
         }
         if !has_user_input {
             header.push_str("define ptr @input(ptr %prompt) {\nentry:\n  %has_prompt = icmp ne ptr %prompt, null\n  br i1 %has_prompt, label %print_p, label %do_read\nprint_p:\n  %p_res = call i32 (ptr, ...) @printf(ptr @.sprint_nonl_fmt, ptr %prompt)\n  br label %do_read\ndo_read:\n  %f_res = call i32 @fflush(ptr null)\n  %s = call ptr @new()\n  br label %loop\nloop:\n  %ch = call i32 @getchar()\n  %is_eof = icmp eq i32 %ch, -1\n  br i1 %is_eof, label %done, label %check_nl\ncheck_nl:\n  %is_nl = icmp eq i32 %ch, 10\n  br i1 %is_nl, label %done, label %check_cr\ncheck_cr:\n  %is_cr = icmp eq i32 %ch, 13\n  br i1 %is_cr, label %loop, label %push_c\npush_c:\n  %ch_i64 = sext i32 %ch to i64\n  call void @push_byte(ptr %s, i64 %ch_i64)\n  br label %loop\ndone:\n  ret ptr %s\n}\n\n")
+        }
+
+        var has_user_parse_int = false
+        var fi_chk_pi = 0usize
+        while fi_chk_pi < self.parser.functions.len {
+            if str_eq(self.parser.functions.ptr[fi_chk_pi].fn_name.as_ptr() as str, "parse_int") {
+                has_user_parse_int = true
+                break
+            }
+            fi_chk_pi = fi_chk_pi + 1usize
+        }
+        if !has_user_parse_int {
+            header.push_str("define i64 @parse_int(ptr %s) {\nentry:\n  %is_null = icmp eq ptr %s, null\n  br i1 %is_null, label %ret_zero, label %do_parse\nret_zero:\n  ret i64 0\ndo_parse:\n  %res = call i64 @strtoll(ptr %s, ptr null, i32 10)\n  ret i64 %res\n}\n\n")
+        }
+
+        var has_user_str_to_int = false
+        var fi_chk_sti = 0usize
+        while fi_chk_sti < self.parser.functions.len {
+            let fn_chk = self.parser.functions.ptr[fi_chk_sti].fn_name.as_ptr() as str
+            if str_eq(fn_chk, "String__to_int") || str_eq(fn_chk, "to_int") {
+                has_user_str_to_int = true
+                break
+            }
+            fi_chk_sti = fi_chk_sti + 1usize
+        }
+        if !has_user_str_to_int {
+            header.push_str("define i64 @String__to_int(ptr %s) {\nentry:\n  %is_null = icmp eq ptr %s, null\n  br i1 %is_null, label %ret_zero, label %do_get_buf\nret_zero:\n  ret i64 0\ndo_get_buf:\n  %cstr = call ptr @as_ptr(ptr %s)\n  %res = call i64 @parse_int(ptr %cstr)\n  ret i64 %res\n}\n\n")
+            header.push_str("define i64 @String__parse_int(ptr %s) {\nentry:\n  %res = call i64 @String__to_int(ptr %s)\n  ret i64 %res\n}\n\n")
         }
 
         var has_user_get = false

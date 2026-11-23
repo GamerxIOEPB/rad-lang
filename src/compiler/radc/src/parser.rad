@@ -2623,6 +2623,12 @@ impl Parser {
                     }
                 }
                 if is_move {
+                    let v_type_str = v_type.as_ptr() as str
+                    if str_eq(v_type_str, "int") || str_eq(v_type_str, "i64") || str_eq(v_type_str, "i32") || str_eq(v_type_str, "u64") || str_eq(v_type_str, "u32") || str_eq(v_type_str, "usize") {
+                        is_move = false
+                    }
+                }
+                if is_move {
                     self.moved_vars.push(self.exprs.ptr[init_id].str_val)
                 }
             }

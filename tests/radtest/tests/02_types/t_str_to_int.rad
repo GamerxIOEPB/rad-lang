@@ -1,0 +1,24 @@
+fn main() {
+    let s1 = "123"
+    let n1: int = s1
+    assert(n1 == 123)
+
+    let s2 = "456"
+    let n2 = parse_int(s2)
+    assert(n2 == 456)
+
+    let s3 = String.from_str("789")
+    let n3: int = s3
+    assert(n3 == 789)
+
+    let n4 = s3.to_int()
+    assert(n4 == 789)
+
+    let n5 = s3.parse_int()
+    assert(n5 == 789)
+
+    let n6 = s3 as int
+    assert(n6 == 789)
+
+    println("All str to int tests passed!")
+}
