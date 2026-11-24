@@ -1,0 +1,6 @@
+fn main() {
+    let a: i64 = 40i64
+    let b: i64 = 0i64
+    let c = a / b
+    println(f"res: {c}")
+}

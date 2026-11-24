@@ -1,0 +1,4 @@
+fn main() {
+    let x: i64 = 2i64
+    x = x + 1i64
+}

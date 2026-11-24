@@ -1,0 +1,12 @@
+fn main() {
+    var buf = [0i64, 0i64, 0i64, 0i64]
+    var head = 0usize
+    var op = 0i64
+    while op < 53i64 {
+        buf[head % 4usize] = op * 2i64
+        head = head + 1usize
+        op = op + 1i64
+    }
+    let last = buf[(head - 1usize) % 4usize]
+    println(f"ring_last: {last}")
+}

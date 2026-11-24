@@ -1,0 +1,26 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+struct Circle {
+    center: Point,
+    radius: i64,
+}
+
+impl Circle {
+    fn new(x: i64, y: i64, radius: i64) -> Circle {
+        return Circle {
+            center: Point { x: x, y: y },
+            radius: radius,
+        }
+    }
+    fn diameter(self) -> i64 {
+        return self.radius * 2i64
+    }
+}
+
+fn main() {
+    let c = Circle.new(49i64, 50i64, 52i64)
+    println(f"center=({c.center.x}, {c.center.y}), diam={c.diameter()}")
+}

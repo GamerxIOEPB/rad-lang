@@ -1,0 +1,5 @@
+fn main() {
+    let s: str = "prefix_91"
+    let num: i64 = 91i64
+    let r = s + num
+}

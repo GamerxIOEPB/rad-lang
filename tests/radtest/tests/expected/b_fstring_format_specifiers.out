@@ -1,0 +1,7 @@
+int_padded: 007
+flt_prec: 3.14
+flt_prec4: 3.1416
+hex_lower: 00ff
+hex_upper: 00AB
+octal: 0100
+combined: num=07, flt=3.142, hex=ff

@@ -1,0 +1,14 @@
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn main() {
+    let p = malloc(16usize) as *raw var i64
+    p[0] = 160i64
+    p[1] = 320i64
+    let r0 = p[0]
+    let r1 = p[1]
+    println(f"r0: {r0}, r1: {r1}, sum: {r0 + r1}")
+    free(p as *raw var u8)
+}

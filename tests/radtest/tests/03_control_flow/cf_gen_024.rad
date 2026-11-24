@@ -1,0 +1,11 @@
+fn main() {
+    var cnt: i64 = 0i64
+    var total: i64 = 0i64
+    for x in 0..72 {
+        if x % 3 == 0 {
+            cnt = cnt + 1i64
+            total = total + (x as i64)
+        }
+    }
+    println(f"cnt: {cnt}, total: {total}")
+}

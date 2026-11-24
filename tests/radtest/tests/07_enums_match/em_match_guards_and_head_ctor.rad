@@ -1,0 +1,60 @@
+enum Shape {
+    Square,
+    Circle(i64),
+}
+
+fn test_guard(o: Option<i64>) -> str {
+    match o {
+        Option.Some(x) if x > 10i64 => return "greater_than_10",
+        Option.Some(x) if x > 0i64 => return "positive",
+        Option.Some(x) => return "zero_or_negative",
+        Option.None => return "none",
+    }
+}
+
+fn test_tuple_guard(t: (i64, i64)) -> str {
+    match t {
+        (a, b) if a == b => return "equal",
+        (a, b) if a > b => return "descending",
+        _ => return "ascending",
+    }
+}
+
+fn test_wildcard_guard(v: i64) -> str {
+    match v {
+        _ if v >= 100i64 => return "century",
+        _ if v >= 50i64 => return "half_century",
+        _ => return "small",
+    }
+}
+
+fn main() {
+    // 1. Enum ctor in match head
+    match Shape::Circle(42i64) {
+        Shape::Circle(r) => println(f"Circle radius: {r}"),
+        Shape::Square => println("Square"),
+        _ => println("Other"),
+    }
+
+    match Shape::Square {
+        Shape::Circle(r) => println(f"Circle: {r}"),
+        Shape::Square => println("Square confirmed"),
+        _ => println("Other"),
+    }
+
+    // 2. Pattern guards
+    println(f"guard(Some(15)): {test_guard(Option.Some(15i64))}");
+    println(f"guard(Some(5)): {test_guard(Option.Some(5i64))}");
+    println(f"guard(Some(0)): {test_guard(Option.Some(0i64))}");
+    println(f"guard(None): {test_guard(Option.None)}");
+
+    // 3. Tuple guards
+    println(f"tup(5, 5): {test_tuple_guard((5i64, 5i64))}");
+    println(f"tup(10, 2): {test_tuple_guard((10i64, 2i64))}");
+    println(f"tup(3, 8): {test_tuple_guard((3i64, 8i64))}");
+
+    // 4. Wildcard guards
+    println(f"wild(150): {test_wildcard_guard(150i64)}");
+    println(f"wild(75): {test_wildcard_guard(75i64)}");
+    println(f"wild(10): {test_wildcard_guard(10i64)}");
+}

@@ -1,0 +1,11 @@
+fn main() {
+    let some_val: Option<i64> = Option.Some(60i64)
+    let none_val: Option<i64> = Option.None
+
+    let v1 = some_val.unwrap_or(0i64)
+    let v2 = none_val.unwrap_or(999i64)
+    let s1 = some_val.is_some()
+    let s2 = none_val.is_none()
+
+    println(f"v1={v1} v2={v2} s1={s1} s2={s2}")
+}

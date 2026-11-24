@@ -1,0 +1,6 @@
+fn main() {
+    var arr = [1i64, 2i64, 3i64, 4i64, 5i64]
+    let bad_idx: usize = 30usize
+    let v = arr[bad_idx]
+    println(f"val: {v}")
+}

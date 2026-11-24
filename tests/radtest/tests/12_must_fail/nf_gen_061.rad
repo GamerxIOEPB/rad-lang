@@ -1,0 +1,8 @@
+fn duplicate_func_61() {
+    let x = 1
+}
+fn duplicate_func_61() {
+    let x = 2
+}
+fn main() {
+}

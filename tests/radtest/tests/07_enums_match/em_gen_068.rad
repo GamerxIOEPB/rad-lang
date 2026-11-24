@@ -1,0 +1,13 @@
+fn test_literal_arm(opt: Option<i64>) -> str {
+    match opt {
+        Option.Some(0i64) => return "exact_zero",
+        Option.Some(v) if v > 0i64 => return "positive",
+        Option.Some(v) => return "negative",
+        Option.None => return "none",
+    }
+}
+
+fn main() {
+    let res = test_literal_arm(Option.Some(-2i64))
+    println(res)
+}

@@ -1,0 +1,3 @@
+fn not_main_77() {
+    println("hello")
+}

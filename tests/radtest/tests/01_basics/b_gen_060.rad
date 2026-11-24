@@ -1,0 +1,9 @@
+fn main() {
+    let b1 = true
+    let b2 = true
+    let b3 = true
+    let r1 = b1 && b2
+    let r2 = b1 || b3
+    let r3 = (b1 && !b2) || (b3 && !b1)
+    println(f"r1: {r1}, r2: {r2}, r3: {r3}")
+}

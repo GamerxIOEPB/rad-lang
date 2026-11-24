@@ -1,0 +1,22 @@
+struct Counter {
+    val: i64,
+}
+
+impl Counter {
+    fn new(val: i64) -> Counter {
+        return Counter { val: val }
+    }
+    fn add(var self, amount: i64) {
+        self.val = self.val + amount
+    }
+    fn multiply(var self, factor: i64) {
+        self.val = self.val * factor
+    }
+}
+
+fn main() {
+    var c = Counter.new(210i64)
+    c.add(63i64)
+    c.multiply(2i64)
+    println(f"counter: {c.val}")
+}

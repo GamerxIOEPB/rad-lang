@@ -1,0 +1,12 @@
+Circle radius: 42
+Square confirmed
+guard(Some(15)): greater_than_10
+guard(Some(5)): positive
+guard(Some(0)): zero_or_negative
+guard(None): none
+tup(5, 5): equal
+tup(10, 2): descending
+tup(3, 8): ascending
+wild(150): century
+wild(75): half_century
+wild(10): small

@@ -2669,14 +2669,31 @@ impl Codegen {
             var i = 0usize
             while i < flen {
                 var is_hole = false
+                var hole_end = 0usize
+                var has_spec = false
+                var spec_start = 0usize
+                var spec_end = 0usize
                 if p_fmt[i] == 123u8 {
                     if i + 1usize < flen {
                         if p_fmt[i + 1usize] == 125u8 {
                             is_hole = true
+                            hole_end = i + 1usize
+                        } else if p_fmt[i + 1usize] == 58u8 {
+                            var j = i + 2usize
+                            while j < flen && p_fmt[j] != 125u8 {
+                                j = j + 1usize
+                            }
+                            if j < flen && p_fmt[j] == 125u8 {
+                                is_hole = true
+                                hole_end = j
+                                has_spec = true
+                                spec_start = i + 2usize
+                                spec_end = j
+                            }
                         }
                     }
                 }
-                if is_hole { // '{}'
+                if is_hole {
                     if i > seg_start {
                         var seg = String.new()
                         var si = seg_start
@@ -2705,7 +2722,114 @@ impl Codegen {
                     if arg_idx < args_len {
                         let arg_expr = ep[expr_id].args.ptr[arg_idx]
                         let arg_reg = self.emit_expr(arg_expr)
-                        if self.is_expr_string_obj(arg_expr) {
+                        if has_spec && spec_end > spec_start {
+                            let spec_len = spec_end - spec_start
+                            let p_spec = (p_fmt as usize + spec_start) as *raw u8
+                            var c_fmt = String.new()
+                            c_fmt.push_byte(37u8)
+                            if self.is_expr_float(arg_expr) {
+                                var flt_reg = arg_reg
+                                if self.is_expr_f32(arg_expr) {
+                                    let cvt = self.alloc_ssa()
+                                    self.ir.push_str("  %")
+                                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                                    self.ir.push_str(" = fpext float %")
+                                    self.ir.push_str(int_to_str(arg_reg).as_ptr() as str)
+                                    self.ir.push_str(" to double\n")
+                                    flt_reg = cvt
+                                }
+                                var spi = 0usize
+                                while spi < spec_len {
+                                    c_fmt.push_byte(p_spec[spi])
+                                    spi = spi + 1usize
+                                }
+                                let last_ch = p_spec[spec_len - 1usize]
+                                if last_ch != 102u8 && last_ch != 101u8 && last_ch != 103u8 && last_ch != 70u8 && last_ch != 69u8 && last_ch != 71u8 {
+                                    c_fmt.push_byte(102u8)
+                                }
+                                c_fmt.push_byte(0u8)
+                                let s_id = self.intern_string(c_fmt)
+                                let s_entry = self.strings.ptr[s_id]
+                                let fmt_reg = self.alloc_ssa()
+                                self.ir.push_str("  %")
+                                self.ir.push_str(int_to_str(fmt_reg).as_ptr() as str)
+                                self.ir.push_str(" = getelementptr inbounds [")
+                                self.ir.push_str(int_to_str(s_entry.byte_len as i32).as_ptr() as str)
+                                self.ir.push_str(" x i8], ptr @.str.")
+                                self.ir.push_str(int_to_str(s_id as i32).as_ptr() as str)
+                                self.ir.push_str(", i32 0, i32 0\n")
+                                let buf_reg = self.alloc_ssa()
+                                self.ir.push_str("  %")
+                                self.ir.push_str(int_to_str(buf_reg).as_ptr() as str)
+                                self.ir.push_str(" = alloca [64 x i8], align 1\n")
+                                let snp_reg = self.alloc_ssa()
+                                self.ir.push_str("  %")
+                                self.ir.push_str(int_to_str(snp_reg).as_ptr() as str)
+                                self.ir.push_str(" = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %")
+                                self.ir.push_str(int_to_str(buf_reg).as_ptr() as str)
+                                self.ir.push_str(", i64 64, ptr %")
+                                self.ir.push_str(int_to_str(fmt_reg).as_ptr() as str)
+                                self.ir.push_str(", double %")
+                                self.ir.push_str(int_to_str(flt_reg).as_ptr() as str)
+                                self.ir.push_str(")\n")
+                                self.ir.push_str("  call void @push_str(ptr %")
+                                self.ir.push_str(int_to_str(res).as_ptr() as str)
+                                self.ir.push_str(", ptr %")
+                                self.ir.push_str(int_to_str(buf_reg).as_ptr() as str)
+                                self.ir.push_str(")\n")
+                            } else {
+                                var spi = 0usize
+                                while spi + 1usize < spec_len {
+                                    c_fmt.push_byte(p_spec[spi])
+                                    spi = spi + 1usize
+                                }
+                                let last_ch = p_spec[spec_len - 1usize]
+                                if last_ch == 100u8 || last_ch == 105u8 {
+                                    c_fmt.push_str("ld")
+                                } else if last_ch == 117u8 {
+                                    c_fmt.push_str("lu")
+                                } else if last_ch == 120u8 {
+                                    c_fmt.push_str("lx")
+                                } else if last_ch == 88u8 {
+                                    c_fmt.push_str("lX")
+                                } else if last_ch == 111u8 {
+                                    c_fmt.push_str("lo")
+                                } else {
+                                    c_fmt.push_byte(last_ch)
+                                    c_fmt.push_str("ld")
+                                }
+                                c_fmt.push_byte(0u8)
+                                let s_id = self.intern_string(c_fmt)
+                                let s_entry = self.strings.ptr[s_id]
+                                let fmt_reg = self.alloc_ssa()
+                                self.ir.push_str("  %")
+                                self.ir.push_str(int_to_str(fmt_reg).as_ptr() as str)
+                                self.ir.push_str(" = getelementptr inbounds [")
+                                self.ir.push_str(int_to_str(s_entry.byte_len as i32).as_ptr() as str)
+                                self.ir.push_str(" x i8], ptr @.str.")
+                                self.ir.push_str(int_to_str(s_id as i32).as_ptr() as str)
+                                self.ir.push_str(", i32 0, i32 0\n")
+                                let buf_reg = self.alloc_ssa()
+                                self.ir.push_str("  %")
+                                self.ir.push_str(int_to_str(buf_reg).as_ptr() as str)
+                                self.ir.push_str(" = alloca [64 x i8], align 1\n")
+                                let snp_reg = self.alloc_ssa()
+                                self.ir.push_str("  %")
+                                self.ir.push_str(int_to_str(snp_reg).as_ptr() as str)
+                                self.ir.push_str(" = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %")
+                                self.ir.push_str(int_to_str(buf_reg).as_ptr() as str)
+                                self.ir.push_str(", i64 64, ptr %")
+                                self.ir.push_str(int_to_str(fmt_reg).as_ptr() as str)
+                                self.ir.push_str(", i64 %")
+                                self.ir.push_str(int_to_str(arg_reg).as_ptr() as str)
+                                self.ir.push_str(")\n")
+                                self.ir.push_str("  call void @push_str(ptr %")
+                                self.ir.push_str(int_to_str(res).as_ptr() as str)
+                                self.ir.push_str(", ptr %")
+                                self.ir.push_str(int_to_str(buf_reg).as_ptr() as str)
+                                self.ir.push_str(")\n")
+                            }
+                        } else if self.is_expr_string_obj(arg_expr) {
                             let str_buf = self.alloc_ssa()
                             self.ir.push_str("  %")
                             self.ir.push_str(int_to_str(str_buf).as_ptr() as str)
@@ -2765,7 +2889,7 @@ impl Codegen {
                         }
                         arg_idx = arg_idx + 1usize
                     }
-                    i = i + 2usize
+                    i = hole_end + 1usize
                     seg_start = i
                 } else {
                     i = i + 1usize
@@ -4328,6 +4452,17 @@ impl Codegen {
                             break
                         }
                         fi = fi + 1usize
+                    }
+                    if !found_static {
+                        var cti = 0usize
+                        while cti < self.parser.enum_variant_ctors.len {
+                            if str_eq(self.parser.enum_variant_ctors.ptr[cti].as_ptr() as str, m_str) {
+                                callee_name = m_str
+                                found_static = true
+                                break
+                            }
+                            cti = cti + 1usize
+                        }
                     }
                     if !found_static {
                         let base_ty = self.clean_type_name(type_s)
@@ -7117,6 +7252,8 @@ impl Codegen {
                 self.ir.push_str("  br label %while.end.")
                 self.ir.push_str(int_to_str(end_lbl).as_ptr() as str)
                 self.ir.push_str("\n")
+            } else {
+                self.parser.report_error("E0025", "'break' outside of a loop", sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
             }
         } else if k == STMT_CONTINUE {
             if self.loop_cond_labels.len > 0usize {
@@ -7132,6 +7269,8 @@ impl Codegen {
                 self.ir.push_str("  br label %while.cond.")
                 self.ir.push_str(int_to_str(cond_lbl).as_ptr() as str)
                 self.ir.push_str("\n")
+            } else {
+                self.parser.report_error("E0025", "'continue' outside of a loop", sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
             }
         } else if k == STMT_RETURN {
             if sp[stmt_id].expr_id != 0usize {
@@ -7600,7 +7739,7 @@ impl Codegen {
         var ext_i = 0usize
         while ext_i < self.parser.functions.len {
             let func = self.parser.functions.ptr[ext_i]
-            if func.body.len == 0usize {
+            if !func.has_body {
                 let fname = func.fn_name.as_ptr() as str
                 if !str_eq(fname, "malloc") && !str_eq(fname, "free") && !str_eq(fname, "realloc") &&
                    !str_eq(fname, "system") && !str_eq(fname, "puts") && !str_eq(fname, "printf") &&
@@ -7623,7 +7762,17 @@ impl Codegen {
                         }
                         prev_i = prev_i + 1usize
                     }
-                    if !already_declared {
+                    var has_def_in_module = false
+                    var chk_i = 0usize
+                    while chk_i < self.parser.functions.len {
+                        let f_chk = self.parser.functions.ptr[chk_i]
+                        if f_chk.has_body && str_eq(f_chk.fn_name.as_ptr() as str, fname) {
+                            has_def_in_module = true
+                            break
+                        }
+                        chk_i = chk_i + 1usize
+                    }
+                    if !already_declared && !has_def_in_module {
                         header.push_str("declare ")
                         header.push_str(self.emit_llvm_type(func.ret_type.as_ptr() as str))
                         header.push_str(" @")
@@ -7806,6 +7955,26 @@ impl Codegen {
 
         header.push_str("define i64 @Just(i64 %v) {\nentry:\n  ret i64 %v\n}\n\n")
 
+        var cti = 0usize
+        while cti < self.parser.enum_variant_ctors.len {
+            let cname = self.parser.enum_variant_ctors.ptr[cti].as_ptr() as str
+            let arity = self.parser.enum_variant_arities.ptr[cti]
+            if !str_eq(cname, "On") && !str_eq(cname, "Just") && !str_eq(cname, "Some") && !str_eq(cname, "Ok") && !str_eq(cname, "Err") {
+                header.push_str("define i64 @")
+                header.push_str(cname)
+                if arity == 0i64 {
+                    header.push_str("() {\nentry:\n  ret i64 0\n}\n\n")
+                } else if arity == 1i64 {
+                    header.push_str("(i64 %v) {\nentry:\n  ret i64 %v\n}\n\n")
+                } else if arity == 2i64 {
+                    header.push_str("(i64 %v0, i64 %v1) {\nentry:\n  %p = call ptr @malloc(i64 16)\n  store i64 %v0, ptr %p, align 8\n  %p1 = getelementptr inbounds i64, ptr %p, i32 1\n  store i64 %v1, ptr %p1, align 8\n  %res = ptrtoint ptr %p to i64\n  ret i64 %res\n}\n\n")
+                } else {
+                    header.push_str("(i64 %v0, i64 %v1, i64 %v2) {\nentry:\n  ret i64 %v0\n}\n\n")
+                }
+            }
+            cti = cti + 1usize
+        }
+
         header.push_str("define i64 @__rad_is_some(ptr %p) {\nentry:\n  %is_null = icmp eq ptr %p, null\n  br i1 %is_null, label %null_ret, label %tag_chk\ntag_chk:\n  %tp = getelementptr inbounds %struct.Option, ptr %p, i32 0, i32 0\n  %tag = load i64, ptr %tp, align 8\n  %is_one = icmp eq i64 %tag, 1\n  %res = zext i1 %is_one to i64\n  ret i64 %res\nnull_ret:\n  ret i64 0\n}\n\n")
 
         header.push_str("define i64 @__rad_get_val(ptr %p) {\nentry:\n  %is_null = icmp eq ptr %p, null\n  br i1 %is_null, label %null_ret, label %val_load\nval_load:\n  %vp = getelementptr inbounds %struct.Option, ptr %p, i32 0, i32 1\n  %val = load i64, ptr %vp, align 8\n  ret i64 %val\nnull_ret:\n  ret i64 0\n}\n\n")
@@ -7836,6 +8005,40 @@ impl Codegen {
         }
         if !has_user_opt_unwrap_or {
             header.push_str("define i64 @Option__unwrap_or(ptr %opt, i64 %def) {\nentry:\n  %is_s = call i64 @__rad_is_some(ptr %opt)\n  %chk = icmp eq i64 %is_s, 0\n  br i1 %chk, label %ret_def, label %ret_val\nret_def:\n  ret i64 %def\nret_val:\n  %val = call i64 @__rad_get_val(ptr %opt)\n  ret i64 %val\n}\n\n")
+        }
+
+        var has_user_res_unwrap = false
+        var has_user_res_unwrap_or = false
+        var has_user_res_is_ok = false
+        var has_user_res_is_err = false
+        var fi_res = 0usize
+        while fi_res < self.parser.functions.len {
+            let fn_name_s = self.parser.functions.ptr[fi_res].fn_name.as_ptr() as str
+            if str_eq(fn_name_s, "Result__unwrap") { has_user_res_unwrap = true }
+            if str_eq(fn_name_s, "Result__unwrap_or") { has_user_res_unwrap_or = true }
+            if str_eq(fn_name_s, "Result__is_ok") { has_user_res_is_ok = true }
+            if str_eq(fn_name_s, "Result__is_err") { has_user_res_is_err = true }
+            fi_res = fi_res + 1usize
+        }
+
+        if !has_user_res_is_ok || !has_user_res_is_err || !has_user_res_unwrap || !has_user_res_unwrap_or {
+            header.push_str("define i64 @__rad_is_ok(ptr %p) {\nentry:\n  %is_null = icmp eq ptr %p, null\n  br i1 %is_null, label %null_ret, label %tag_chk\ntag_chk:\n  %tp = getelementptr inbounds %struct.Result, ptr %p, i32 0, i32 0\n  %tag = load i64, ptr %tp, align 8\n  %is_one = icmp eq i64 %tag, 1\n  %res = zext i1 %is_one to i64\n  ret i64 %res\nnull_ret:\n  ret i64 0\n}\n\n")
+        }
+
+        if !has_user_res_is_ok {
+            header.push_str("define i64 @Result__is_ok(ptr %res) {\nentry:\n  %r = call i64 @__rad_is_ok(ptr %res)\n  ret i64 %r\n}\n\n")
+        }
+
+        if !has_user_res_is_err {
+            header.push_str("define i64 @Result__is_err(ptr %res) {\nentry:\n  %r = call i64 @__rad_is_ok(ptr %res)\n  %is_err = icmp eq i64 %r, 0\n  %z = zext i1 %is_err to i64\n  ret i64 %z\n}\n\n")
+        }
+
+        if !has_user_res_unwrap {
+            header.push_str("define i64 @Result__unwrap(ptr %res) {\nentry:\n  %is_ok = call i64 @__rad_is_ok(ptr %res)\n  %chk = icmp eq i64 %is_ok, 0\n  br i1 %chk, label %panic_arm, label %val_arm\npanic_arm:\n  %fmt = getelementptr inbounds [39 x i8], ptr @.opt_unwrap_panic, i32 0, i32 0\n  call void @panic(ptr %fmt)\n  ret i64 0\nval_arm:\n  %vp = getelementptr inbounds %struct.Result, ptr %res, i32 0, i32 1\n  %val = load i64, ptr %vp, align 8\n  ret i64 %val\n}\n\n")
+        }
+
+        if !has_user_res_unwrap_or {
+            header.push_str("define i64 @Result__unwrap_or(ptr %res, i64 %def) {\nentry:\n  %is_ok = call i64 @__rad_is_ok(ptr %res)\n  %chk = icmp eq i64 %is_ok, 0\n  br i1 %chk, label %ret_def, label %ret_val\nret_def:\n  ret i64 %def\nret_val:\n  %val = call i64 @__rad_get_val(ptr %res)\n  ret i64 %val\n}\n\n")
         }
 
         header.push_str("@.eprint_fmt = private unnamed_addr constant [4 x i8] c\"%s\\0A\\00\", align 1\n")
@@ -7911,7 +8114,7 @@ impl Codegen {
         var f_idx = 0usize
         while f_idx < self.parser.functions.len {
             let func = self.parser.functions.ptr[f_idx]
-            if func.body.len == 0usize {
+            if !func.has_body {
                 f_idx = f_idx + 1usize
                 continue
             }

@@ -1,0 +1,7 @@
+fn main() {
+    let n: i64 = 10i64
+    let f: f64 = 13.463957142857142
+    let h: i64 = 10i64
+    let o: i64 = 10i64
+    println(f"pad: {n:05d}, flt2: {f:.2f}, flt4: {f:.4f}, hex: {h:04x}, oct: {o:04o}")
+}

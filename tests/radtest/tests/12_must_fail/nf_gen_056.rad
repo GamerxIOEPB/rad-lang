@@ -1,0 +1,4 @@
+fn main() {
+    let y = 56
+    continue;
+}

@@ -1,0 +1,8 @@
+extern "C" {
+    fn sqrt(x: f64) -> f64;
+}
+
+fn main() {
+    let s = sqrt(484.0)
+    println(f"sqrt(484.0) = {s:.1f}")
+}

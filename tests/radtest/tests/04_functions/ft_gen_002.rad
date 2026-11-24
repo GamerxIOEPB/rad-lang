@@ -1,0 +1,11 @@
+fn gcd(a: i64, b: i64) -> i64 {
+    if b == 0i64 {
+        return a
+    }
+    return gcd(b, a % b)
+}
+
+fn main() {
+    let res = gcd(33i64, 13i64)
+    println(f"gcd(33, 13) = {res}")
+}

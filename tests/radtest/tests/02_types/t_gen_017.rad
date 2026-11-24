@@ -1,0 +1,9 @@
+fn main() {
+    let x: i64 = 209865i64
+    let u: u64 = x as u64
+    let i32_v: i32 = x as i32
+    let u32_v: u32 = x as u32
+    let i16_v: i16 = x as i16
+    let u8_v: u8 = x as u8
+    println(f"x={x} u32={u32_v} u8={u8_v}")
+}

@@ -1,0 +1,18 @@
+fn is_prime(n: i64) -> bool {
+    if n <= 1i64 {
+        return false
+    }
+    var d: i64 = 2i64
+    while d * d <= n {
+        if n % d == 0i64 {
+            return false
+        }
+        d = d + 1i64
+    }
+    return true
+}
+
+fn main() {
+    let res = is_prime(111i64)
+    println(f"prime(111): {res}")
+}

@@ -1,0 +1,9 @@
+fn eval_poly(x: i64, y: i64, z: i64) -> i64 {
+    let r = x * x + 2i64 * y + 3i64 * z
+    return r
+}
+
+fn main() {
+    let res = eval_poly(31i64, 33i64, 93i64)
+    println(f"poly(31, 33, 93) = {res}")
+}

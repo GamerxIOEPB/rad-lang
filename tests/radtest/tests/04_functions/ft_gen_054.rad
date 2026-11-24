@@ -1,0 +1,20 @@
+fn is_odd(n: i64) -> bool;
+
+fn is_even(n: i64) -> bool {
+    if n == 0i64 {
+        return true
+    }
+    return is_odd(n - 1i64)
+}
+
+fn is_odd(n: i64) -> bool {
+    if n == 0i64 {
+        return false
+    }
+    return is_even(n - 1i64)
+}
+
+fn main() {
+    let ev = is_even(54i64)
+    println(f"is_even(54): {ev}")
+}

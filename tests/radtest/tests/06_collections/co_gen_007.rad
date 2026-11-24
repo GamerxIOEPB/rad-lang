@@ -1,0 +1,15 @@
+fn main() {
+    var v = Vec.new()
+    var k: i64 = 0i64
+    while k < 10i64 {
+        v.push(k * 7i64)
+        k = k + 1i64
+    }
+    var sum: i64 = 0i64
+    var idx = 0usize
+    while idx < v.len {
+        sum = sum + v.ptr[idx]
+        idx = idx + 1usize
+    }
+    println(f"len: {v.len}, sum: {sum}")
+}

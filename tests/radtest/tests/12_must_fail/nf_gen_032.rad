@@ -1,0 +1,3 @@
+fn main() {
+    let a: i64 = nonexistent_var_32 + 5i64
+}

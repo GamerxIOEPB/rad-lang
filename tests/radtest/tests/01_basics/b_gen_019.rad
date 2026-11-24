@@ -1,0 +1,5 @@
+fn main() {
+    let a: i64 = 133i64
+    let b: i64 = 58i64
+    println(f"add: {a + b}, sub: {a - b}, mul: {a * b}, div: {a / b}, mod: {a % b}")
+}

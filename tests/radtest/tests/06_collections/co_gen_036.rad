@@ -1,0 +1,5 @@
+fn main() {
+    var s = String.from_str("Prefix_36_")
+    s.push_str("Suffix")
+    println(f"str: {s.as_ptr() as str}, len: {s.len()}")
+}

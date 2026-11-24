@@ -1,0 +1,30 @@
+struct Node {
+    val: i64,
+    next: *raw var Node,
+}
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn main() {
+    var head = 0usize as *raw var Node
+    var k: i64 = 1i64
+    while k <= 7i64 {
+        let n = malloc(16usize) as *raw var Node
+        n.val = k
+        n.next = head
+        head = n
+        k = k + 1i64
+    }
+    var sum: i64 = 0i64
+    var curr = head
+    while (curr as usize) != 0usize {
+        sum = sum + curr.val
+        let nxt = curr.next
+        free(curr as *raw var u8)
+        curr = nxt
+    }
+    println(f"list_sum: {sum}")
+}

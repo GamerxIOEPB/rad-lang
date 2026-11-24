@@ -76,6 +76,8 @@ struct FunctionDef {
     body: Vec<usize>,
     is_test: bool,
     is_async: bool,
+    has_body: bool,
+    source_id: usize,
 }
 
 struct TraitMethodDef {

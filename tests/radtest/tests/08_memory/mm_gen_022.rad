@@ -1,0 +1,22 @@
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn main() {
+    let count: usize = 4usize
+    let p = malloc(count * 8usize) as *raw var i64
+    var idx = 0usize
+    while idx < count {
+        p[idx] = ((22i64 + (idx as i64)) * 3i64)
+        idx = idx + 1usize
+    }
+    var total: i64 = 0i64
+    idx = 0usize
+    while idx < count {
+        total = total + p[idx]
+        idx = idx + 1usize
+    }
+    println(f"total: {total}")
+    free(p as *raw var u8)
+}

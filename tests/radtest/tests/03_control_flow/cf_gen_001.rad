@@ -1,0 +1,9 @@
+fn main() {
+    var sum: i64 = 0i64
+    var k: i64 = 1i64
+    while k <= 6i64 {
+        sum = sum + k * k
+        k = k + 1i64
+    }
+    println(f"sum: {sum}")
+}

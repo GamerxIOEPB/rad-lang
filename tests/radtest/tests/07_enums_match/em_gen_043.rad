@@ -1,0 +1,9 @@
+fn main() {
+    let x: i64 = 3i64
+    match x {
+        1i64 | 2i64 | 3i64 => println(f"group_123: {x}"),
+        4i64 | 5i64 | 6i64 => println(f"group_456: {x}"),
+        _ if x > 6i64 => println(f"high: {x}"),
+        _ => println(f"zero: {x}"),
+    }
+}

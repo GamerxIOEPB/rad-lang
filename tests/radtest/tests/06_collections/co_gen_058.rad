@@ -1,0 +1,6 @@
+fn main() {
+    var map = HashMap.new()
+    map.insert("key_58_a", 638i64)
+    map.insert("key_58_b", 1276i64)
+    println("map-inserted-ok")
+}

@@ -758,6 +758,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         cur_is_async: false,
         extra_stmts: Vec.new(),
         tup_tmp_counter: 0i64,
+        enum_variant_ctors: Vec.new(),
+        enum_variant_arities: Vec.new(),
     }
     parser.enum_names.push(String.from_str("Option"))
     parser.enum_names.push(String.from_str("Result"))
@@ -899,6 +901,25 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
 
     if parser.error_count > 0i64 {
         return 1
+    }
+
+    if !opts.compile_only && !opts.test_mode && !opts.emit_llvm && !opts.check_only {
+        var has_main_entry = false
+        var fi = 0usize
+        while fi < parser.functions.len {
+            let func_chk = parser.functions.ptr[fi]
+            if func_chk.has_body && str_eq(func_chk.fn_name.as_ptr() as str, "main") {
+                has_main_entry = true
+                break
+            }
+            fi = fi + 1usize
+        }
+        if !has_main_entry {
+            var err = String.new()
+            err.push_str("error[E0026]: entry point 'main' function not found")
+            println(err.as_ptr() as str)
+            return 1
+        }
     }
 
     var main_src = String.from_str("main.rad")

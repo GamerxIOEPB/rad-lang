@@ -1,0 +1,15 @@
+fn main() {
+    let num: i64 = 7i64;
+    let flt: f64 = 3.14159;
+    let hex_val: i64 = 255i64;
+    let hex_upper: i64 = 171i64;
+    let oct_val: i64 = 64i64;
+
+    println(f"int_padded: {num:03d}");
+    println(f"flt_prec: {flt:.2f}");
+    println(f"flt_prec4: {flt:.4f}");
+    println(f"hex_lower: {hex_val:04x}");
+    println(f"hex_upper: {hex_upper:04X}");
+    println(f"octal: {oct_val:04o}");
+    println(f"combined: num={num:02d}, flt={flt:.3f}, hex={hex_val:x}");
+}

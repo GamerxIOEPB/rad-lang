@@ -1,0 +1,14 @@
+fn classify(o: Option<i64>) -> str {
+    match o {
+        Option.Some(x) if x > 15i64 => return "large_positive",
+        Option.Some(x) if x > 0i64 => return "small_positive",
+        Option.Some(0i64) => return "zero",
+        Option.Some(x) => return "negative",
+        Option.None => return "none",
+    }
+}
+
+fn main() {
+    let res = classify(Option.Some(-1i64))
+    println(res)
+}

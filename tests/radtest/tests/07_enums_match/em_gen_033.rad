@@ -1,0 +1,14 @@
+enum Geometry {
+    Square,
+    Circle(i64),
+    Triangle(i64, i64),
+}
+
+fn main() {
+    match Geometry::Circle(132i64) {
+        Geometry::Circle(r) if r > 100i64 => println(f"BigRadius: {r}"),
+        Geometry::Circle(r) => println(f"Radius: {r}"),
+        Geometry::Square => println("Square"),
+        _ => println("Other"),
+    }
+}

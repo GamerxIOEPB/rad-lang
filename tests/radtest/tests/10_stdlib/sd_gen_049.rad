@@ -1,0 +1,11 @@
+fn main() {
+    let ok_val: Result<i64, str> = Result.Ok(1225i64)
+    let err_val: Result<i64, str> = Result.Err("error_occurred")
+
+    let v1 = ok_val.unwrap_or(0i64)
+    let v2 = err_val.unwrap_or(404i64)
+    let is_ok = ok_val.is_ok()
+    let is_err = err_val.is_err()
+
+    println(f"ok={v1} err_fallback={v2} is_ok={is_ok} is_err={is_err}")
+}

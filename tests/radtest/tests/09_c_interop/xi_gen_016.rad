@@ -1,0 +1,8 @@
+extern "C" {
+    fn strlen(s: str) -> usize;
+}
+
+fn main() {
+    let l = strlen("hello_c_16")
+    println(f"len('hello_c_16') = {l}")
+}
