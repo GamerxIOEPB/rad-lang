@@ -27,10 +27,27 @@ fn test_or_payload(res: Result<i64, str>) -> str {
     }
 }
 
+fn test_minimal_some5(o: Option<i64>) -> str {
+    match o {
+        Option.Some(0) => return "A",
+        Option.Some(v) => return "B",
+        Option.None => return "C",
+    }
+}
+
+fn test_minimal_err_io(r: Result<i64, str>) -> str {
+    match r {
+        Result.Err("io") => return "A",
+        Result.Err(e) => return "B",
+        Result.Ok(v) => return "C",
+    }
+}
+
 fn main() {
     // 1. Option literal payloads
     println(f"test_opt(Some(0)): {test_opt(Option.Some(0))}");
     println(f"test_opt(Some(1)): {test_opt(Option.Some(1))}");
+    println(f"test_opt(Some(5)): {test_opt(Option.Some(5))}");
     println(f"test_opt(Some(-1)): {test_opt(Option.Some(-1))}");
     println(f"test_opt(Some(42)): {test_opt(Option.Some(42))}");
     println(f"test_opt(None): {test_opt(Option.None)}");
@@ -49,4 +66,8 @@ fn main() {
     println(f"test_or_payload(Err(bad)): {test_or_payload(Result.Err(\"bad\"))}");
     println(f"test_or_payload(Err(fatal)): {test_or_payload(Result.Err(\"fatal\"))}");
     println(f"test_or_payload(Err(other)): {test_or_payload(Result.Err(\"other\"))}");
+
+    // 4. Minimal reproducer probe structures (r42-r44)
+    println(f"test_minimal_some5(Some(5)): {test_minimal_some5(Option.Some(5))}");
+    println(f"test_minimal_err_io(Err(not-found)): {test_minimal_err_io(Result.Err(\"not-found\"))}");
 }

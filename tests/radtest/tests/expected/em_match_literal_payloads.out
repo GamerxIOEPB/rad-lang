@@ -1,5 +1,6 @@
 test_opt(Some(0)): some-zero
 test_opt(Some(1)): some-one
+test_opt(Some(5)): some-other
 test_opt(Some(-1)): some-neg-one
 test_opt(Some(42)): some-other
 test_opt(None): none
@@ -14,3 +15,5 @@ test_or_payload(Ok(30)): other-ok
 test_or_payload(Err(bad)): bad-or-fatal
 test_or_payload(Err(fatal)): bad-or-fatal
 test_or_payload(Err(other)): wildcard
+test_minimal_some5(Some(5)): B
+test_minimal_err_io(Err(not-found)): B
