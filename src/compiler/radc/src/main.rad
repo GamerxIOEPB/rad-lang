@@ -758,6 +758,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         cur_is_async: false,
         extra_stmts: Vec.new(),
         tup_tmp_counter: 0i64,
+        lambda_counter: 0i64,
         enum_variant_ctors: Vec.new(),
         enum_variant_arities: Vec.new(),
     }
@@ -948,6 +949,8 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         active_drops_type: Vec.new(),
         debug_info: opts.debug_info,
         source_file: main_src,
+        fn_defer_metas: Vec.new(),
+        pending_defer_thunks: Vec.new(),
     }
     codegen.parser.filename = main_src
     let ir = codegen.generate()

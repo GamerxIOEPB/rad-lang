@@ -1,0 +1,256 @@
+// ==============================================================================
+// std/src/bytes.rad — Byte buffer, endian binary I/O, and hex encoding/decoding
+// ==============================================================================
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn realloc(p: *raw var u8, size: usize) -> *raw var u8;
+    fn free(p: *raw var u8);
+}
+
+fn bytes_str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var n = 0usize
+    while p[n] != 0u8 {
+        n = n + 1usize
+    }
+    return n
+}
+
+pub struct ByteBuffer {
+    pub data: *raw var u8,
+    pub len: usize,
+    pub cap: usize,
+}
+
+impl ByteBuffer {
+    pub fn new() -> ByteBuffer {
+        let cap = 64usize
+        let data = malloc(cap)
+        return ByteBuffer { data: data, len: 0usize, cap: cap }
+    }
+
+    pub fn with_capacity(cap: usize) -> ByteBuffer {
+        var c = cap
+        if c < 16usize { c = 16usize }
+        let data = malloc(c)
+        return ByteBuffer { data: data, len: 0usize, cap: c }
+    }
+
+    pub fn len(self) -> usize {
+        return self.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        return self.len == 0usize
+    }
+
+    pub fn clear(var self) {
+        self.len = 0usize
+    }
+
+    pub fn ensure_cap(var self, extra: usize) {
+        let need = self.len + extra
+        if need <= self.cap { return }
+        var new_cap = self.cap * 2usize
+        while new_cap < need {
+            new_cap = new_cap * 2usize
+        }
+        self.data = realloc(self.data, new_cap)
+        self.cap = new_cap
+    }
+
+    pub fn write_u8(var self, b: u8) {
+        self.ensure_cap(1usize)
+        self.data[self.len] = b
+        self.len = self.len + 1usize
+    }
+
+    pub fn write_u16_le(var self, v: u16) {
+        let x = v as u64
+        self.write_u8((x & 255u64) as u8)
+        self.write_u8(((x >> 8u64) & 255u64) as u8)
+    }
+
+    pub fn write_u16_be(var self, v: u16) {
+        let x = v as u64
+        self.write_u8(((x >> 8u64) & 255u64) as u8)
+        self.write_u8((x & 255u64) as u8)
+    }
+
+    pub fn write_u32_le(var self, v: u32) {
+        let x = v as u64
+        self.write_u8((x & 255u64) as u8)
+        self.write_u8(((x >> 8u64) & 255u64) as u8)
+        self.write_u8(((x >> 16u64) & 255u64) as u8)
+        self.write_u8(((x >> 24u64) & 255u64) as u8)
+    }
+
+    pub fn write_u32_be(var self, v: u32) {
+        let x = v as u64
+        self.write_u8(((x >> 24u64) & 255u64) as u8)
+        self.write_u8(((x >> 16u64) & 255u64) as u8)
+        self.write_u8(((x >> 8u64) & 255u64) as u8)
+        self.write_u8((x & 255u64) as u8)
+    }
+
+    pub fn write_u64_le(var self, x: u64) {
+        var i = 0u64
+        while i < 8u64 {
+            self.write_u8(((x >> (i * 8u64)) & 255u64) as u8)
+            i = i + 1u64
+        }
+    }
+
+    pub fn write_u64_be(var self, x: u64) {
+        var i = 8u64
+        while i > 0u64 {
+            i = i - 1u64
+            self.write_u8(((x >> (i * 8u64)) & 255u64) as u8)
+        }
+    }
+
+    pub fn write_str(var self, s: str) {
+        let n = bytes_str_len(s)
+        let p = s as *raw u8
+        self.ensure_cap(n)
+        var i = 0usize
+        while i < n {
+            self.data[self.len + i] = p[i]
+            i = i + 1usize
+        }
+        self.len = self.len + n
+    }
+
+    pub fn write_bytes(var self, src: *raw u8, n: usize) {
+        self.ensure_cap(n)
+        var i = 0usize
+        while i < n {
+            self.data[self.len + i] = src[i]
+            i = i + 1usize
+        }
+        self.len = self.len + n
+    }
+
+    pub fn read_u8(self, offset: usize) -> Option<u8> {
+        if offset >= self.len { return Option.None }
+        return Option.Some(self.data[offset] as i64)
+    }
+
+    pub fn read_u16_le(self, offset: usize) -> Option<u64> {
+        if offset + 2usize > self.len { return Option.None }
+        let b0 = self.data[offset] as u64
+        let b1 = self.data[offset + 1usize] as u64
+        return Option.Some((b0 | (b1 << 8u64)) as i64)
+    }
+
+    pub fn read_u16_be(self, offset: usize) -> Option<u64> {
+        if offset + 2usize > self.len { return Option.None }
+        let b0 = self.data[offset] as u64
+        let b1 = self.data[offset + 1usize] as u64
+        return Option.Some(((b0 << 8u64) | b1) as i64)
+    }
+
+    pub fn read_u32_le(self, offset: usize) -> Option<u64> {
+        if offset + 4usize > self.len { return Option.None }
+        let b0 = self.data[offset] as u64
+        let b1 = self.data[offset + 1usize] as u64
+        let b2 = self.data[offset + 2usize] as u64
+        let b3 = self.data[offset + 3usize] as u64
+        return Option.Some((b0 | (b1 << 8u64) | (b2 << 16u64) | (b3 << 24u64)) as i64)
+    }
+
+    pub fn read_u32_be(self, offset: usize) -> Option<u64> {
+        if offset + 4usize > self.len { return Option.None }
+        let b0 = self.data[offset] as u64
+        let b1 = self.data[offset + 1usize] as u64
+        let b2 = self.data[offset + 2usize] as u64
+        let b3 = self.data[offset + 3usize] as u64
+        return Option.Some(((b0 << 24u64) | (b1 << 16u64) | (b2 << 8u64) | b3) as i64)
+    }
+
+    pub fn read_u64_le(self, offset: usize) -> Option<u64> {
+        if offset + 8usize > self.len { return Option.None }
+        var res = 0u64
+        var i = 0usize
+        while i < 8usize {
+            let b = self.data[offset + i] as u64
+            res = res | (b << ((i as u64) * 8u64))
+            i = i + 1usize
+        }
+        return Option.Some(res as i64)
+    }
+
+    pub fn read_u64_be(self, offset: usize) -> Option<u64> {
+        if offset + 8usize > self.len { return Option.None }
+        var res = 0u64
+        var i = 0usize
+        while i < 8usize {
+            let b = self.data[offset + i] as u64
+            res = (res << 8u64) | b
+            i = i + 1usize
+        }
+        return Option.Some(res as i64)
+    }
+
+    pub fn to_hex(self) -> String {
+        var out = String.new()
+        var i = 0usize
+        while i < self.len {
+            let b = self.data[i] as usize
+            let hi = (b >> 4usize) & 15usize
+            let lo = b & 15usize
+            if hi < 10usize { out.push_byte((hi + 48usize) as i64) } else { out.push_byte((hi - 10usize + 97usize) as i64) }
+            if lo < 10usize { out.push_byte((lo + 48usize) as i64) } else { out.push_byte((lo - 10usize + 97usize) as i64) }
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn to_string(self) -> String {
+        var out = String.new()
+        var i = 0usize
+        while i < self.len {
+            out.push_byte(self.data[i] as i64)
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn drop(var self) {
+        if (self.data as usize) != 0usize {
+            free(self.data)
+            self.data = 0usize as *raw var u8
+            self.len = 0usize
+            self.cap = 0usize
+        }
+    }
+}
+
+fn hex_nibble(ch: u8) -> i64 {
+    if ch >= 48u8 && ch <= 57u8 { return (ch - 48u8) as i64 }
+    if ch >= 97u8 && ch <= 102u8 { return (ch - 97u8 + 10u8) as i64 }
+    if ch >= 65u8 && ch <= 70u8 { return (ch - 65u8 + 10u8) as i64 }
+    return -1i64
+}
+
+pub fn bytes_from_hex(hex: str) -> Result<ByteBuffer, str> {
+    let p = hex as *raw u8
+    let n = bytes_str_len(hex)
+    if (n % 2usize) != 0usize {
+        return Result.Err("odd-length hex string")
+    }
+    var buf = ByteBuffer.with_capacity(n / 2usize + 1usize)
+    var i = 0usize
+    while i < n {
+        let hi = hex_nibble(p[i])
+        let lo = hex_nibble(p[i + 1usize])
+        if hi < 0i64 || lo < 0i64 {
+            buf.drop()
+            return Result.Err("invalid hex character")
+        }
+        buf.write_u8(((hi << 4i64) | lo) as u8)
+        i = i + 2usize
+    }
+    return Result.Ok(buf)
+}

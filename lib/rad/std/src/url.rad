@@ -1,0 +1,219 @@
+// ==============================================================================
+// std/src/url.rad — URL parsing and percent-encoding/decoding (RFC 3986)
+// ==============================================================================
+
+fn url_str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var n = 0usize
+    while p[n] != 0u8 {
+        n = n + 1usize
+    }
+    return n
+}
+
+fn url_str_eq(a: str, b: str) -> bool {
+    let ap = a as *raw u8
+    let bp = b as *raw u8
+    var i = 0usize
+    while true {
+        if ap[i] != bp[i] { return false }
+        if ap[i] == 0u8 { return true }
+        i = i + 1usize
+    }
+    return false
+}
+
+pub struct ParsedUrl {
+    pub scheme: String,
+    pub host: String,
+    pub port: i64,
+    pub path: String,
+    pub query: String,
+    pub fragment: String,
+}
+
+fn url_is_unreserved(ch: u8) -> bool {
+    if ch >= 65u8 && ch <= 90u8 { return true }
+    if ch >= 97u8 && ch <= 122u8 { return true }
+    if ch >= 48u8 && ch <= 57u8 { return true }
+    if ch == 45u8 || ch == 95u8 || ch == 46u8 || ch == 126u8 { return true }
+    return false
+}
+
+fn url_hex_char(v: u8) -> u8 {
+    if v < 10u8 { return v + 48u8 }
+    return v - 10u8 + 65u8
+}
+
+fn url_hex_val(ch: u8) -> i64 {
+    if ch >= 48u8 && ch <= 57u8 { return (ch - 48u8) as i64 }
+    if ch >= 65u8 && ch <= 70u8 { return (ch - 65u8 + 10u8) as i64 }
+    if ch >= 97u8 && ch <= 102u8 { return (ch - 97u8 + 10u8) as i64 }
+    return -1i64
+}
+
+pub fn url_encode(s: str) -> String {
+    let p = s as *raw u8
+    let n = url_str_len(s)
+    var out = String.new()
+    var i = 0usize
+    while i < n {
+        let ch = p[i]
+        if url_is_unreserved(ch) {
+            out.push_byte(ch as i64)
+        } else {
+            out.push_byte(37i64) // '%'
+            out.push_byte(url_hex_char((ch >> 4u8) & 15u8) as i64)
+            out.push_byte(url_hex_char(ch & 15u8) as i64)
+        }
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn url_decode(s: str) -> String {
+    let p = s as *raw u8
+    let n = url_str_len(s)
+    var out = String.new()
+    var i = 0usize
+    while i < n {
+        let ch = p[i]
+        if ch == 37u8 && i + 2usize < n {
+            let hi = url_hex_val(p[i + 1usize])
+            let lo = url_hex_val(p[i + 2usize])
+            if hi >= 0i64 && lo >= 0i64 {
+                out.push_byte((hi << 4i64) | lo)
+                i = i + 3usize
+                continue
+            }
+        }
+        if ch == 43u8 { // '+' -> space in query strings
+            out.push_byte(32i64)
+        } else {
+            out.push_byte(ch as i64)
+        }
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn url_parse(raw: str) -> ParsedUrl {
+    let p = raw as *raw u8
+    let n = url_str_len(raw)
+    var scheme = String.new()
+    var host = String.new()
+    var port = -1i64
+    var path = String.new()
+    var query = String.new()
+    var fragment = String.new()
+
+    var pos = 0usize
+    var scheme_end = 0usize
+    var found_scheme = false
+    while scheme_end + 2usize < n {
+        if p[scheme_end] == 58u8 && p[scheme_end + 1usize] == 47u8 && p[scheme_end + 2usize] == 47u8 {
+            found_scheme = true
+            break
+        }
+        if p[scheme_end] == 47u8 || p[scheme_end] == 63u8 || p[scheme_end] == 35u8 {
+            break
+        }
+        scheme_end = scheme_end + 1usize
+    }
+    if found_scheme {
+        var si = 0usize
+        while si < scheme_end {
+            scheme.push_byte(p[si] as i64)
+            si = si + 1usize
+        }
+        pos = scheme_end + 3usize
+        var auth_end = pos
+        while auth_end < n && p[auth_end] != 47u8 && p[auth_end] != 63u8 && p[auth_end] != 35u8 {
+            auth_end = auth_end + 1usize
+        }
+        var colon_pos = auth_end
+        var ai = pos
+        while ai < auth_end {
+            if p[ai] == 58u8 {
+                colon_pos = ai
+            }
+            ai = ai + 1usize
+        }
+        var hi = pos
+        while hi < colon_pos {
+            host.push_byte(p[hi] as i64)
+            hi = hi + 1usize
+        }
+        if colon_pos < auth_end {
+            var pval = 0i64
+            var pi = colon_pos + 1usize
+            while pi < auth_end {
+                if p[pi] >= 48u8 && p[pi] <= 57u8 {
+                    pval = pval * 10i64 + ((p[pi] - 48u8) as i64)
+                }
+                pi = pi + 1usize
+            }
+            port = pval
+        }
+        pos = auth_end
+    }
+
+    while pos < n && p[pos] != 63u8 && p[pos] != 35u8 {
+        path.push_byte(p[pos] as i64)
+        pos = pos + 1usize
+    }
+    if path.len() == 0usize && found_scheme {
+        path.push_byte(47i64)
+    }
+    if pos < n && p[pos] == 63u8 {
+        pos = pos + 1usize
+        while pos < n && p[pos] != 35u8 {
+            query.push_byte(p[pos] as i64)
+            pos = pos + 1usize
+        }
+    }
+    if pos < n && p[pos] == 35u8 {
+        pos = pos + 1usize
+        while pos < n {
+            fragment.push_byte(p[pos] as i64)
+            pos = pos + 1usize
+        }
+    }
+    return ParsedUrl { scheme: scheme, host: host, port: port, path: path, query: query, fragment: fragment }
+}
+
+pub fn url_query_get(query: str, target_key: str) -> Option<String> {
+    let p = query as *raw u8
+    let n = url_str_len(query)
+    var i = 0usize
+    while i < n {
+        var key_raw = String.new()
+        while i < n && p[i] != 61u8 && p[i] != 38u8 {
+            key_raw.push_byte(p[i] as i64)
+            i = i + 1usize
+        }
+        var val_raw = String.new()
+        if i < n && p[i] == 61u8 {
+            i = i + 1usize
+            while i < n && p[i] != 38u8 {
+                val_raw.push_byte(p[i] as i64)
+                i = i + 1usize
+            }
+        }
+        if i < n && p[i] == 38u8 {
+            i = i + 1usize
+        }
+        let dk = url_decode(key_raw.as_ptr() as str)
+        if url_str_eq(dk.as_ptr() as str, target_key) {
+            let dv = url_decode(val_raw.as_ptr() as str)
+            key_raw.drop()
+            dk.drop()
+            val_raw.drop()
+            return Option.Some(dv)
+        }
+        key_raw.drop()
+        dk.drop()
+        val_raw.drop()
+    }
+    return Option.None
+}

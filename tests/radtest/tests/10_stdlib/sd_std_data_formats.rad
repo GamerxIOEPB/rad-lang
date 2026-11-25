@@ -1,0 +1,67 @@
+import std/base64
+import std/csv
+import std/url
+import std/datetime
+import std/bytes
+import std/heap
+import std/stats
+import std/io
+import std/sync
+import std/wasm
+
+fn main() {
+    // base64
+    let b1 = encode("Hello, Rad!")
+    let d1 = decode(b1.as_ptr() as str).unwrap()
+    let bu = encode_url("?>?")
+    let du = decode(bu.as_ptr() as str).unwrap()
+    println("b64={b1.as_ptr() as str} dec={d1.as_ptr() as str} url={bu.as_ptr() as str} du={du.as_ptr() as str}")
+    b1.drop(); d1.drop(); bu.drop(); du.drop()
+
+    // csv
+    let tbl = csv_parse("name,note\n\"Bob\",\"a, \"\"quoted\"\" field\"\n")
+    let out_csv = csv_format(tbl)
+    println("csv rows={tbl.len} f1={tbl.ptr[1].ptr[1].as_ptr() as str}")
+    println("csv_fmt={csv_parse_row(tbl.ptr[1].ptr[1].as_ptr() as str).len}")
+    out_csv.drop()
+
+    // url
+    let u = url_parse("https://example.org:8443/v1/search?q=rad%20lang&ok=1#sec")
+    let q = url_query_get(u.query.as_ptr() as str, "q").unwrap()
+    println("url scheme={u.scheme.as_ptr() as str} host={u.host.as_ptr() as str} port={u.port} path={u.path.as_ptr() as str} q={q.as_ptr() as str} frag={u.fragment.as_ptr() as str}")
+    q.drop()
+
+    // datetime
+    let dt = dt_from_timestamp(1700000000i64)
+    let iso = dt.format_iso8601()
+    let parsed = dt_parse_iso8601(iso.as_ptr() as str).unwrap()
+    println("dt={iso.as_ptr() as str} ts={parsed.to_timestamp()} leap24={dt_is_leap_year(2024i64)} leap23={dt_is_leap_year(2023i64)}")
+    iso.drop()
+
+    // bytes
+    var bb = ByteBuffer.new()
+    bb.write_u32_be(0x12345678u32)
+    bb.write_u16_le(0xABCDu16)
+    let hx = bb.to_hex()
+    println("bytes u32={bb.read_u32_be(0usize).unwrap()} u16={bb.read_u16_le(4usize).unwrap()} hex={hx.as_ptr() as str}")
+    hx.drop()
+    bb.drop()
+
+    // heap
+    var min_h = MinHeap.new()
+    min_h.push(40); min_h.push(10); min_h.push(25)
+    var max_h = MaxHeap.new()
+    max_h.push(40); max_h.push(10); max_h.push(25)
+    println("heaps min={min_h.pop().unwrap()},{min_h.pop().unwrap()} max={max_h.pop().unwrap()},{max_h.pop().unwrap()}")
+    min_h.drop(); max_h.drop()
+
+    // stats
+    let sv = Vec.from([10, 20, 30, 40])
+    println("stats sum={stats_sum_i64(sv)} mean={stats_mean_i64(sv)} med={stats_median_i64(sv)} lerp={stats_lerp(0.0, 10.0, 0.25)}")
+    sv.drop()
+
+    // atomic + sync co-imported with io & wasm
+    var ab = AtomicBool.new(false)
+    let prev = ab.swap(true)
+    println("atomic prev={prev} now={ab.load()}")
+}

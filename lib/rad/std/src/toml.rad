@@ -3,7 +3,7 @@
 // Zero C, zero libc, zero external dependencies.
 // ==============================================================================
 
-fn str_len(s: str) -> usize {
+fn toml_str_len(s: str) -> usize {
     if (s as usize) == 0usize { return 0usize }
     let p = s as *raw u8
     var i = 0usize
@@ -11,7 +11,7 @@ fn str_len(s: str) -> usize {
     return i
 }
 
-fn str_eq(a: str, b: str) -> bool {
+fn toml_raw_str_eq(a: str, b: str) -> bool {
     if (a as usize) == 0usize && (b as usize) == 0usize { return true }
     if (a as usize) == 0usize || (b as usize) == 0usize { return false }
     let pa = a as *raw u8
@@ -37,8 +37,8 @@ fn str_starts_with(s: str, prefix: str) -> bool {
 }
 
 fn str_ends_with(s: str, suffix: str) -> bool {
-    let s_len = str_len(s)
-    let suf_len = str_len(suffix)
+    let s_len = toml_str_len(s)
+    let suf_len = toml_str_len(suffix)
     if s_len < suf_len || s_len == 0usize { return false }
     let ps = s as *raw u8
     let p_suf = suffix as *raw u8
@@ -53,8 +53,8 @@ fn str_ends_with(s: str, suffix: str) -> bool {
 
 fn str_contains(s: str, sub: str) -> bool {
     if (s as usize) == 0usize || (sub as usize) == 0usize { return false }
-    let slen = str_len(s)
-    let sublen = str_len(sub)
+    let slen = toml_str_len(s)
+    let sublen = toml_str_len(sub)
     if sublen > slen { return false }
     if sublen == 0usize { return true }
     let p_s = s as *raw u8
@@ -103,7 +103,7 @@ pub struct TomlValue {
 }
 
 fn toml_str_eq(a: str, b: str) -> bool {
-    return str_eq(a, b)
+    return toml_raw_str_eq(a, b)
 }
 
 impl TomlValue {
@@ -260,7 +260,7 @@ impl TomlValue {
         if self.kind != TOML_TABLE {
             return Option.None
         }
-        let p_len = str_len(path)
+        let p_len = toml_str_len(path)
         let p = path as *raw u8
         var dot_pos = p_len
         var i = 0usize
@@ -362,7 +362,7 @@ impl TomlValue {
         var root = TomlValue.table()
         var cur_section = String.new()
 
-        let len = str_len(content)
+        let len = toml_str_len(content)
         let p = content as *raw u8
         var i = 0usize
 
@@ -459,7 +459,7 @@ impl TomlValue {
 
     fn ensure_table_path(var self, path: str) {
         if self.kind != TOML_TABLE { return }
-        let p_len = str_len(path)
+        let p_len = toml_str_len(path)
         let p = path as *raw u8
         var dot_pos = p_len
         var i = 0usize
@@ -505,7 +505,7 @@ impl TomlValue {
 
     fn set_in_section(var self, section: str, key: str, val: TomlValue) {
         self.ensure_table_path(section)
-        let s_len = str_len(section)
+        let s_len = toml_str_len(section)
         let p = section as *raw u8
         var dot_pos = s_len
         var i = 0usize
@@ -811,7 +811,7 @@ fn toml_int_to_str(val: i64) -> String {
 
 fn parse_int_str(s: str) -> i64 {
     let p = s as *raw u8
-    let len = str_len(s)
+    let len = toml_str_len(s)
     var i = 0usize
     var is_neg = false
     if i < len && p[i] == 45u8 {
@@ -836,7 +836,7 @@ fn parse_int_str(s: str) -> i64 {
 
 fn parse_hex_str(s: str) -> i64 {
     let p = s as *raw u8
-    let len = str_len(s)
+    let len = toml_str_len(s)
     var res = 0i64
     var i = 0usize
     while i < len {
@@ -859,7 +859,7 @@ fn parse_hex_str(s: str) -> i64 {
 
 fn parse_bin_str(s: str) -> i64 {
     let p = s as *raw u8
-    let len = str_len(s)
+    let len = toml_str_len(s)
     var res = 0i64
     var i = 0usize
     while i < len {
@@ -878,7 +878,7 @@ fn parse_bin_str(s: str) -> i64 {
 
 fn parse_float_str(s: str) -> f64 {
     let p = s as *raw u8
-    let len = str_len(s)
+    let len = toml_str_len(s)
     var i = 0usize
     var is_neg = false
     if i < len && p[i] == 45u8 {

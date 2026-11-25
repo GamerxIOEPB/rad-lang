@@ -1,0 +1,9 @@
+b64=SGVsbG8sIFJhZCE= dec=Hello, Rad! url=Pz4_ du=?>?
+csv rows=2 f1=a, "quoted" field
+csv_fmt=2
+url scheme=https host=example.org port=8443 path=/v1/search q=rad lang frag=sec
+dt=2023-11-14T22:13:20Z ts=1700000000 leap24=1 leap23=0
+bytes u32=305419896 u16=43981 hex=12345678cdab
+heaps min=10,25 max=40,25
+stats sum=100 mean=25.000000 med=25.000000 lerp=2.500000
+atomic prev=0 now=1

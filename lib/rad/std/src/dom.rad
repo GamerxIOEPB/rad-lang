@@ -4,7 +4,7 @@
 // Zero external C dynamic dependencies.
 // ==============================================================================
 
-fn str_len(s: str) -> usize {
+fn dom_str_len(s: str) -> usize {
     let p = s as *raw u8
     var i = 0usize
     while p[i] != 0u8 {
@@ -13,13 +13,13 @@ fn str_len(s: str) -> usize {
     return i
 }
 
-fn str_eq(a: str, b: str) -> bool {
+fn dom_str_eq(a: str, b: str) -> bool {
     let pa = a as usize
     let pb = b as usize
     if pa == pb { return true }
     if pa == 0usize || pb == 0usize { return false }
-    let la = str_len(a)
-    let lb = str_len(b)
+    let la = dom_str_len(a)
+    let lb = dom_str_len(b)
     if la != lb { return false }
     let p1 = a as *raw u8
     let p2 = b as *raw u8
@@ -118,7 +118,7 @@ pub fn button(label: str) -> VNode {
 pub fn input_tag(input_type: str, placeholder: str) -> VNode {
     var node = VNode::new_element("input")
     node = node.attr("type", input_type)
-    if str_len(placeholder) > 0usize {
+    if dom_str_len(placeholder) > 0usize {
         node = node.attr("placeholder", placeholder)
     }
     return node
@@ -161,8 +161,8 @@ impl Signal {
 
 // Universal Server-Side Rendering (SSR)
 pub fn is_self_closing(tag: str) -> bool {
-    return str_eq(tag, "input") || str_eq(tag, "img") || str_eq(tag, "br") ||
-           str_eq(tag, "hr") || str_eq(tag, "meta") || str_eq(tag, "link")
+    return dom_str_eq(tag, "input") || dom_str_eq(tag, "img") || dom_str_eq(tag, "br") ||
+           dom_str_eq(tag, "hr") || dom_str_eq(tag, "meta") || dom_str_eq(tag, "link")
 }
 
 pub fn render_to_string(node: VNode) -> String {

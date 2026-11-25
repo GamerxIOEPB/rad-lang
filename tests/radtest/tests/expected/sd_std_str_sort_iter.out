@@ -1,0 +1,5 @@
+str=alpha,beta,gamma joined=alpha::beta::gamma rev=dar pre=value suf=value
+str_meta idx=2 lidx=4 cnt=2 dig=1 blk=1
+sort sorted=1 ded_len=5 bs=3 lb=3 ub=5
+sort_strs=apple,orange,pear
+iter sum=56 prod=48 min=4 max=36 z=288

@@ -1,0 +1,130 @@
+// ==============================================================================
+// std/src/stats.rad — Descriptive statistics and numerical utilities
+// ==============================================================================
+
+extern "C" {
+    fn sqrt(x: f64) -> f64;
+}
+
+pub fn stats_sum_i64(v: Vec<i64>) -> i64 {
+    var acc = 0i64
+    var i = 0usize
+    while i < v.len {
+        acc = acc + v.ptr[i]
+        i = i + 1usize
+    }
+    return acc
+}
+
+pub fn stats_mean_i64(v: Vec<i64>) -> f64 {
+    if v.len == 0usize { return 0.0 }
+    return (stats_sum_i64(v) as f64) / (v.len as f64)
+}
+
+pub fn stats_variance_i64(v: Vec<i64>) -> f64 {
+    if v.len == 0usize { return 0.0 }
+    let mean = stats_mean_i64(v)
+    var sq_sum = 0.0
+    var i = 0usize
+    while i < v.len {
+        let diff = (v.ptr[i] as f64) - mean
+        sq_sum = sq_sum + diff * diff
+        i = i + 1usize
+    }
+    return sq_sum / (v.len as f64)
+}
+
+pub fn stats_stddev_i64(v: Vec<i64>) -> f64 {
+    return sqrt(stats_variance_i64(v))
+}
+
+pub fn stats_median_i64(v: Vec<i64>) -> f64 {
+    if v.len == 0usize { return 0.0 }
+    var tmp = Vec.new()
+    var i = 0usize
+    while i < v.len {
+        tmp.push(v.ptr[i])
+        i = i + 1usize
+    }
+    var k = 1usize
+    while k < tmp.len {
+        let key = tmp.ptr[k]
+        var j = k
+        while j > 0usize {
+            if tmp.ptr[j - 1usize] <= key {
+                break
+            }
+            tmp.ptr[j] = tmp.ptr[j - 1usize]
+            j = j - 1usize
+        }
+        tmp.ptr[j] = key
+        k = k + 1usize
+    }
+    let n = tmp.len
+    var med = 0.0
+    if (n % 2usize) == 1usize {
+        med = tmp.ptr[n / 2usize] as f64
+    } else {
+        med = ((tmp.ptr[n / 2usize - 1usize] + tmp.ptr[n / 2usize]) as f64) / 2.0
+    }
+    tmp.drop()
+    return med
+}
+
+pub fn stats_sum_f64(ptr_arr: *raw f64, n: usize) -> f64 {
+    var acc = 0.0
+    var i = 0usize
+    while i < n {
+        acc = acc + ptr_arr[i]
+        i = i + 1usize
+    }
+    return acc
+}
+
+pub fn stats_mean_f64(ptr_arr: *raw f64, n: usize) -> f64 {
+    if n == 0usize { return 0.0 }
+    return stats_sum_f64(ptr_arr, n) / (n as f64)
+}
+
+pub fn stats_variance_f64(ptr_arr: *raw f64, n: usize) -> f64 {
+    if n == 0usize { return 0.0 }
+    let mean = stats_mean_f64(ptr_arr, n)
+    var sq_sum = 0.0
+    var i = 0usize
+    while i < n {
+        let diff = ptr_arr[i] - mean
+        sq_sum = sq_sum + diff * diff
+        i = i + 1usize
+    }
+    return sq_sum / (n as f64)
+}
+
+pub fn stats_stddev_f64(ptr_arr: *raw f64, n: usize) -> f64 {
+    return sqrt(stats_variance_f64(ptr_arr, n))
+}
+
+pub fn stats_dot_f64(a: *raw f64, b: *raw f64, n: usize) -> f64 {
+    var acc = 0.0
+    var i = 0usize
+    while i < n {
+        acc = acc + a[i] * b[i]
+        i = i + 1usize
+    }
+    return acc
+}
+
+pub fn stats_clamp_i64(val: i64, lo: i64, hi: i64) -> i64 {
+    if val < lo { return lo }
+    if val > hi { return hi }
+    return val
+}
+
+pub fn stats_clamp_f64(val: f64, lo: f64, hi: f64) -> f64 {
+    if val < lo { return lo }
+    if val > hi { return hi }
+    return val
+}
+
+pub fn stats_lerp(a: f64, b: f64, t: f64) -> f64 {
+    return a + (b - a) * t
+}

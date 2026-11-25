@@ -32,6 +32,6 @@ __pycache__/
 
 # Core dumps
 vgcore*
-core
+/core
 core.*
 

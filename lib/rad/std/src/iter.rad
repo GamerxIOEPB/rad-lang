@@ -1,0 +1,205 @@
+// ==============================================================================
+// std/src/iter.rad — Higher-order iteration combinators for Vec<i64> & ranges
+// ==============================================================================
+
+pub fn iter_sum(v: Vec<i64>) -> i64 {
+    var acc = 0i64
+    var i = 0usize
+    while i < v.len {
+        acc = acc + v.ptr[i]
+        i = i + 1usize
+    }
+    return acc
+}
+
+pub fn iter_prod(v: Vec<i64>) -> i64 {
+    var acc = 1i64
+    var i = 0usize
+    while i < v.len {
+        acc = acc * v.ptr[i]
+        i = i + 1usize
+    }
+    return acc
+}
+
+pub fn iter_min(v: Vec<i64>) -> Option<i64> {
+    if v.len == 0usize {
+        return Option.None
+    }
+    var m = v.ptr[0usize]
+    var i = 1usize
+    while i < v.len {
+        let cur = v.ptr[i]
+        if cur < m {
+            m = cur
+        }
+        i = i + 1usize
+    }
+    return Option.Some(m)
+}
+
+pub fn iter_max(v: Vec<i64>) -> Option<i64> {
+    if v.len == 0usize {
+        return Option.None
+    }
+    var m = v.ptr[0usize]
+    var i = 1usize
+    while i < v.len {
+        let cur = v.ptr[i]
+        if cur > m {
+            m = cur
+        }
+        i = i + 1usize
+    }
+    return Option.Some(m)
+}
+
+pub fn iter_fold(v: Vec<i64>, init: i64, f: fn(i64, i64) -> i64) -> i64 {
+    var acc = init
+    var i = 0usize
+    while i < v.len {
+        acc = f(acc, v.ptr[i])
+        i = i + 1usize
+    }
+    return acc
+}
+
+pub fn iter_map(v: Vec<i64>, f: fn(i64) -> i64) -> Vec<i64> {
+    var out = Vec.new()
+    var i = 0usize
+    while i < v.len {
+        out.push(f(v.ptr[i]))
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn iter_filter(v: Vec<i64>, pred: fn(i64) -> bool) -> Vec<i64> {
+    var out = Vec.new()
+    var i = 0usize
+    while i < v.len {
+        let item = v.ptr[i]
+        if pred(item) {
+            out.push(item)
+        }
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn iter_for_each(v: Vec<i64>, f: fn(i64)) {
+    var i = 0usize
+    while i < v.len {
+        f(v.ptr[i])
+        i = i + 1usize
+    }
+}
+
+pub fn iter_enumerate(v: Vec<i64>, f: fn(usize, i64)) {
+    var i = 0usize
+    while i < v.len {
+        f(i, v.ptr[i])
+        i = i + 1usize
+    }
+}
+
+pub fn iter_any(v: Vec<i64>, pred: fn(i64) -> bool) -> bool {
+    var i = 0usize
+    while i < v.len {
+        if pred(v.ptr[i]) {
+            return true
+        }
+        i = i + 1usize
+    }
+    return false
+}
+
+pub fn iter_all(v: Vec<i64>, pred: fn(i64) -> bool) -> bool {
+    var i = 0usize
+    while i < v.len {
+        if !pred(v.ptr[i]) {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+pub fn iter_count_where(v: Vec<i64>, pred: fn(i64) -> bool) -> i64 {
+    var c = 0i64
+    var i = 0usize
+    while i < v.len {
+        if pred(v.ptr[i]) {
+            c = c + 1i64
+        }
+        i = i + 1usize
+    }
+    return c
+}
+
+pub fn iter_find(v: Vec<i64>, pred: fn(i64) -> bool) -> Option<i64> {
+    var i = 0usize
+    while i < v.len {
+        let item = v.ptr[i]
+        if pred(item) {
+            return Option.Some(item)
+        }
+        i = i + 1usize
+    }
+    return Option.None
+}
+
+pub fn iter_find_index(v: Vec<i64>, pred: fn(i64) -> bool) -> Option<usize> {
+    var i = 0usize
+    while i < v.len {
+        if pred(v.ptr[i]) {
+            return Option.Some(i as i64)
+        }
+        i = i + 1usize
+    }
+    return Option.None
+}
+
+pub fn iter_take(v: Vec<i64>, count: usize) -> Vec<i64> {
+    var out = Vec.new()
+    var limit = count
+    if limit > v.len { limit = v.len }
+    var i = 0usize
+    while i < limit {
+        out.push(v.ptr[i])
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn iter_skip(v: Vec<i64>, count: usize) -> Vec<i64> {
+    var out = Vec.new()
+    var i = count
+    while i < v.len {
+        out.push(v.ptr[i])
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn iter_range_vec(start: i64, end: i64) -> Vec<i64> {
+    var out = Vec.new()
+    var cur = start
+    while cur < end {
+        out.push(cur)
+        cur = cur + 1i64
+    }
+    return out
+}
+
+pub fn iter_zip_fold(a: Vec<i64>, b: Vec<i64>, init: i64, f: fn(i64, i64, i64) -> i64) -> i64 {
+    var n = a.len
+    if b.len < n { n = b.len }
+    var acc = init
+    var i = 0usize
+    while i < n {
+        acc = f(acc, a.ptr[i], b.ptr[i])
+        i = i + 1usize
+    }
+    return acc
+}

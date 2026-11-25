@@ -1,0 +1,10 @@
+fn trigger() {
+    defer { println("defer:bounds-cleanup") }
+    let a = [1, 2, 3]
+    println(a[10])
+}
+
+fn main() {
+    defer { println("defer:main-bounds") }
+    trigger()
+}

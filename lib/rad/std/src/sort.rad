@@ -1,0 +1,204 @@
+// ==============================================================================
+// std/src/sort.rad — Sorting, searching, and partitioning algorithms
+// ==============================================================================
+
+fn sort_str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var n = 0usize
+    while p[n] != 0u8 {
+        n = n + 1usize
+    }
+    return n
+}
+
+fn sort_i64_qsort(var v: Vec<i64>, lo: i64, hi: i64) {
+    if lo >= hi {
+        return
+    }
+    let mid = lo + (hi - lo) / 2i64
+    let pivot = v.ptr[mid as usize]
+    var i = lo
+    var j = hi
+    while i <= j {
+        while v.ptr[i as usize] < pivot {
+            i = i + 1i64
+        }
+        while v.ptr[j as usize] > pivot {
+            j = j - 1i64
+        }
+        if i <= j {
+            let tmp = v.ptr[i as usize]
+            v.ptr[i as usize] = v.ptr[j as usize]
+            v.ptr[j as usize] = tmp
+            i = i + 1i64
+            j = j - 1i64
+        }
+    }
+    if lo < j { sort_i64_qsort(v, lo, j) }
+    if i < hi { sort_i64_qsort(v, i, hi) }
+}
+
+pub fn sort_i64(var v: Vec<i64>) {
+    if v.len > 1usize {
+        sort_i64_qsort(v, 0i64, (v.len - 1usize) as i64)
+    }
+}
+
+pub fn sort_i64_desc(var v: Vec<i64>) {
+    sort_i64(v)
+    sort_reverse_i64(v)
+}
+
+pub fn sort_reverse_i64(var v: Vec<i64>) {
+    if v.len <= 1usize { return }
+    var l = 0usize
+    var r = v.len - 1usize
+    while l < r {
+        let tmp = v.ptr[l]
+        v.ptr[l] = v.ptr[r]
+        v.ptr[r] = tmp
+        l = l + 1usize
+        r = r - 1usize
+    }
+}
+
+fn sort_by_qsort(var v: Vec<i64>, lo: i64, hi: i64, cmp: fn(i64, i64) -> i64) {
+    if lo >= hi {
+        return
+    }
+    let mid = lo + (hi - lo) / 2i64
+    let pivot = v.ptr[mid as usize]
+    var i = lo
+    var j = hi
+    while i <= j {
+        while cmp(v.ptr[i as usize], pivot) < 0i64 {
+            i = i + 1i64
+        }
+        while cmp(v.ptr[j as usize], pivot) > 0i64 {
+            j = j - 1i64
+        }
+        if i <= j {
+            let tmp = v.ptr[i as usize]
+            v.ptr[i as usize] = v.ptr[j as usize]
+            v.ptr[j as usize] = tmp
+            i = i + 1i64
+            j = j - 1i64
+        }
+    }
+    if lo < j { sort_by_qsort(v, lo, j, cmp) }
+    if i < hi { sort_by_qsort(v, i, hi, cmp) }
+}
+
+pub fn sort_by(var v: Vec<i64>, cmp: fn(i64, i64) -> i64) {
+    if v.len > 1usize {
+        sort_by_qsort(v, 0i64, (v.len - 1usize) as i64, cmp)
+    }
+}
+
+fn sort_str_cmp_raw(a: str, b: str) -> i64 {
+    let ap = a as *raw u8
+    let bp = b as *raw u8
+    let alen = sort_str_len(a)
+    let blen = sort_str_len(b)
+    var min_len = alen
+    if blen < min_len { min_len = blen }
+    var i = 0usize
+    while i < min_len {
+        if ap[i] < bp[i] { return -1i64 }
+        if ap[i] > bp[i] { return 1i64 }
+        i = i + 1usize
+    }
+    if alen < blen { return -1i64 }
+    if alen > blen { return 1i64 }
+    return 0i64
+}
+
+pub fn sort_strs(var v: Vec<String>) {
+    var i = 1usize
+    while i < v.len {
+        let key = v.ptr[i]
+        var j = i
+        while j > 0usize {
+            if sort_str_cmp_raw(v.ptr[j - 1usize].as_ptr() as str, key.as_ptr() as str) <= 0i64 {
+                break
+            }
+            v.ptr[j] = v.ptr[j - 1usize]
+            j = j - 1usize
+        }
+        v.ptr[j] = key
+        i = i + 1usize
+    }
+}
+
+pub fn is_sorted_i64(v: Vec<i64>) -> bool {
+    if v.len <= 1usize { return true }
+    var i = 1usize
+    while i < v.len {
+        if v.ptr[i] < v.ptr[i - 1usize] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+pub fn binary_search_i64(v: Vec<i64>, target: i64) -> Option<usize> {
+    if v.len == 0usize { return Option.None }
+    var lo = 0usize
+    var hi = v.len
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2usize
+        let val = v.ptr[mid]
+        if val == target {
+            return Option.Some(mid as i64)
+        }
+        if val < target {
+            lo = mid + 1usize
+        } else {
+            hi = mid
+        }
+    }
+    return Option.None
+}
+
+pub fn lower_bound_i64(v: Vec<i64>, target: i64) -> usize {
+    var lo = 0usize
+    var hi = v.len
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2usize
+        if v.ptr[mid] < target {
+            lo = mid + 1usize
+        } else {
+            hi = mid
+        }
+    }
+    return lo
+}
+
+pub fn upper_bound_i64(v: Vec<i64>, target: i64) -> usize {
+    var lo = 0usize
+    var hi = v.len
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2usize
+        if v.ptr[mid] <= target {
+            lo = mid + 1usize
+        } else {
+            hi = mid
+        }
+    }
+    return lo
+}
+
+pub fn dedup_sorted_i64(v: Vec<i64>) -> Vec<i64> {
+    var out = Vec.new()
+    if v.len == 0usize { return out }
+    out.push(v.ptr[0usize])
+    var i = 1usize
+    while i < v.len {
+        if v.ptr[i] != v.ptr[i - 1usize] {
+            out.push(v.ptr[i])
+        }
+        i = i + 1usize
+    }
+    return out
+}

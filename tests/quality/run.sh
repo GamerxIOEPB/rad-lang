@@ -23,8 +23,9 @@ failed=0
 check_import() {
     local spec="$1"
     local file="$TMP_DIR/import_probe.rad"
+    local bin="$TMP_DIR/import_probe.bin"
     printf 'import %s;\nfn main() -> i32 { return 0; }\n' "$spec" > "$file"
-    if "$RADC" --check "$file" >"$TMP_DIR/import.log" 2>&1; then
+    if "$RADC" "$file" -o "$bin" >"$TMP_DIR/import.log" 2>&1; then
         checked=$((checked + 1))
         printf '  [OK] %s\n' "$spec"
     else

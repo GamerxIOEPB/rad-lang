@@ -1,71 +1,431 @@
-// Rad Alloc Library: String (Owned Growable UTF-8 String)
+// ==============================================================================
+// alloc/src/string.rad — Heap-allocated UTF-8 String (24-byte {ptr, cap, len})
+// ==============================================================================
+
+extern "C" {
+    fn malloc(size: usize) -> *raw var u8;
+    fn realloc(p: *raw var u8, size: usize) -> *raw var u8;
+    fn free(p: *raw var u8);
+    fn strtoll(s: *raw u8, endp: *raw var u8, base: i32) -> i64;
+}
 
 pub struct String {
-    pub buf: Vec<u8>,
+    pub ptr: *raw var u8,
+    pub cap: usize,
+    pub len: usize,
+}
+
+fn alloc_str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var n = 0usize
+    while p[n] != 0u8 {
+        n = n + 1usize
+    }
+    return n
+}
+
+fn alloc_str_eq(a: str, b: str) -> bool {
+    let ap = a as *raw u8
+    let bp = b as *raw u8
+    var i = 0usize
+    while true {
+        if ap[i] != bp[i] { return false }
+        if ap[i] == 0u8 { return true }
+        i = i + 1usize
+    }
+    return false
+}
+
+fn alloc_str_starts_with(s: str, prefix: str) -> bool {
+    let sp = s as *raw u8
+    let pp = prefix as *raw u8
+    var i = 0usize
+    while pp[i] != 0u8 {
+        if sp[i] != pp[i] { return false }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn alloc_str_ends_with(s: str, suffix: str) -> bool {
+    let slen = alloc_str_len(s)
+    let suflen = alloc_str_len(suffix)
+    if suflen > slen { return false }
+    let sp = s as *raw u8
+    let sup = suffix as *raw u8
+    let off = slen - suflen
+    var i = 0usize
+    while i < suflen {
+        if sp[off + i] != sup[i] { return false }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn str_internal_is_ws(b: u8) -> bool {
+    return b == 32u8 || b == 9u8 || b == 10u8 || b == 13u8 || b == 11u8 || b == 12u8
 }
 
 impl String {
     pub fn new() -> String {
-        String { buf: Vec.new() }
+        let init_cap = 64usize
+        let buf = malloc(init_cap)
+        buf[0usize] = 0u8
+        return String { ptr: buf, cap: init_cap, len: 0usize }
     }
 
-    pub fn from_raw(ptr: *raw u8, length: usize) -> String {
-        var s = String.new()
+    pub fn from_raw(raw_p: *raw u8, length: usize) -> String {
+        var cap = length + 1usize
+        if cap < 64usize { cap = 64usize }
+        let buf = malloc(cap)
         var i = 0usize
         while i < length {
-            s.buf.push(ptr[i])
+            buf[i] = raw_p[i]
             i = i + 1usize
         }
-        s
+        buf[length] = 0u8
+        return String { ptr: buf, cap: cap, len: length }
     }
 
     pub fn from_str(s: str) -> String {
-        var str_obj = String.new()
-        str_obj.push_str(s)
-        str_obj
+        let p = s as *raw u8
+        let length = alloc_str_len(s)
+        return String.from_raw(p, length)
     }
 
     pub fn len(self) -> usize {
-        self.buf.len
+        return self.len
+    }
+
+    pub fn capacity(self) -> usize {
+        return self.cap
     }
 
     pub fn is_empty(self) -> bool {
-        self.buf.len == 0usize
+        return self.len == 0usize
+    }
+
+    pub fn clear(var self) {
+        self.len = 0usize
+        if (self.ptr as usize) != 0usize {
+            self.ptr[0usize] = 0u8
+        }
     }
 
     pub fn push_byte(var self, byte: u8) {
-        self.buf.push(byte)
+        if (self.ptr as usize) == 0usize {
+            self.cap = 64usize
+            self.ptr = malloc(self.cap)
+            self.len = 0usize
+        }
+        if self.len + 2usize >= self.cap {
+            var new_cap = self.cap * 2usize
+            if new_cap < 64usize { new_cap = 64usize }
+            self.ptr = realloc(self.ptr, new_cap)
+            self.cap = new_cap
+        }
+        self.ptr[self.len] = byte
+        self.len = self.len + 1usize
+        self.ptr[self.len] = 0u8
     }
 
     pub fn push_char(var self, ch: char) {
-        self.buf.push(ch as u8)
+        self.push_byte(ch as u8)
     }
 
     pub fn push_str(var self, s: str) {
-        if (s as usize) == 0usize {
-            return
-        }
         let p = s as *raw u8
         var i = 0usize
         while p[i] != 0u8 {
-            self.buf.push(p[i])
+            self.push_byte(p[i])
             i = i + 1usize
         }
     }
 
     pub fn get_byte(self, idx: usize) -> Option<u8> {
-        self.buf.get(idx)
+        if idx >= self.len {
+            return Option.None
+        }
+        return Option.Some(self.ptr[idx] as i64)
     }
 
     pub fn as_ptr(self) -> *raw u8 {
-        if (self.buf.ptr as usize) == 0usize {
-            "" as *raw u8
-        } else {
-            self.buf.ptr as *raw u8
+        if (self.ptr as usize) == 0usize {
+            return "" as *raw u8
         }
+        return self.ptr as *raw u8
+    }
+
+    pub fn clone_str(self) -> String {
+        return String.from_raw(self.as_ptr(), self.len)
+    }
+
+    pub fn equals(self, other: str) -> bool {
+        return alloc_str_eq(self.as_ptr() as str, other)
+    }
+
+    pub fn starts_with(self, prefix: str) -> bool {
+        return alloc_str_starts_with(self.as_ptr() as str, prefix)
+    }
+
+    pub fn ends_with(self, suffix: str) -> bool {
+        return alloc_str_ends_with(self.as_ptr() as str, suffix)
+    }
+
+    pub fn index_of(self, needle: str) -> i64 {
+        let h = self.as_ptr()
+        let n = needle as *raw u8
+        let hlen = self.len
+        let nlen = alloc_str_len(needle)
+        if nlen == 0usize { return 0i64 }
+        if nlen > hlen { return -1i64 }
+        var i = 0usize
+        while i + nlen <= hlen {
+            var matched = true
+            var j = 0usize
+            while j < nlen {
+                if h[i + j] != n[j] {
+                    matched = false
+                    break
+                }
+                j = j + 1usize
+            }
+            if matched { return i as i64 }
+            i = i + 1usize
+        }
+        return -1i64
+    }
+
+    pub fn contains(self, needle: str) -> bool {
+        return self.index_of(needle) >= 0i64
+    }
+
+    pub fn substring(self, start: usize, count: usize) -> String {
+        if start >= self.len {
+            return String.new()
+        }
+        var avail = self.len - start
+        if count < avail { avail = count }
+        return String.from_raw(((self.as_ptr() as usize) + start) as *raw u8, avail)
+    }
+
+    pub fn trim_start(self) -> String {
+        let p = self.as_ptr()
+        var start = 0usize
+        while start < self.len {
+            if !str_internal_is_ws(p[start]) { break }
+            start = start + 1usize
+        }
+        return String.from_raw(((p as usize) + start) as *raw u8, self.len - start)
+    }
+
+    pub fn trim_end(self) -> String {
+        let p = self.as_ptr()
+        var end = self.len
+        while end > 0usize {
+            if !str_internal_is_ws(p[end - 1usize]) { break }
+            end = end - 1usize
+        }
+        return String.from_raw(p, end)
+    }
+
+    pub fn trim(self) -> String {
+        let p = self.as_ptr()
+        var start = 0usize
+        while start < self.len {
+            if !str_internal_is_ws(p[start]) { break }
+            start = start + 1usize
+        }
+        var end = self.len
+        while end > start {
+            if !str_internal_is_ws(p[end - 1usize]) { break }
+            end = end - 1usize
+        }
+        return String.from_raw(((p as usize) + start) as *raw u8, end - start)
+    }
+
+    pub fn to_upper(self) -> String {
+        let p = self.as_ptr()
+        var out = String.new()
+        var i = 0usize
+        while i < self.len {
+            var b = p[i]
+            if b >= 97u8 && b <= 122u8 { b = b - 32u8 }
+            out.push_byte(b)
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn to_lower(self) -> String {
+        let p = self.as_ptr()
+        var out = String.new()
+        var i = 0usize
+        while i < self.len {
+            var b = p[i]
+            if b >= 65u8 && b <= 90u8 { b = b + 32u8 }
+            out.push_byte(b)
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn replace(self, from: str, to: str) -> String {
+        let sp = self.as_ptr()
+        let fp = from as *raw u8
+        let flen = alloc_str_len(from)
+        var out = String.new()
+        if flen == 0usize {
+            out.push_str(self.as_ptr() as str)
+            return out
+        }
+        var i = 0usize
+        while i < self.len {
+            if i + flen <= self.len {
+                var matched = true
+                var j = 0usize
+                while j < flen {
+                    if sp[i + j] != fp[j] {
+                        matched = false
+                        break
+                    }
+                    j = j + 1usize
+                }
+                if matched {
+                    out.push_str(to)
+                    i = i + flen
+                    continue
+                }
+            }
+            out.push_byte(sp[i])
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn split(self, delim: str) -> Vec<String> {
+        var parts = Vec.new()
+        let sp = self.as_ptr()
+        let dp = delim as *raw u8
+        let dlen = alloc_str_len(delim)
+        if dlen == 0usize {
+            var i = 0usize
+            while i < self.len {
+                var ch = String.new()
+                ch.push_byte(sp[i])
+                parts.push(ch)
+                i = i + 1usize
+            }
+            return parts
+        }
+        var cur = String.new()
+        var i = 0usize
+        while i < self.len {
+            if i + dlen <= self.len {
+                var matched = true
+                var j = 0usize
+                while j < dlen {
+                    if sp[i + j] != dp[j] {
+                        matched = false
+                        break
+                    }
+                    j = j + 1usize
+                }
+                if matched {
+                    parts.push(cur)
+                    cur = String.new()
+                    i = i + dlen
+                    continue
+                }
+            }
+            cur.push_byte(sp[i])
+            i = i + 1usize
+        }
+        parts.push(cur)
+        return parts
+    }
+
+    pub fn lines(self) -> Vec<String> {
+        var res = Vec.new()
+        let p = self.as_ptr()
+        var cur = String.new()
+        var i = 0usize
+        while i < self.len {
+            let ch = p[i]
+            if ch == 13u8 {
+                if i + 1usize < self.len && p[i + 1usize] == 10u8 {
+                    i = i + 1usize
+                }
+                res.push(cur)
+                cur = String.new()
+            } else if ch == 10u8 {
+                res.push(cur)
+                cur = String.new()
+            } else {
+                cur.push_byte(ch)
+            }
+            i = i + 1usize
+        }
+        if cur.len > 0usize {
+            res.push(cur)
+        }
+        return res
+    }
+
+    pub fn repeat(self, count: usize) -> String {
+        var out = String.new()
+        let s = self.as_ptr() as str
+        var i = 0usize
+        while i < count {
+            out.push_str(s)
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn pad_left(self, total_width: usize, ch: u8) -> String {
+        var out = String.new()
+        if self.len < total_width {
+            var rem = total_width - self.len
+            while rem > 0usize {
+                out.push_byte(ch)
+                rem = rem - 1usize
+            }
+        }
+        out.push_str(self.as_ptr() as str)
+        return out
+    }
+
+    pub fn pad_right(self, total_width: usize, ch: u8) -> String {
+        var out = String.new()
+        out.push_str(self.as_ptr() as str)
+        if self.len < total_width {
+            var rem = total_width - self.len
+            while rem > 0usize {
+                out.push_byte(ch)
+                rem = rem - 1usize
+            }
+        }
+        return out
+    }
+
+    pub fn to_int(self) -> i64 {
+        if (self.ptr as usize) == 0usize {
+            return 0i64
+        }
+        return strtoll(self.ptr as *raw u8, 0usize as *raw var u8, 10i32)
+    }
+
+    pub fn parse_int(self) -> i64 {
+        return self.to_int()
     }
 
     pub fn drop(var self) {
-        self.buf.drop()
+        if (self.ptr as usize) != 0usize {
+            free(self.ptr)
+            self.ptr = 0usize as *raw var u8
+        }
+        self.cap = 0usize
+        self.len = 0usize
     }
 }

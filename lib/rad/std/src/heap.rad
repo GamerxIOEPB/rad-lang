@@ -1,0 +1,175 @@
+// ==============================================================================
+// std/src/heap.rad — Binary MinHeap and MaxHeap priority queues
+// ==============================================================================
+
+pub struct MinHeap {
+    pub data: Vec<i64>,
+}
+
+pub struct MaxHeap {
+    pub data: Vec<i64>,
+}
+
+impl MinHeap {
+    pub fn new() -> MinHeap {
+        return MinHeap { data: Vec.new() }
+    }
+
+    pub fn len(self) -> usize {
+        return self.data.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        return self.data.len == 0usize
+    }
+
+    pub fn peek(self) -> Option<i64> {
+        if self.data.len == 0usize {
+            return Option.None
+        }
+        return Option.Some(self.data.ptr[0usize])
+    }
+
+    pub fn push(var self, val: i64) {
+        self.data.push(val)
+        var i = self.data.len - 1usize
+        while i > 0usize {
+            let parent = (i - 1usize) / 2usize
+            if self.data.ptr[i] < self.data.ptr[parent] {
+                let tmp = self.data.ptr[i]
+                self.data.ptr[i] = self.data.ptr[parent]
+                self.data.ptr[parent] = tmp
+                i = parent
+            } else {
+                break
+            }
+        }
+    }
+
+    pub fn pop(var self) -> Option<i64> {
+        let n = self.data.len
+        if n == 0usize {
+            return Option.None
+        }
+        let top = self.data.ptr[0usize]
+        let last_opt = self.data.pop()
+        if n > 1usize && last_opt.is_some() {
+            self.data.ptr[0usize] = last_opt.unwrap()
+            let cur_len = self.data.len
+            var i = 0usize
+            while true {
+                let left = 2usize * i + 1usize
+                let right = 2usize * i + 2usize
+                var smallest = i
+                if left < cur_len {
+                    if self.data.ptr[left] < self.data.ptr[smallest] {
+                        smallest = left
+                    }
+                }
+                if right < cur_len {
+                    if self.data.ptr[right] < self.data.ptr[smallest] {
+                        smallest = right
+                    }
+                }
+                if smallest == i {
+                    break
+                }
+                let tmp = self.data.ptr[i]
+                self.data.ptr[i] = self.data.ptr[smallest]
+                self.data.ptr[smallest] = tmp
+                i = smallest
+            }
+        }
+        return Option.Some(top)
+    }
+
+    pub fn clear(var self) {
+        self.data.clear()
+    }
+
+    pub fn drop(var self) {
+        self.data.drop()
+    }
+}
+
+impl MaxHeap {
+    pub fn new() -> MaxHeap {
+        return MaxHeap { data: Vec.new() }
+    }
+
+    pub fn len(self) -> usize {
+        return self.data.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        return self.data.len == 0usize
+    }
+
+    pub fn peek(self) -> Option<i64> {
+        if self.data.len == 0usize {
+            return Option.None
+        }
+        return Option.Some(self.data.ptr[0usize])
+    }
+
+    pub fn push(var self, val: i64) {
+        self.data.push(val)
+        var i = self.data.len - 1usize
+        while i > 0usize {
+            let parent = (i - 1usize) / 2usize
+            if self.data.ptr[i] > self.data.ptr[parent] {
+                let tmp = self.data.ptr[i]
+                self.data.ptr[i] = self.data.ptr[parent]
+                self.data.ptr[parent] = tmp
+                i = parent
+            } else {
+                break
+            }
+        }
+    }
+
+    pub fn pop(var self) -> Option<i64> {
+        let n = self.data.len
+        if n == 0usize {
+            return Option.None
+        }
+        let top = self.data.ptr[0usize]
+        let last_opt = self.data.pop()
+        if n > 1usize && last_opt.is_some() {
+            self.data.ptr[0usize] = last_opt.unwrap()
+            let cur_len = self.data.len
+            var i = 0usize
+            while true {
+                let left = 2usize * i + 1usize
+                let right = 2usize * i + 2usize
+                var largest = i
+                if left < cur_len {
+                    if self.data.ptr[left] > self.data.ptr[largest] {
+                        largest = left
+                    }
+                }
+                if right < cur_len {
+                    if self.data.ptr[right] > self.data.ptr[largest] {
+                        largest = right
+                    }
+                }
+                if largest == i {
+                    break
+                }
+                let tmp = self.data.ptr[i]
+                self.data.ptr[i] = self.data.ptr[largest]
+                self.data.ptr[largest] = tmp
+                i = largest
+            }
+        }
+        return Option.Some(top)
+    }
+
+    pub fn clear(var self) {
+        self.data.clear()
+    }
+
+    pub fn drop(var self) {
+        self.data.drop()
+    }
+}

@@ -1,0 +1,127 @@
+// ==============================================================================
+// core/src/iter.rad — Zero-overhead iterators and functional combinators
+// ==============================================================================
+
+pub struct RangeIter {
+    pub current: i64,
+    pub end: i64,
+    pub step: i64,
+}
+
+impl RangeIter {
+    pub fn new(start: i64, end: i64) -> RangeIter {
+        return RangeIter { current: start, end: end, step: 1i64 }
+    }
+
+    pub fn stepped(start: i64, end: i64, step: i64) -> RangeIter {
+        return RangeIter { current: start, end: end, step: step }
+    }
+
+    pub fn has_next(self) -> bool {
+        if self.step > 0i64 {
+            return self.current < self.end
+        }
+        if self.step < 0i64 {
+            return self.current > self.end
+        }
+        return false
+    }
+
+    pub fn next(var self) -> Option<i64> {
+        if !self.has_next() {
+            return Option.None
+        }
+        let val = self.current
+        self.current = self.current + self.step
+        return Option.Some(val)
+    }
+
+    pub fn count(self) -> i64 {
+        if self.step > 0i64 {
+            if self.current >= self.end { return 0i64 }
+            return ((self.end - self.current) + self.step - 1i64) / self.step
+        }
+        if self.step < 0i64 {
+            if self.current <= self.end { return 0i64 }
+            let abs_s = -self.step
+            return ((self.current - self.end) + abs_s - 1i64) / abs_s
+        }
+        return 0i64
+    }
+
+    pub fn sum(var self) -> i64 {
+        var total = 0i64
+        while self.has_next() {
+            total = total + self.current
+            self.current = self.current + self.step
+        }
+        return total
+    }
+
+    pub fn fold(var self, init: i64, f: fn(i64, i64) -> i64) -> i64 {
+        var acc = init
+        while self.has_next() {
+            acc = f(acc, self.current)
+            self.current = self.current + self.step
+        }
+        return acc
+    }
+
+    pub fn for_each(var self, f: fn(i64)) {
+        while self.has_next() {
+            f(self.current)
+            self.current = self.current + self.step
+        }
+    }
+
+    pub fn any(var self, pred: fn(i64) -> bool) -> bool {
+        while self.has_next() {
+            if pred(self.current) {
+                return true
+            }
+            self.current = self.current + self.step
+        }
+        return false
+    }
+
+    pub fn all(var self, pred: fn(i64) -> bool) -> bool {
+        while self.has_next() {
+            if !pred(self.current) {
+                return false
+            }
+            self.current = self.current + self.step
+        }
+        return true
+    }
+
+    pub fn find(var self, pred: fn(i64) -> bool) -> Option<i64> {
+        while self.has_next() {
+            if pred(self.current) {
+                let v = self.current
+                self.current = self.current + self.step
+                return Option.Some(v)
+            }
+            self.current = self.current + self.step
+        }
+        return Option.None
+    }
+
+    pub fn count_where(var self, pred: fn(i64) -> bool) -> i64 {
+        var c = 0i64
+        while self.has_next() {
+            if pred(self.current) {
+                c = c + 1i64
+            }
+            self.current = self.current + self.step
+        }
+        return c
+    }
+}
+
+pub fn range(start: i64, end: i64) -> RangeIter {
+    return RangeIter.new(start, end)
+}
+
+pub fn range_step(start: i64, end: i64, step: i64) -> RangeIter {
+    return RangeIter.stepped(start, end, step)
+}

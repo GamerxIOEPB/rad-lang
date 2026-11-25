@@ -97,3 +97,20 @@ impl Result<T, E> {
         return f(res.val as E);
     }
 }
+
+
+impl<T, E> Result<T, E> {
+    pub fn contains(res: Result<T, E>, target: T) -> bool {
+        if res.is_ok() {
+            return res.unwrap() == target
+        }
+        return false
+    }
+
+    pub fn or_else<F>(res: Result<T, E>, f: fn(E) -> Result<T, F>) -> Result<T, F> {
+        if res.is_ok() {
+            return Result.Ok(res.unwrap())
+        }
+        return f(res.unwrap_err())
+    }
+}

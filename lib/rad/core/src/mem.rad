@@ -1,15 +1,60 @@
-// Rad Core Library: Memory Intrinsics and Operations
+// ==============================================================================
+// core/src/mem.rad — Memory manipulation intrinsics and layout helpers
+// ==============================================================================
 
 pub fn copy(dest: *raw var u8, src: *raw u8, count: usize) {
-    // Intrinsic: memcpy
+    var i = 0usize
+    while i < count {
+        dest[i] = src[i]
+        i = i + 1usize
+    }
 }
 
-pub fn set(dest: *raw var u8, val: u8, count: usize) {
-    // Intrinsic: memset
+pub fn mem_copy(dest: *raw var u8, src: *raw u8, count: usize) {
+    copy(dest, src, count)
+}
+
+pub fn mem_set(dest: *raw var u8, val: u8, count: usize) {
+    var i = 0usize
+    while i < count {
+        dest[i] = val
+        i = i + 1usize
+    }
 }
 
 pub fn zero(dest: *raw var u8, count: usize) {
-    set(dest, 0, count)
+    mem_set(dest, 0u8, count)
+}
+
+pub fn mem_zero(dest: *raw var u8, count: usize) {
+    mem_set(dest, 0u8, count)
+}
+
+pub fn mem_eq(a: *raw u8, b: *raw u8, count: usize) -> bool {
+    var i = 0usize
+    while i < count {
+        if a[i] != b[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+pub fn mem_cmp(a: *raw u8, b: *raw u8, count: usize) -> i64 {
+    var i = 0usize
+    while i < count {
+        if a[i] < b[i] { return -1i64 }
+        if a[i] > b[i] { return 1i64 }
+        i = i + 1usize
+    }
+    return 0i64
+}
+
+pub fn swap_i64(a: *raw var i64, b: *raw var i64) {
+    let tmp = a[0usize]
+    a[0usize] = b[0usize]
+    b[0usize] = tmp
 }
 
 pub fn size_of_val<T>(val: T) -> usize;

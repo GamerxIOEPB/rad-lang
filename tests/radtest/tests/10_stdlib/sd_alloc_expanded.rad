@@ -1,0 +1,63 @@
+import alloc/vec
+import alloc/string
+import alloc/deque
+import alloc/hash
+import alloc/boxed
+
+fn main() {
+    var v = Vec.from([4, 1, 7, 2, 9])
+    let v_clone = v.clone_vec()
+    let sum = v.reduce(0, |a, b| a + b)
+    let has7 = v.any(|x| x == 7)
+    let all_lt10 = v.all(|x| x < 10)
+    let f6 = v.find(|x| x > 5).unwrap()
+    let cw = v.count_where(|x| x >= 4)
+    v.insert_at(1usize, 88)
+    let rem = v.remove_at(1usize).unwrap()
+    let tk = v_clone.take(2usize)
+    let sk = v_clone.skip(3usize)
+    v.sort_by(|a, b| a - b)
+    let fm = tk.flat_map(|x| Vec.from([x, x * 2]))
+    println("vec sum={sum} any={has7} all={all_lt10} find={f6} cw={cw} rem={rem} first={v.first().unwrap()} last={v.last().unwrap()} sk0={sk.ptr[0]} fm_len={fm.len()}")
+    v.drop()
+    v_clone.drop()
+    tk.drop()
+    sk.drop()
+    fm.drop()
+
+    var s = String.from_str("  Rad Systems Lang  ")
+    let tr = s.trim()
+    let up = tr.to_upper()
+    let lo = tr.to_lower()
+    let rp = tr.replace("Systems", "Fast")
+    let sub = tr.substring(4usize, 7usize)
+    let parts = tr.split(" ")
+    let pad = sub.pad_left(9usize, 95u8)
+    println("str tr={tr.as_ptr() as str} up={up.as_ptr() as str} lo={lo.as_ptr() as str}")
+    println("str rp={rp.as_ptr() as str} sub={sub.as_ptr() as str} pad={pad.as_ptr() as str} nparts={parts.len()} eq={tr.equals(\"Rad Systems Lang\")} idx={tr.index_of(\"Lang\")}")
+    s.drop()
+    tr.drop()
+    up.drop()
+    lo.drop()
+    rp.drop()
+    sub.drop()
+    pad.drop()
+
+    var q: Queue<i64> = Queue.new()
+    q.enqueue(101)
+    q.enqueue(202)
+    println("queue len={q.len()} empty={q.is_empty()} front={q.peek_front().unwrap()} deq={q.dequeue().unwrap()} len2={q.len()}")
+    q.free_queue()
+
+    var hm: StringHashMap<i64> = StringHashMap.new()
+    hm.put("k1", 11)
+    hm.put("k2", 22)
+    println("hm len={hm.len()} empty={hm.is_empty()} k2={hm.lookup(\"k2\").unwrap()}")
+    hm.free_strmap()
+
+    var bx: Box<i64> = Box.new(55)
+    let g1 = bx.get()
+    bx.set(77)
+    println("box={g1},{bx.get()}")
+    bx.drop()
+}

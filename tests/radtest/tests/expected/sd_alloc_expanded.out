@@ -1,0 +1,6 @@
+vec sum=23 any=1 all=1 find=7 cw=3 rem=88 first=1 last=9 sk0=2 fm_len=4
+str tr=Rad Systems Lang up=RAD SYSTEMS LANG lo=rad systems lang
+str rp=Rad Fast Lang sub=Systems pad=__Systems nparts=3 eq=1 idx=12
+queue len=2 empty=0 front=101 deq=101 len2=1
+hm len=2 empty=0 k2=22
+box=55,77

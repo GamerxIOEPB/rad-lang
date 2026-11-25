@@ -1,0 +1,256 @@
+// ==============================================================================
+// std/src/datetime.rad — Date/time calendar arithmetic and ISO-8601 formatting
+// ==============================================================================
+
+fn dt_str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var n = 0usize
+    while p[n] != 0u8 {
+        n = n + 1usize
+    }
+    return n
+}
+
+pub struct DateTime {
+    pub year: i64,
+    pub month: i64,
+    pub day: i64,
+    pub hour: i64,
+    pub minute: i64,
+    pub second: i64,
+}
+
+pub fn dt_is_leap_year(year: i64) -> bool {
+    if (year % 400i64) == 0i64 { return true }
+    if (year % 100i64) == 0i64 { return false }
+    return (year % 4i64) == 0i64
+}
+
+pub fn dt_days_in_month(year: i64, month: i64) -> i64 {
+    if month == 1i64 || month == 3i64 || month == 5i64 || month == 7i64 || month == 8i64 || month == 10i64 || month == 12i64 {
+        return 31i64
+    }
+    if month == 4i64 || month == 6i64 || month == 9i64 || month == 11i64 {
+        return 30i64
+    }
+    if month == 2i64 {
+        if dt_is_leap_year(year) { return 29i64 }
+        return 28i64
+    }
+    return 0i64
+}
+
+fn dt_floor_div(a: i64, b: i64) -> i64 {
+    var q = a / b
+    let r = a - q * b
+    if r != 0i64 && ((r < 0i64) != (b < 0i64)) {
+        q = q - 1i64
+    }
+    return q
+}
+
+// Days since 1970-01-01 (Howard Hinnant algorithm)
+fn dt_days_from_civil(y_in: i64, m: i64, d: i64) -> i64 {
+    var y = y_in
+    if m <= 2i64 { y = y - 1i64 }
+    var era = 0i64
+    if y >= 0i64 {
+        era = y / 400i64
+    } else {
+        era = (y - 399i64) / 400i64
+    }
+    let yoe = y - era * 400i64
+    var m_adj = m
+    if m > 2i64 {
+        m_adj = m - 3i64
+    } else {
+        m_adj = m + 9i64
+    }
+    let doy = (153i64 * m_adj + 2i64) / 5i64 + d - 1i64
+    let doe = yoe * 365i64 + yoe / 4i64 - yoe / 100i64 + doy
+    return era * 146097i64 + doe - 719468i64
+}
+
+pub fn dt_from_timestamp(unix_sec: i64) -> DateTime {
+    var days = dt_floor_div(unix_sec, 86400i64)
+    var rem = unix_sec - days * 86400i64
+    if rem < 0i64 {
+        rem = rem + 86400i64
+        days = days - 1i64
+    }
+    let hour = rem / 3600i64
+    rem = rem - hour * 3600i64
+    let minute = rem / 60i64
+    let second = rem - minute * 60i64
+
+    let z = days + 719468i64
+    var era = 0i64
+    if z >= 0i64 {
+        era = z / 146097i64
+    } else {
+        era = (z - 146096i64) / 146097i64
+    }
+    let doe = z - era * 146097i64
+    let yoe = (doe - doe / 1460i64 + doe / 36524i64 - doe / 146096i64) / 365i64
+    var y = yoe + era * 400i64
+    let doy = doe - (365i64 * yoe + yoe / 4i64 - yoe / 100i64)
+    let mp = (5i64 * doy + 2i64) / 153i64
+    let day = doy - (153i64 * mp + 2i64) / 5i64 + 1i64
+    var month = 0i64
+    if mp < 10i64 {
+        month = mp + 3i64
+    } else {
+        month = mp - 9i64
+    }
+    if month <= 2i64 {
+        y = y + 1i64
+    }
+    return DateTime { year: y, month: month, day: day, hour: hour, minute: minute, second: second }
+}
+
+impl DateTime {
+    pub fn new(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64) -> DateTime {
+        return DateTime { year: year, month: month, day: day, hour: hour, minute: minute, second: second }
+    }
+
+    pub fn to_timestamp(self) -> i64 {
+        let days = dt_days_from_civil(self.year, self.month, self.day)
+        return days * 86400i64 + self.hour * 3600i64 + self.minute * 60i64 + self.second
+    }
+
+    // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    pub fn weekday(self) -> i64 {
+        let days = dt_days_from_civil(self.year, self.month, self.day)
+        var wd = (days + 4i64) % 7i64
+        if wd < 0i64 { wd = wd + 7i64 }
+        return wd
+    }
+
+    pub fn day_of_year(self) -> i64 {
+        var total = 0i64
+        var m = 1i64
+        while m < self.month {
+            total = total + dt_days_in_month(self.year, m)
+            m = m + 1i64
+        }
+        return total + self.day
+    }
+
+    pub fn add_seconds(self, secs: i64) -> DateTime {
+        return dt_from_timestamp(self.to_timestamp() + secs)
+    }
+
+    pub fn add_days(self, days: i64) -> DateTime {
+        return dt_from_timestamp(self.to_timestamp() + days * 86400i64)
+    }
+
+    pub fn diff_seconds(self, other: DateTime) -> i64 {
+        return self.to_timestamp() - other.to_timestamp()
+    }
+
+    pub fn format_iso8601(self) -> String {
+        var out = String.new()
+        dt_push_padded(out, self.year, 4usize)
+        out.push_byte(45i64) // '-'
+        dt_push_padded(out, self.month, 2usize)
+        out.push_byte(45i64)
+        dt_push_padded(out, self.day, 2usize)
+        out.push_byte(84i64) // 'T'
+        dt_push_padded(out, self.hour, 2usize)
+        out.push_byte(58i64) // ':'
+        dt_push_padded(out, self.minute, 2usize)
+        out.push_byte(58i64)
+        dt_push_padded(out, self.second, 2usize)
+        out.push_byte(90i64) // 'Z'
+        return out
+    }
+}
+
+fn dt_push_padded(var out: String, val: i64, width: usize) {
+    var v = val
+    if v < 0i64 {
+        out.push_byte(45i64)
+        v = -v
+    }
+    var rev = String.new()
+    if v == 0i64 {
+        rev.push_byte(48i64)
+    } else {
+        while v > 0i64 {
+            let d = v % 10i64
+            rev.push_byte(48i64 + d)
+            v = v / 10i64
+        }
+    }
+    let n = rev.len()
+    if n < width {
+        var rem = width - n
+        while rem > 0usize {
+            out.push_byte(48i64)
+            rem = rem - 1usize
+        }
+    }
+    let rp = rev.as_ptr()
+    var i = n
+    while i > 0usize {
+        i = i - 1usize
+        out.push_byte(rp[i] as i64)
+    }
+    rev.drop()
+}
+
+fn dt_parse_digits(p: *raw u8, start: usize, count: usize) -> Option<i64> {
+    var acc = 0i64
+    var i = 0usize
+    while i < count {
+        let ch = p[start + i]
+        if ch < 48u8 || ch > 57u8 { return Option.None }
+        acc = acc * 10i64 + ((ch - 48u8) as i64)
+        i = i + 1usize
+    }
+    return Option.Some(acc)
+}
+
+pub fn dt_parse_iso8601(s: str) -> Result<DateTime, str> {
+    let n = dt_str_len(s)
+    if n < 10usize {
+        return Result.Err("invalid ISO-8601 string")
+    }
+    let p = s as *raw u8
+    if p[4usize] != 45u8 || p[7usize] != 45u8 {
+        return Result.Err("expected YYYY-MM-DD")
+    }
+    let y_opt = dt_parse_digits(p, 0usize, 4usize)
+    let m_opt = dt_parse_digits(p, 5usize, 2usize)
+    let d_opt = dt_parse_digits(p, 8usize, 2usize)
+    if y_opt.is_none() || m_opt.is_none() || d_opt.is_none() {
+        return Result.Err("invalid date digits")
+    }
+    let y = y_opt.unwrap()
+    let m = m_opt.unwrap()
+    let d = d_opt.unwrap()
+    if m < 1i64 || m > 12i64 || d < 1i64 || d > dt_days_in_month(y, m) {
+        return Result.Err("date out of range")
+    }
+    var hh = 0i64
+    var mm = 0i64
+    var ss = 0i64
+    if n >= 19usize && (p[10usize] == 84u8 || p[10usize] == 32u8) {
+        if p[13usize] != 58u8 || p[16usize] != 58u8 {
+            return Result.Err("expected HH:MM:SS")
+        }
+        let ho = dt_parse_digits(p, 11usize, 2usize)
+        let mo = dt_parse_digits(p, 14usize, 2usize)
+        let so = dt_parse_digits(p, 17usize, 2usize)
+        if ho.is_none() || mo.is_none() || so.is_none() {
+            return Result.Err("invalid time digits")
+        }
+        hh = ho.unwrap()
+        mm = mo.unwrap()
+        ss = so.unwrap()
+        if hh < 0i64 || hh > 23i64 || mm < 0i64 || mm > 59i64 || ss < 0i64 || ss > 59i64 {
+            return Result.Err("time out of range")
+        }
+    }
+    return Result.Ok(DateTime { year: y, month: m, day: d, hour: hh, minute: mm, second: ss })
+}

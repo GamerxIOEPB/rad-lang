@@ -1,0 +1,78 @@
+import alloc/vec
+import core/option
+import core/result
+import core/iter
+
+fn apply_i64(val: i64, f: fn(i64) -> i64) -> i64 {
+    return f(val)
+}
+
+fn apply_f64(val: f64, f: fn(f64) -> f64) -> f64 {
+    return f(val)
+}
+
+fn invoke_void(f: fn()) {
+    f()
+}
+
+fn outer_shadow(x: i64) -> i64 {
+    // Parameter shadowing inside lambda MUST NOT be treated as a capture
+    let f = |x| x + 1
+    return x + f(5)
+}
+
+fn main() {
+    let f_sq = |x| x * x
+    let f_add = |a, b| -> i64 { return a + b }
+    let f_arrow = fn(x: i64) => x * 10 + 2
+    let f_block = fn(a: i64, b: i64) -> i64 {
+        let s = a + b
+        return s * 2
+    }
+    let f_unit = || println("unit_lambda_ok")
+    let f_const = || 77
+
+    f_unit()
+    invoke_void(|| println("passed_zero_arg_ok"))
+    println("direct={(|n| n + 5)(37)} sq={f_sq(9)} add={f_add(11, 22)} c={f_const()}")
+    println("fnstyle={f_arrow(4)},{f_block(3, 5)} shadow={outer_shadow(10)}")
+    let h_i = apply_i64(6, |n| n * n + 1)
+    let h_f = apply_f64(2.5, |x: f64| -> f64 { return x * 4.0 })
+    println("hof_i64={h_i} hof_f64={h_f}")
+
+    // Nested non-capturing lambdas
+    let mk = |n: i64| -> i64 {
+        let g = |k| k * 3
+        return g(n) + 1
+    }
+    println("nested_noncap={mk(4)}")
+
+    // Vec functional methods
+    let nums = Vec.from([1, 2, 3, 4, 5, 6])
+    let mapped = nums.map(|x| x * x)
+    let big = mapped.filter(|x| x >= 16)
+    let total = big.reduce(0, |acc, x| acc + x)
+    print("vec_big:")
+    big.for_each(|x| print(" {x}"))
+    println(" total={total} any={big.any(|x| x == 25)} all={big.all(|x| x >= 16)}")
+    nums.drop()
+    mapped.drop()
+    big.drop()
+
+    // Option/Result combinators with lambdas
+    let o: Option<i64> = Option.Some(21)
+    let o_doubled = o.map(|x| x * 2)
+    let o_kept = o_doubled.filter(|x| x > 30)
+    let o_dropped = o_doubled.filter(|x| x > 100)
+    println("opt={o_kept.unwrap()},{o_dropped.is_none()}")
+
+    let r: Result<i64, str> = Result.Ok(15)
+    let r2 = r.map(|x| x + 5)
+    println("res={r2.unwrap()}")
+
+    // RangeIter combinators with lambdas
+    var ri = range(1, 6)
+    let rsum = ri.fold(0, |acc, x| acc + x)
+    var r2_it = range(2, 10)
+    println("range_fold={rsum} even_cnt={r2_it.count_where(|x| (x % 2) == 0)}")
+}

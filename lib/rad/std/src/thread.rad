@@ -68,15 +68,15 @@ impl Thread {
     }
 }
 
-pub struct Mutex {
+pub struct ThreadMutex {
     pub raw_ptr: *raw var u8,
 }
 
-impl Mutex {
-    pub fn new() -> Mutex {
+impl ThreadMutex {
+    pub fn new() -> ThreadMutex {
         let m = malloc(64usize)
         let _ = pthread_mutex_init(m, 0usize as *raw var u8)
-        return Mutex { raw_ptr: m }
+        return ThreadMutex { raw_ptr: m }
     }
 
     pub fn lock(self) -> i32 {

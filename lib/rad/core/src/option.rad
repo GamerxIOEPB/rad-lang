@@ -77,3 +77,23 @@ impl Option<T> {
         }
     }
 }
+
+
+impl<T> Option<T> {
+    pub fn filter(opt: Option<T>, pred: fn(T) -> bool) -> Option<T> {
+        if opt.is_some() {
+            let val = opt.unwrap()
+            if pred(val) {
+                return Option.Some(val)
+            }
+        }
+        return Option.None
+    }
+
+    pub fn contains(opt: Option<T>, target: T) -> bool {
+        if opt.is_some() {
+            return opt.unwrap() == target
+        }
+        return false
+    }
+}

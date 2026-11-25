@@ -1,0 +1,5 @@
+iter cnt=5 sum=15 step=10,7,4,1,1 fact=720 find=5 odd=1 pos=1
+math gcd=6 lcm=36 pow=1024 isqrt=12 p2=1 np2=64 dc=4 sgn=-1 rng=1
+mem eq1=1 eq2=0 cmp=-1 z0=0
+opt filter=25,1 contains=1,0
+res contains=1,0 or_else=99

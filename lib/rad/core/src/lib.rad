@@ -1,6 +1,6 @@
-// Rad Core Library Root
-// Zero allocation, zero OS dependencies.
-// Freestanding runtime for bare metal, embedded systems, and foundational types.
+// ==============================================================================
+// core/src/lib.rad — Core Library Root Module (freestanding, no libc required)
+// ==============================================================================
 
 import marker
 import mem
@@ -10,3 +10,4 @@ import math
 import panic
 import ffi
 import ptr
+import iter

@@ -2,6 +2,7 @@
 // Zero allocation, freestanding runtime panic handler
 
 pub fn panic(msg: str) {
+    __rad_run_panic_hook();
     let prefix = "rad runtime panic: ";
     let _ = syscall3(1i64, 2i64, prefix as *raw u8, 19i64);
     let p = msg as *raw u8;

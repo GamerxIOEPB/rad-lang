@@ -303,6 +303,14 @@ impl<V> StringHashMap<V> {
         false
     }
 
+    pub fn len(self) -> usize {
+        return self.count
+    }
+
+    pub fn is_empty(self) -> bool {
+        return self.count == 0usize
+    }
+
     pub fn free_strmap(var self) {
         if (self.keys as usize) != 0usize {
             free(self.keys as *raw var u8)

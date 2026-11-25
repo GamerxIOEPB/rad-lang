@@ -1,0 +1,45 @@
+import std/str
+import std/sort
+import std/iter
+import alloc/vec
+
+fn main() {
+    let t = str_trim("  alpha,beta,gamma  ")
+    let up = str_to_upper(t.as_ptr() as str)
+    let lo = str_to_lower(up.as_ptr() as str)
+    let rp = str_replace(lo.as_ptr() as str, ",", "|")
+    let parts = str_split(rp.as_ptr() as str, "|")
+    let joined = str_join(parts, "::")
+    let rev = str_reverse("rad")
+    let pre = str_remove_prefix("pre_value", "pre_")
+    let suf = str_remove_suffix(pre.as_ptr() as str, "_val")
+    println("str={t.as_ptr() as str} joined={joined.as_ptr() as str} rev={rev.as_ptr() as str} pre={pre.as_ptr() as str} suf={suf.as_ptr() as str}")
+    println("str_meta idx={str_index_of(\"banana\", \"na\")} lidx={str_last_index_of(\"banana\", \"na\")} cnt={str_count(\"banana\", \"na\")} dig={str_is_digits(\"1234\")} blk={str_is_blank(\" \\t\")}")
+    t.drop(); up.drop(); lo.drop(); rp.drop(); joined.drop(); rev.drop(); pre.drop(); suf.drop()
+
+    var arr = Vec.from([9, 3, 7, 1, 7, 5])
+    sort_i64(arr)
+    let ded = dedup_sorted_i64(arr)
+    let bs = binary_search_i64(ded, 7).unwrap()
+    let lb = lower_bound_i64(arr, 7)
+    let ub = upper_bound_i64(arr, 7)
+    println("sort sorted={is_sorted_i64(arr)} ded_len={ded.len()} bs={bs} lb={lb} ub={ub}")
+    arr.drop()
+    ded.drop()
+
+    var strs = Vec.new()
+    strs.push(String.from_str("pear"))
+    strs.push(String.from_str("apple"))
+    strs.push(String.from_str("orange"))
+    sort_strs(strs)
+    println("sort_strs={strs.ptr[0].as_ptr() as str},{strs.ptr[1].as_ptr() as str},{strs.ptr[2].as_ptr() as str}")
+
+    let nums = iter_range_vec(1, 7)
+    let evens = iter_filter(nums, |x| (x % 2) == 0)
+    let sqs = iter_map(evens, |x| x * x)
+    let sq_sum = iter_sum(sqs)
+    let prd = iter_prod(evens)
+    let z = iter_zip_fold(evens, sqs, 0, |acc, a, b| acc + a * b)
+    println("iter sum={sq_sum} prod={prd} min={iter_min(sqs).unwrap()} max={iter_max(sqs).unwrap()} z={z}")
+    nums.drop(); evens.drop(); sqs.drop()
+}

@@ -1,0 +1,10 @@
+fn trigger_unwrap() {
+    defer { println("defer:unwrap-cleanup") }
+    let empty: Option<i64> = Option.None
+    println(empty.unwrap())
+}
+
+fn main() {
+    defer { println("defer:main-unwrap") }
+    trigger_unwrap()
+}

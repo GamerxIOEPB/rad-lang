@@ -1,0 +1,453 @@
+// ==============================================================================
+// std/src/str.rad — String manipulation utilities
+// ==============================================================================
+
+fn str_mod_len(s: str) -> usize {
+    let p = s as *raw u8
+    var n = 0usize
+    while p[n] != 0u8 {
+        n = n + 1usize
+    }
+    return n
+}
+
+fn str_mod_starts_with(s: str, prefix: str) -> bool {
+    let sp = s as *raw u8
+    let pp = prefix as *raw u8
+    var i = 0usize
+    while pp[i] != 0u8 {
+        if sp[i] != pp[i] { return false }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn str_mod_ends_with(s: str, suffix: str) -> bool {
+    let slen = str_mod_len(s)
+    let suflen = str_mod_len(suffix)
+    if suflen > slen { return false }
+    let sp = s as *raw u8
+    let sup = suffix as *raw u8
+    let off = slen - suflen
+    var i = 0usize
+    while i < suflen {
+        if sp[off + i] != sup[i] { return false }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn str_is_ws(b: u8) -> bool {
+    return b == 32u8 || b == 9u8 || b == 10u8 || b == 13u8 || b == 11u8 || b == 12u8
+}
+
+pub fn str_trim_start(s: str) -> String {
+    let p = s as *raw u8
+    let n = str_mod_len(s)
+    var start = 0usize
+    while start < n {
+        if !str_is_ws(p[start]) { break }
+        start = start + 1usize
+    }
+    var out = String.new()
+    var i = start
+    while i < n {
+        out.push_byte(p[i] as i64)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_trim_end(s: str) -> String {
+    let p = s as *raw u8
+    var end = str_mod_len(s)
+    while end > 0usize {
+        if !str_is_ws(p[end - 1usize]) { break }
+        end = end - 1usize
+    }
+    var out = String.new()
+    var i = 0usize
+    while i < end {
+        out.push_byte(p[i] as i64)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_trim(s: str) -> String {
+    let p = s as *raw u8
+    let n = str_mod_len(s)
+    var start = 0usize
+    while start < n {
+        if !str_is_ws(p[start]) { break }
+        start = start + 1usize
+    }
+    var end = n
+    while end > start {
+        if !str_is_ws(p[end - 1usize]) { break }
+        end = end - 1usize
+    }
+    var out = String.new()
+    var i = start
+    while i < end {
+        out.push_byte(p[i] as i64)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_to_upper(s: str) -> String {
+    let p = s as *raw u8
+    let n = str_mod_len(s)
+    var out = String.new()
+    var i = 0usize
+    while i < n {
+        var b = p[i]
+        if b >= 97u8 && b <= 122u8 {
+            b = b - 32u8
+        }
+        out.push_byte(b as i64)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_to_lower(s: str) -> String {
+    let p = s as *raw u8
+    let n = str_mod_len(s)
+    var out = String.new()
+    var i = 0usize
+    while i < n {
+        var b = p[i]
+        if b >= 65u8 && b <= 90u8 {
+            b = b + 32u8
+        }
+        out.push_byte(b as i64)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_substr(s: str, start: usize, count: usize) -> String {
+    let p = s as *raw u8
+    let n = str_mod_len(s)
+    var out = String.new()
+    if start >= n {
+        return out
+    }
+    var end = start + count
+    if end > n {
+        end = n
+    }
+    var i = start
+    while i < end {
+        out.push_byte(p[i] as i64)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_index_of(haystack: str, needle: str) -> i64 {
+    let h = haystack as *raw u8
+    let n = needle as *raw u8
+    let hlen = str_mod_len(haystack)
+    let nlen = str_mod_len(needle)
+    if nlen == 0usize { return 0i64 }
+    if nlen > hlen { return -1i64 }
+    var i = 0usize
+    while i + nlen <= hlen {
+        var matched = true
+        var j = 0usize
+        while j < nlen {
+            if h[i + j] != n[j] {
+                matched = false
+                break
+            }
+            j = j + 1usize
+        }
+        if matched {
+            return i as i64
+        }
+        i = i + 1usize
+    }
+    return -1i64
+}
+
+pub fn str_last_index_of(haystack: str, needle: str) -> i64 {
+    let h = haystack as *raw u8
+    let n = needle as *raw u8
+    let hlen = str_mod_len(haystack)
+    let nlen = str_mod_len(needle)
+    if nlen == 0usize { return hlen as i64 }
+    if nlen > hlen { return -1i64 }
+    var i = hlen - nlen + 1usize
+    while i > 0usize {
+        i = i - 1usize
+        var matched = true
+        var j = 0usize
+        while j < nlen {
+            if h[i + j] != n[j] {
+                matched = false
+                break
+            }
+            j = j + 1usize
+        }
+        if matched {
+            return i as i64
+        }
+    }
+    return -1i64
+}
+
+pub fn str_count(haystack: str, needle: str) -> usize {
+    let h = haystack as *raw u8
+    let n = needle as *raw u8
+    let hlen = str_mod_len(haystack)
+    let nlen = str_mod_len(needle)
+    if nlen == 0usize || nlen > hlen { return 0usize }
+    var count = 0usize
+    var i = 0usize
+    while i + nlen <= hlen {
+        var matched = true
+        var j = 0usize
+        while j < nlen {
+            if h[i + j] != n[j] {
+                matched = false
+                break
+            }
+            j = j + 1usize
+        }
+        if matched {
+            count = count + 1usize
+            i = i + nlen
+        } else {
+            i = i + 1usize
+        }
+    }
+    return count
+}
+
+pub fn str_replace(s: str, from: str, to: str) -> String {
+    let sp = s as *raw u8
+    let fp = from as *raw u8
+    let slen = str_mod_len(s)
+    let flen = str_mod_len(from)
+    var out = String.new()
+    if flen == 0usize {
+        out.push_str(s)
+        return out
+    }
+    var i = 0usize
+    while i < slen {
+        if i + flen <= slen {
+            var matched = true
+            var j = 0usize
+            while j < flen {
+                if sp[i + j] != fp[j] {
+                    matched = false
+                    break
+                }
+                j = j + 1usize
+            }
+            if matched {
+                out.push_str(to)
+                i = i + flen
+                continue
+            }
+        }
+        out.push_byte(sp[i] as i64)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_split(s: str, delim: str) -> Vec<String> {
+    var parts = Vec.new()
+    let sp = s as *raw u8
+    let dp = delim as *raw u8
+    let slen = str_mod_len(s)
+    let dlen = str_mod_len(delim)
+    if dlen == 0usize {
+        var i = 0usize
+        while i < slen {
+            var ch = String.new()
+            ch.push_byte(sp[i] as i64)
+            parts.push(ch)
+            i = i + 1usize
+        }
+        return parts
+    }
+    var cur = String.new()
+    var i = 0usize
+    while i < slen {
+        if i + dlen <= slen {
+            var matched = true
+            var j = 0usize
+            while j < dlen {
+                if sp[i + j] != dp[j] {
+                    matched = false
+                    break
+                }
+                j = j + 1usize
+            }
+            if matched {
+                parts.push(cur)
+                cur = String.new()
+                i = i + dlen
+                continue
+            }
+        }
+        cur.push_byte(sp[i] as i64)
+        i = i + 1usize
+    }
+    parts.push(cur)
+    return parts
+}
+
+pub fn str_lines(s: str) -> Vec<String> {
+    var result = Vec.new()
+    let p = s as *raw u8
+    let n = str_mod_len(s)
+    var cur = String.new()
+    var i = 0usize
+    while i < n {
+        let ch = p[i]
+        if ch == 13u8 {
+            if i + 1usize < n && p[i + 1usize] == 10u8 {
+                i = i + 1usize
+            }
+            result.push(cur)
+            cur = String.new()
+        } else if ch == 10u8 {
+            result.push(cur)
+            cur = String.new()
+        } else {
+            cur.push_byte(ch as i64)
+        }
+        i = i + 1usize
+    }
+    if cur.len() > 0usize {
+        result.push(cur)
+    }
+    return result
+}
+
+pub fn str_join(parts: Vec<String>, sep: str) -> String {
+    var out = String.new()
+    var i = 0usize
+    while i < parts.len {
+        if i > 0usize {
+            out.push_str(sep)
+        }
+        out.push_str(parts.ptr[i].as_ptr() as str)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_repeat(s: str, times: usize) -> String {
+    var out = String.new()
+    var i = 0usize
+    while i < times {
+        out.push_str(s)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn str_pad_left(s: str, total_width: usize, pad_ch: u8) -> String {
+    let n = str_mod_len(s)
+    var out = String.new()
+    if n < total_width {
+        var rem = total_width - n
+        while rem > 0usize {
+            out.push_byte(pad_ch as i64)
+            rem = rem - 1usize
+        }
+    }
+    out.push_str(s)
+    return out
+}
+
+pub fn str_pad_right(s: str, total_width: usize, pad_ch: u8) -> String {
+    let n = str_mod_len(s)
+    var out = String.new()
+    out.push_str(s)
+    if n < total_width {
+        var rem = total_width - n
+        while rem > 0usize {
+            out.push_byte(pad_ch as i64)
+            rem = rem - 1usize
+        }
+    }
+    return out
+}
+
+pub fn str_reverse(s: str) -> String {
+    let p = s as *raw u8
+    var i = str_mod_len(s)
+    var out = String.new()
+    while i > 0usize {
+        i = i - 1usize
+        out.push_byte(p[i] as i64)
+    }
+    return out
+}
+
+pub fn str_remove_prefix(s: str, prefix: str) -> String {
+    if str_mod_starts_with(s, prefix) {
+        let plen = str_mod_len(prefix)
+        return str_substr(s, plen, str_mod_len(s) - plen)
+    }
+    return String.from_str(s)
+}
+
+pub fn str_remove_suffix(s: str, suffix: str) -> String {
+    if str_mod_ends_with(s, suffix) {
+        let slen = str_mod_len(s)
+        let suflen = str_mod_len(suffix)
+        return str_substr(s, 0usize, slen - suflen)
+    }
+    return String.from_str(s)
+}
+
+pub fn str_cmp(a: str, b: str) -> i64 {
+    let ap = a as *raw u8
+    let bp = b as *raw u8
+    let alen = str_mod_len(a)
+    let blen = str_mod_len(b)
+    var min_len = alen
+    if blen < min_len { min_len = blen }
+    var i = 0usize
+    while i < min_len {
+        if ap[i] < bp[i] { return -1i64 }
+        if ap[i] > bp[i] { return 1i64 }
+        i = i + 1usize
+    }
+    if alen < blen { return -1i64 }
+    if alen > blen { return 1i64 }
+    return 0i64
+}
+
+pub fn str_is_digits(s: str) -> bool {
+    let p = s as *raw u8
+    let n = str_mod_len(s)
+    if n == 0usize { return false }
+    var i = 0usize
+    while i < n {
+        if p[i] < 48u8 || p[i] > 57u8 { return false }
+        i = i + 1usize
+    }
+    return true
+}
+
+pub fn str_is_blank(s: str) -> bool {
+    let p = s as *raw u8
+    let n = str_mod_len(s)
+    var i = 0usize
+    while i < n {
+        if !str_is_ws(p[i]) { return false }
+        i = i + 1usize
+    }
+    return true
+}

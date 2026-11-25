@@ -1,5 +1,6 @@
-// Rad Standard Library Tier 3 (`rad-std`) Root
-
+// ==============================================================================
+// std/src/lib.rad — Standard Library Root Module
+// ==============================================================================
 pub import io;
 pub import fs;
 pub import process;
@@ -55,3 +56,13 @@ pub import zk;
 pub import wasm_vm;
 pub import pkg;
 pub import lsp;
+pub import str;
+pub import iter;
+pub import sort;
+pub import base64;
+pub import csv;
+pub import url;
+pub import datetime;
+pub import heap;
+pub import bytes;
+pub import stats;

@@ -4,7 +4,7 @@
 // Zero external C dynamic dependencies.
 // ==============================================================================
 
-fn str_len(s: str) -> usize {
+fn elf_str_len(s: str) -> usize {
     let p = s as *raw u8
     var i = 0usize
     while p[i] != 0u8 {
@@ -557,7 +557,7 @@ impl AstHashCache {
         // 64-bit FNV-1a hash
         var hash = 14695981039346656037u64
         let p = source as *raw u8
-        let len = str_len(source)
+        let len = elf_str_len(source)
         var i = 0usize
         while i < len {
             hash = hash ^ (p[i] as u64)

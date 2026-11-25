@@ -1,0 +1,64 @@
+import core/iter;
+import core/math;
+import core/mem;
+import core/option;
+import core/result;
+
+extern "C" {
+    fn malloc(sz: usize) -> *raw var u8;
+    fn free(p: *raw var u8);
+}
+
+fn main() {
+    // core/iter
+    var r1 = range(1, 6)
+    let cnt = r1.count()
+    let s1 = r1.sum()
+    var r2 = range_step(10, 0, -3)
+    var step_vals = ""
+    let n1 = r2.next().unwrap()
+    let n2 = r2.next().unwrap()
+    let n3 = r2.next().unwrap()
+    let n4 = r2.next().unwrap()
+    let n5 = r2.next().is_none()
+    var r3 = range(1, 7)
+    let fold_p = r3.fold(1, |a, b| a * b)
+    var r4 = range(2, 8)
+    let fnd = r4.find(|x| (x % 5) == 0).unwrap()
+    var r5 = range(2, 8)
+    let has_odd = r5.any(|x| (x % 2) == 1)
+    var r6 = range(1, 6)
+    let all_pos = r6.all(|x| x > 0)
+    println("iter cnt={cnt} sum={s1} step={n1},{n2},{n3},{n4},{n5} fact={fold_p} find={fnd} odd={has_odd} pos={all_pos}")
+
+    // core/math
+    println("math gcd={gcd(54, 24)} lcm={lcm(12, 18)} pow={pow_i64(2, 10u64)} isqrt={isqrt(144)} p2={is_power_of_two(64)} np2={next_power_of_two(33)} dc={div_ceil(17, 5)} sgn={sign(-9)} rng={in_range(5, 1, 10)}")
+
+    // core/mem
+    let src = malloc(4usize)
+    let dst = malloc(4usize)
+    src[0usize] = 65u8
+    src[1usize] = 66u8
+    src[2usize] = 67u8
+    src[3usize] = 0u8
+    copy(dst, src, 4usize)
+    let eq1 = mem_eq(src, dst, 4usize)
+    mem_set(dst, 90u8, 2usize)
+    let eq2 = mem_eq(src, dst, 4usize)
+    let cmp = mem_cmp(src, dst, 4usize)
+    zero(dst, 4usize)
+    println("mem eq1={eq1} eq2={eq2} cmp={cmp} z0={dst[0usize] as i64}")
+    free(src)
+    free(dst)
+
+    // core/option & core/result
+    let o1: Option<i64> = Option.Some(25)
+    let o_ok = o1.filter(|x| x > 20)
+    let o_no = o1.filter(|x| x > 30)
+    println("opt filter={o_ok.unwrap()},{o_no.is_none()} contains={o1.contains(25)},{o1.contains(9)}")
+
+    let res_ok: Result<i64, str> = Result.Ok(42)
+    let res_err: Result<i64, str> = Result.Err("oops")
+    let recovered = res_err.or_else(|_e| Result.Ok(99))
+    println("res contains={res_ok.contains(42)},{res_ok.contains(7)} or_else={recovered.unwrap()}")
+}

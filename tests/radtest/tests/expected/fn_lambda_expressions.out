@@ -1,0 +1,10 @@
+unit_lambda_ok
+passed_zero_arg_ok
+direct=42 sq=81 add=33 c=77
+fnstyle=42,16 shadow=16
+hof_i64=37 hof_f64=10.000000
+nested_noncap=13
+vec_big: 16 25 36 total=77 any=1 all=1
+opt=42,1
+res=20
+range_fold=15 even_cnt=4

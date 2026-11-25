@@ -1,0 +1,172 @@
+// ==============================================================================
+// std/src/csv.rad — RFC 4180 CSV parser and serializer
+// ==============================================================================
+
+fn csv_str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var n = 0usize
+    while p[n] != 0u8 {
+        n = n + 1usize
+    }
+    return n
+}
+
+pub fn csv_parse_row(line: str) -> Vec<String> {
+    return csv_parse_row_sep(line, 44u8) // ','
+}
+
+pub fn csv_parse_row_sep(line: str, sep: u8) -> Vec<String> {
+    var row = Vec.new()
+    let p = line as *raw u8
+    let n = csv_str_len(line)
+    var field = String.new()
+    var in_quotes = false
+    var i = 0usize
+    while i < n {
+        let ch = p[i]
+        if in_quotes {
+            if ch == 34u8 { // '"'
+                if i + 1usize < n && p[i + 1usize] == 34u8 {
+                    field.push_byte(34i64)
+                    i = i + 2usize
+                    continue
+                }
+                in_quotes = false
+            } else {
+                field.push_byte(ch as i64)
+            }
+        } else {
+            if ch == 34u8 && field.len() == 0usize {
+                in_quotes = true
+            } else if ch == sep {
+                row.push(field)
+                field = String.new()
+            } else if ch != 13u8 {
+                field.push_byte(ch as i64)
+            }
+        }
+        i = i + 1usize
+    }
+    row.push(field)
+    return row
+}
+
+pub fn csv_parse(input: str) -> Vec<Vec<String>> {
+    return csv_parse_sep(input, 44u8)
+}
+
+pub fn csv_parse_sep(input: str, sep: u8) -> Vec<Vec<String>> {
+    var table = Vec.new()
+    let p = input as *raw u8
+    let n = csv_str_len(input)
+    var cur_row = Vec.new()
+    var field = String.new()
+    var in_quotes = false
+    var has_content = false
+    var i = 0usize
+    while i < n {
+        let ch = p[i]
+        if in_quotes {
+            has_content = true
+            if ch == 34u8 {
+                if i + 1usize < n && p[i + 1usize] == 34u8 {
+                    field.push_byte(34i64)
+                    i = i + 2usize
+                    continue
+                }
+                in_quotes = false
+            } else {
+                field.push_byte(ch as i64)
+            }
+        } else {
+            if ch == 34u8 && field.len() == 0usize {
+                in_quotes = true
+                has_content = true
+            } else if ch == sep {
+                cur_row.push(field)
+                field = String.new()
+                has_content = true
+            } else if ch == 13u8 {
+                if i + 1usize < n && p[i + 1usize] == 10u8 {
+                    i = i + 1usize
+                }
+                cur_row.push(field)
+                table.push(cur_row)
+                cur_row = Vec.new()
+                field = String.new()
+                has_content = false
+            } else if ch == 10u8 {
+                cur_row.push(field)
+                table.push(cur_row)
+                cur_row = Vec.new()
+                field = String.new()
+                has_content = false
+            } else {
+                field.push_byte(ch as i64)
+                has_content = true
+            }
+        }
+        i = i + 1usize
+    }
+    if has_content || cur_row.len > 0usize {
+        cur_row.push(field)
+        table.push(cur_row)
+    }
+    return table
+}
+
+pub fn csv_escape_field(val: str, sep: u8) -> String {
+    let p = val as *raw u8
+    let n = csv_str_len(val)
+    var needs_quote = false
+    var i = 0usize
+    while i < n {
+        let ch = p[i]
+        if ch == sep || ch == 34u8 || ch == 10u8 || ch == 13u8 {
+            needs_quote = true
+            break
+        }
+        i = i + 1usize
+    }
+    var out = String.new()
+    if !needs_quote {
+        out.push_str(val)
+        return out
+    }
+    out.push_byte(34i64)
+    i = 0usize
+    while i < n {
+        let ch = p[i]
+        if ch == 34u8 {
+            out.push_byte(34i64)
+        }
+        out.push_byte(ch as i64)
+        i = i + 1usize
+    }
+    out.push_byte(34i64)
+    return out
+}
+
+pub fn csv_format_row(row: Vec<String>) -> String {
+    var out = String.new()
+    var i = 0usize
+    while i < row.len {
+        if i > 0usize { out.push_byte(44i64) }
+        let escaped = csv_escape_field(row.ptr[i].as_ptr() as str, 44u8)
+        out.push_str(escaped.as_ptr() as str)
+        i = i + 1usize
+    }
+    return out
+}
+
+pub fn csv_format(table: Vec<Vec<String>>) -> String {
+    var out = String.new()
+    var r = 0usize
+    while r < table.len {
+        if r > 0usize { out.push_byte(10i64) }
+        let line = csv_format_row(table.ptr[r])
+        out.push_str(line.as_ptr() as str)
+        r = r + 1usize
+    }
+    return out
+}

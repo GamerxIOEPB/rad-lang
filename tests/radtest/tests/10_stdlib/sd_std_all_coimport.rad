@@ -1,0 +1,12 @@
+import core/lib
+import std/lib
+
+fn main() {
+    let dt = dt_from_timestamp(0i64)
+    let iso = dt.format_iso8601()
+    let enc = encode("coimport")
+    let g = gcd(36, 24)
+    println("coimport iso={iso.as_ptr() as str} b64={enc.as_ptr() as str} gcd={g}")
+    iso.drop()
+    enc.drop()
+}

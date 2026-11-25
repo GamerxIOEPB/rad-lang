@@ -1,0 +1,17 @@
+fn leaf() {
+    defer { println("defer:leaf") }
+    panic("abort-leaf")
+}
+
+fn middle() {
+    var counter = 10
+    defer { println("defer:middle counter={counter}") }
+    counter = 42
+    leaf()
+}
+
+fn main() {
+    defer { println("defer:main-first") }
+    defer { println("defer:main-second") }
+    middle()
+}

@@ -1,0 +1,5 @@
+fn main() {
+    let base = 10
+    let bad = |x| x + base
+    println(bad(5))
+}

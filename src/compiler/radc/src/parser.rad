@@ -33,6 +33,7 @@ struct Parser {
     cur_is_async: bool,
     extra_stmts: Vec<usize>,
     tup_tmp_counter: i64,
+    lambda_counter: i64,
     enum_variant_ctors: Vec<String>,
     enum_variant_arities: Vec<i64>,
 }
@@ -1147,10 +1148,163 @@ impl Parser {
         })
     }
 
+    fn parse_lambda_expr(var self, tok_l: i64, tok_c: i64) -> usize {
+        let k = self.peek_kind()
+        var param_names = Vec.new()
+        var param_types = Vec.new()
+        var is_fn_style = false
+        if k == TOK_OROR {
+            self.advance()
+        } else if k == TOK_PIPE {
+            self.advance()
+            while self.peek_kind() != TOK_PIPE && self.peek_kind() != TOK_EOF {
+                if self.peek_kind() == TOK_VAR {
+                    self.advance()
+                }
+                if !self.is_ident_or_contextual_kw() {
+                    self.report_error("E0014", "expected closure parameter name", self.cur_tok_line(), self.cur_tok_col())
+                    break
+                }
+                let p_name = String.from_str(self.peek_text())
+                self.match_ident_or_kw()
+                var p_ty = String.from_str("__rad_infer")
+                if self.match_tok(TOK_COLON) {
+                    p_ty = self.parse_type_str()
+                }
+                param_names.push(p_name)
+                param_types.push(p_ty)
+                if !self.match_tok(TOK_COMMA) {
+                    break
+                }
+            }
+            self.expect_tok(TOK_PIPE, "|")
+        } else if k == TOK_FN {
+            is_fn_style = true
+            self.advance()
+            self.expect_tok(TOK_LPAREN, "(")
+            while self.peek_kind() != TOK_RPAREN && self.peek_kind() != TOK_EOF {
+                if self.peek_kind() == TOK_VAR {
+                    self.advance()
+                }
+                if !self.is_ident_or_contextual_kw() {
+                    self.report_error("E0014", "expected lambda parameter name", self.cur_tok_line(), self.cur_tok_col())
+                    break
+                }
+                let p_name = String.from_str(self.peek_text())
+                self.match_ident_or_kw()
+                var p_ty = String.from_str("__rad_infer")
+                if self.match_tok(TOK_COLON) {
+                    p_ty = self.parse_type_str()
+                }
+                param_names.push(p_name)
+                param_types.push(p_ty)
+                if !self.match_tok(TOK_COMMA) {
+                    break
+                }
+            }
+            self.expect_tok(TOK_RPAREN, ")")
+        }
+
+        var ret_type = String.from_str("__rad_infer")
+        if self.match_tok(TOK_ARROW) {
+            ret_type = self.parse_type_str()
+        }
+
+        let saved_moved = self.moved_vars
+        self.moved_vars = Vec.new()
+        var body = Vec.new()
+        if is_fn_style {
+            if self.match_tok(TOK_FAT_ARROW) {
+                if self.match_tok(TOK_LBRACE) {
+                    body = self.parse_block_stmts()
+                    self.expect_tok(TOK_RBRACE, "}")
+                } else {
+                    let b_expr = self.parse_expr(0)
+                    let b_st = self.add_stmt(Stmt {
+                        kind: STMT_EXPR,
+                        name: String.new(),
+                        type_name: String.new(),
+                        expr_id: b_expr,
+                        index_expr: 0usize,
+                        then_stmts: Vec.new(),
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: tok_l,
+                        stmt_col: tok_c,
+                    })
+                    body.push(b_st)
+                }
+            } else if self.match_tok(TOK_LBRACE) {
+                body = self.parse_block_stmts()
+                self.expect_tok(TOK_RBRACE, "}")
+            } else {
+                self.report_error("E0014", "expected '=>' or '{' after lambda signature", self.cur_tok_line(), self.cur_tok_col())
+            }
+        } else {
+            if self.match_tok(TOK_LBRACE) {
+                body = self.parse_block_stmts()
+                self.expect_tok(TOK_RBRACE, "}")
+            } else {
+                let _opt_arrow = self.match_tok(TOK_FAT_ARROW)
+                let b_expr = self.parse_expr(0)
+                let b_st = self.add_stmt(Stmt {
+                    kind: STMT_EXPR,
+                    name: String.new(),
+                    type_name: String.new(),
+                    expr_id: b_expr,
+                    index_expr: 0usize,
+                    then_stmts: Vec.new(),
+                    else_stmts: Vec.new(),
+                    body_stmts: Vec.new(),
+                    stmt_line: tok_l,
+                    stmt_col: tok_c,
+                })
+                body.push(b_st)
+            }
+        }
+        self.moved_vars = saved_moved
+
+        self.lambda_counter = self.lambda_counter + 1i64
+        var fn_name = String.new()
+        fn_name.push_str("__rad_lambda_")
+        fn_name.push_str(int_to_str(self.lambda_counter as i32).as_ptr() as str)
+        fn_name.push_byte(0u8)
+
+        let fn_idx = self.functions.len
+        self.functions.push(FunctionDef {
+            fn_name: String.from_str(fn_name.as_ptr() as str),
+            param_names: param_names,
+            param_types: param_types,
+            ret_type: ret_type,
+            body: body,
+            is_test: false,
+            is_async: false,
+            has_body: true,
+            source_id: self.current_source_id,
+        })
+
+        return self.add_expr(Expr {
+            kind: EXPR_LAMBDA,
+            op: 0,
+            int_val: fn_idx as i64,
+            str_val: fn_name,
+            target_type: String.from_str("ptr"),
+            left: 0usize,
+            right: 0usize,
+            args: Vec.new(),
+            field_name: String.new(),
+            expr_line: tok_l,
+            expr_col: tok_c,
+        })
+    }
+
     fn parse_primary(var self) -> usize {
         let k = self.peek_kind()
         let tok_l = self.cur_tok_line()
         let tok_c = self.cur_tok_col()
+        if k == TOK_PIPE || k == TOK_OROR || (k == TOK_FN && self.peek_next_kind() == TOK_LPAREN) {
+            return self.parse_lambda_expr(tok_l, tok_c)
+        }
         if k == TOK_PERFORM || (k == TOK_IDENT && str_eq(self.peek_text(), "perform")) {
             self.advance()
             return self.parse_primary()
@@ -3600,7 +3754,7 @@ impl Parser {
             }
         }
         var fn_name = String.new()
-        if str_len(prefix) > 0usize && ((!str_eq(prefix, "String") && !str_eq(prefix, "Vec")) || str_eq(raw_fn_name.as_ptr() as str, "new") || (str_eq(prefix, "String") && str_eq(raw_fn_name.as_ptr() as str, "from_str"))) {
+        if str_len(prefix) > 0usize {
             fn_name.push_str(prefix)
             fn_name.push_str("__")
         }

@@ -152,3 +152,196 @@ impl<T> Vec<T> {
         return res
     }
 }
+
+
+impl<T> Vec<T> {
+    pub fn clone_vec(self) -> Vec<T> {
+        var out = Vec.new()
+        var i = 0usize
+        while i < self.len {
+            out.push(self.ptr[i])
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn first(self) -> Option<T> {
+        if self.len == 0usize { return Option.None }
+        return Option.Some(self.ptr[0usize])
+    }
+
+    pub fn last(self) -> Option<T> {
+        if self.len == 0usize { return Option.None }
+        return Option.Some(self.ptr[self.len - 1usize])
+    }
+
+    pub fn contains(self, target: T) -> bool {
+        var i = 0usize
+        while i < self.len {
+            if self.ptr[i] == target {
+                return true
+            }
+            i = i + 1usize
+        }
+        return false
+    }
+
+    pub fn index_of(self, target: T) -> Option<usize> {
+        var i = 0usize
+        while i < self.len {
+            if self.ptr[i] == target {
+                return Option.Some(i as i64)
+            }
+            i = i + 1usize
+        }
+        return Option.None
+    }
+
+    pub fn insert_at(var self, idx: usize, item: T) -> bool {
+        if idx > self.len { return false }
+        self.push(item)
+        var i = self.len - 1usize
+        while i > idx {
+            self.ptr[i] = self.ptr[i - 1usize]
+            i = i - 1usize
+        }
+        self.ptr[idx] = item
+        return true
+    }
+
+    pub fn remove_at(var self, idx: usize) -> Option<T> {
+        if idx >= self.len { return Option.None }
+        let removed = self.ptr[idx]
+        var i = idx
+        while i + 1usize < self.len {
+            self.ptr[i] = self.ptr[i + 1usize]
+            i = i + 1usize
+        }
+        let _last = self.pop()
+        return Option.Some(removed)
+    }
+
+    pub fn extend(var self, other: Vec<T>) {
+        var i = 0usize
+        while i < other.len {
+            self.push(other.ptr[i])
+            i = i + 1usize
+        }
+    }
+
+    pub fn take(self, n: usize) -> Vec<T> {
+        var out = Vec.new()
+        var limit = n
+        if limit > self.len { limit = self.len }
+        var i = 0usize
+        while i < limit {
+            out.push(self.ptr[i])
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn skip(self, n: usize) -> Vec<T> {
+        var out = Vec.new()
+        var i = n
+        while i < self.len {
+            out.push(self.ptr[i])
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn reduce<U>(self, init: U, f: fn(U, T) -> U) -> U {
+        var acc = init
+        var i = 0usize
+        while i < self.len {
+            acc = f(acc, self.ptr[i])
+            i = i + 1usize
+        }
+        return acc
+    }
+
+    pub fn any(self, pred: fn(T) -> bool) -> bool {
+        var i = 0usize
+        while i < self.len {
+            if pred(self.ptr[i]) {
+                return true
+            }
+            i = i + 1usize
+        }
+        return false
+    }
+
+    pub fn all(self, pred: fn(T) -> bool) -> bool {
+        var i = 0usize
+        while i < self.len {
+            if !pred(self.ptr[i]) {
+                return false
+            }
+            i = i + 1usize
+        }
+        return true
+    }
+
+    pub fn find(self, pred: fn(T) -> bool) -> Option<T> {
+        var i = 0usize
+        while i < self.len {
+            let item = self.ptr[i]
+            if pred(item) {
+                return Option.Some(item)
+            }
+            i = i + 1usize
+        }
+        return Option.None
+    }
+
+    pub fn count_where(self, pred: fn(T) -> bool) -> usize {
+        var c = 0usize
+        var i = 0usize
+        while i < self.len {
+            if pred(self.ptr[i]) {
+                c = c + 1usize
+            }
+            i = i + 1usize
+        }
+        return c
+    }
+
+    pub fn flat_map<U>(self, f: fn(T) -> Vec<U>) -> Vec<U> {
+        var out = Vec.new()
+        var i = 0usize
+        while i < self.len {
+            var sub = f(self.ptr[i])
+            var j = 0usize
+            while j < sub.len {
+                out.push(sub.ptr[j])
+                j = j + 1usize
+            }
+            sub.drop()
+            i = i + 1usize
+        }
+        return out
+    }
+
+    pub fn sort_by(var self, cmp: fn(T, T) -> i64) {
+        if self.len <= 1usize { return }
+        var gap = self.len / 2usize
+        while gap > 0usize {
+            var i = gap
+            while i < self.len {
+                let tmp = self.ptr[i]
+                var j = i
+                while j >= gap {
+                    if cmp(self.ptr[j - gap], tmp) <= 0i64 {
+                        break
+                    }
+                    self.ptr[j] = self.ptr[j - gap]
+                    j = j - gap
+                }
+                self.ptr[j] = tmp
+                i = i + 1usize
+            }
+            gap = gap / 2usize
+        }
+    }
+}

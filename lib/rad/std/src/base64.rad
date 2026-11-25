@@ -1,0 +1,149 @@
+// ==============================================================================
+// std/src/base64.rad — RFC 4648 Base64 and URL-safe Base64 encoding/decoding
+// ==============================================================================
+
+fn b64_str_len(s: str) -> usize {
+    let p = s as *raw u8
+    var n = 0usize
+    while p[n] != 0u8 {
+        n = n + 1usize
+    }
+    return n
+}
+
+fn b64_encode_char(val: u8, url_safe: bool) -> u8 {
+    let v = val as usize
+    if v < 26usize { return (65usize + v) as u8 }
+    if v < 52usize { return (97usize + (v - 26usize)) as u8 }
+    if v < 62usize { return (48usize + (v - 52usize)) as u8 }
+    if v == 62usize {
+        if url_safe { return 45u8 } // '-'
+        return 43u8 // '+'
+    }
+    if url_safe { return 95u8 } // '_'
+    return 47u8 // '/'
+}
+
+fn b64_decode_char(ch: u8) -> i64 {
+    if ch >= 65u8 && ch <= 90u8 { return (ch - 65u8) as i64 }
+    if ch >= 97u8 && ch <= 122u8 { return (ch - 97u8 + 26u8) as i64 }
+    if ch >= 48u8 && ch <= 57u8 { return (ch - 48u8 + 52u8) as i64 }
+    if ch == 43u8 || ch == 45u8 { return 62i64 }
+    if ch == 47u8 || ch == 95u8 { return 63i64 }
+    if ch == 61u8 { return -2i64 }
+    return -1i64
+}
+
+fn b64_byte_at(cond: bool, p: *raw u8, idx: usize) -> usize {
+    if cond {
+        return p[idx] as usize
+    }
+    return 0usize
+}
+
+pub fn encode_bytes_impl(data: *raw u8, n: usize, url_safe: bool, pad: bool) -> String {
+    var out = String.new()
+    var i = 0usize
+    while i < n {
+        let b0 = data[i] as usize
+        let rem = n - i
+        let b1 = b64_byte_at(rem > 1usize, data, i + 1usize)
+        let b2 = b64_byte_at(rem > 2usize, data, i + 2usize)
+
+        let c0 = (b0 >> 2usize) & 63usize
+        let c1 = ((b0 & 3usize) << 4usize) | ((b1 >> 4usize) & 15usize)
+        let c2 = ((b1 & 15usize) << 2usize) | ((b2 >> 6usize) & 3usize)
+        let c3 = b2 & 63usize
+
+        out.push_byte(b64_encode_char(c0 as u8, url_safe) as i64)
+        out.push_byte(b64_encode_char(c1 as u8, url_safe) as i64)
+
+        if rem > 1usize {
+            out.push_byte(b64_encode_char(c2 as u8, url_safe) as i64)
+        } else if pad {
+            out.push_byte(61i64)
+        }
+
+        if rem > 2usize {
+            out.push_byte(b64_encode_char(c3 as u8, url_safe) as i64)
+        } else if pad {
+            out.push_byte(61i64)
+        }
+
+        i = i + 3usize
+    }
+    return out
+}
+
+pub fn encode_bytes(data: *raw u8, n: usize) -> String {
+    return encode_bytes_impl(data, n, false, true)
+}
+
+pub fn encode(input: str) -> String {
+    let n = b64_str_len(input)
+    return encode_bytes_impl(input as *raw u8, n, false, true)
+}
+
+pub fn encode_url(input: str) -> String {
+    let n = b64_str_len(input)
+    return encode_bytes_impl(input as *raw u8, n, true, false)
+}
+
+pub fn decode(encoded: str) -> Result<String, str> {
+    let p = encoded as *raw u8
+    let n = b64_str_len(encoded)
+    var out = String.new()
+    var v0 = 0i64
+    var v1 = 0i64
+    var v2 = 0i64
+    var v3 = 0i64
+    var count = 0usize
+    var pad_count = 0usize
+    var i = 0usize
+    while i < n {
+        let ch = p[i]
+        i = i + 1usize
+        if ch == 32u8 || ch == 10u8 || ch == 13u8 || ch == 9u8 {
+            continue
+        }
+        let d = b64_decode_char(ch)
+        if d == -1i64 {
+            return Result.Err("invalid base64 character")
+        }
+        var cur_val = d
+        if d == -2i64 {
+            cur_val = 0i64
+            pad_count = pad_count + 1usize
+        } else {
+            if pad_count > 0usize {
+                return Result.Err("unexpected data after base64 padding")
+            }
+        }
+        if count == 0usize { v0 = cur_val }
+        else if count == 1usize { v1 = cur_val }
+        else if count == 2usize { v2 = cur_val }
+        else { v3 = cur_val }
+        count = count + 1usize
+        if count == 4usize {
+            out.push_byte(((v0 << 2i64) | (v1 >> 4i64)) & 255i64)
+            if pad_count < 2usize {
+                out.push_byte(((v1 << 4i64) | (v2 >> 2i64)) & 255i64)
+            }
+            if pad_count == 0usize {
+                out.push_byte(((v2 << 6i64) | v3) & 255i64)
+            }
+            count = 0usize
+            pad_count = 0usize
+        }
+    }
+    if count == 1usize {
+        return Result.Err("invalid base64 length")
+    }
+    if count == 2usize {
+        out.push_byte(((v0 << 2i64) | (v1 >> 4i64)) & 255i64)
+    } else if count == 3usize {
+        out.push_byte(((v0 << 2i64) | (v1 >> 4i64)) & 255i64)
+        out.push_byte(((v1 << 4i64) | (v2 >> 2i64)) & 255i64)
+    }
+    return Result.Ok(out)
+}

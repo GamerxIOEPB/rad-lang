@@ -221,7 +221,7 @@ pub fn yield_now() {
     let _ = syscall0(24i64);
 }
 
-pub fn sleep_ms(ms: u64) {
+pub fn async_sleep_ms(ms: u64) {
     // SYS_nanosleep = 35
     let req = malloc(16usize) as *raw var u8;
     let sec = (ms / 1000u64) as i64;

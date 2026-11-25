@@ -1,0 +1,10 @@
+fn trigger_div0() {
+    defer { println("defer:div0-cleanup") }
+    let z = 0
+    let _x = 100 / z
+}
+
+fn main() {
+    defer { println("defer:main-div0") }
+    trigger_div0()
+}
