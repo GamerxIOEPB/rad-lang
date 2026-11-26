@@ -85,6 +85,20 @@ jobs:
             LLVM_CXXFLAGS="$(llvm-config --cxxflags)" \
             LLVM_LDFLAGS="$(llvm-config --ldflags)"
 
+      - name: Run Grammar & AST Fuzzer Stress Suite
+        run: |
+          python3 tests/fuzzer/grammar_fuzzer.py 200
+
+      - name: Run Standalone Memory Safety & Pointer Stress Suite
+        run: |
+          ./bin/radc -g tests/quality/memory_safety.rad -o /tmp/mem_safety
+          valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=all --track-origins=yes /tmp/mem_safety
+          rm -f /tmp/mem_safety
+
+      - name: Verify Stage-2 vs Stage-3 Self-Hosting Determinism
+        run: |
+          make self-host-check
+
       - name: Upload Quality Diagnostics Artifact
         if: always()
         uses: actions/upload-artifact@v4

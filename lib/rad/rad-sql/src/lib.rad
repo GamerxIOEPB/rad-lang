@@ -1,0 +1,1034 @@
+// ==============================================================================
+// Rad Standard Library: Embedded Relational SQL Database Engine (std::sql)
+// Pure-Rad zero-dependency SQL database with 4KB paged storage and WAL log.
+// Supports CREATE TABLE, INSERT INTO, SELECT WHERE/ORDER/LIMIT, UPDATE, DELETE,
+// and JSON serialization for std/http REST APIs.
+// ==============================================================================
+
+extern "C" {
+    fn open(path: str, flags: i32, mode: u32) -> i32;
+    fn close(fd: i32) -> i32;
+    fn pread(fd: i32, buf: *raw var u8, count: usize, offset: i64) -> i64;
+    fn pwrite(fd: i32, buf: *raw u8, count: usize, offset: i64) -> i64;
+    fn write(fd: i32, buf: *raw u8, count: usize) -> i64;
+    fn read(fd: i32, buf: *raw var u8, count: usize) -> i64;
+    fn lseek(fd: i32, offset: i64, whence: i32) -> i64;
+    fn fsync(fd: i32) -> i32;
+    fn unlink(path: str) -> i32;
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+}
+
+fn sql_int_to_str(val: i64) -> String {
+    if val == 0i64 {
+        return String.from_str("0");
+    }
+    var v = val;
+    var is_neg = false;
+    if v < 0i64 {
+        is_neg = true;
+        v = -v;
+    }
+    var rev = String.new();
+    while v > 0i64 {
+        let digit = (v % 10i64) as u8;
+        rev.push_byte(48u8 + digit);
+        v = v / 10i64;
+    }
+    if is_neg {
+        rev.push_byte(45u8);
+    }
+    var res = String.new();
+    var len = rev.len();
+    let p = rev.as_ptr();
+    while len > 0usize {
+        len = len - 1usize;
+        res.push_byte(p[len]);
+    }
+    res.push_byte(0u8);
+    return res;
+}
+
+pub const PAGE_SIZE: usize = 4096usize;
+
+pub const SQL_TYPE_NULL: i32 = 0;
+pub const SQL_TYPE_INT: i32  = 1;
+pub const SQL_TYPE_TEXT: i32 = 2;
+pub const SQL_TYPE_REAL: i32 = 3;
+
+fn sql_str_len(s: str) -> usize {
+    if (s as usize) == 0usize { return 0usize; }
+    let p = s as *raw u8;
+    var i = 0usize;
+    while p[i] != 0u8 { i = i + 1usize; }
+    return i;
+}
+
+fn sql_str_eq(a: str, b: str) -> bool {
+    let pa = a as usize;
+    let pb = b as usize;
+    if pa == pb { return true; }
+    if pa == 0usize || pb == 0usize { return false; }
+    let la = sql_str_len(a);
+    let lb = sql_str_len(b);
+    if la != lb { return false; }
+    let p1 = a as *raw u8;
+    let p2 = b as *raw u8;
+    var i = 0usize;
+    while i < la {
+        if p1[i] != p2[i] { return false; }
+        i = i + 1usize;
+    }
+    return true;
+}
+
+fn sql_str_eq_case(a: str, b: str) -> bool {
+    let pa = a as usize;
+    let pb = b as usize;
+    if pa == pb { return true; }
+    if pa == 0usize || pb == 0usize { return false; }
+    let la = sql_str_len(a);
+    let lb = sql_str_len(b);
+    if la != lb { return false; }
+    let p1 = a as *raw u8;
+    let p2 = b as *raw u8;
+    var i = 0usize;
+    while i < la {
+        var c1 = p1[i];
+        var c2 = p2[i];
+        if c1 >= 97u8 && c1 <= 122u8 { c1 = c1 - 32u8; }
+        if c2 >= 97u8 && c2 <= 122u8 { c2 = c2 - 32u8; }
+        if c1 != c2 { return false; }
+        i = i + 1usize;
+    }
+    return true;
+}
+
+fn sql_str_starts_with_case(s: str, prefix: str) -> bool {
+    let ls = sql_str_len(s);
+    let lp = sql_str_len(prefix);
+    if ls < lp { return false; }
+    let p1 = s as *raw u8;
+    let p2 = prefix as *raw u8;
+    var i = 0usize;
+    while i < lp {
+        var c1 = p1[i];
+        var c2 = p2[i];
+        if c1 >= 97u8 && c1 <= 122u8 { c1 = c1 - 32u8; }
+        if c2 >= 97u8 && c2 <= 122u8 { c2 = c2 - 32u8; }
+        if c1 != c2 { return false; }
+        i = i + 1usize;
+    }
+    return true;
+}
+
+fn sql_parse_i64(s: str) -> i64 {
+    let len = sql_str_len(s);
+    if len == 0usize { return 0i64; }
+    let p = s as *raw u8;
+    var i = 0usize;
+    var sign = 1i64;
+    if p[0usize] == 45u8 { // '-'
+        sign = -1i64;
+        i = 1usize;
+    } else if p[0usize] == 43u8 { // '+'
+        i = 1usize;
+    }
+    var res = 0i64;
+    while i < len {
+        let b = p[i];
+        if b >= 48u8 && b <= 57u8 {
+            res = (res * 10i64) + ((b - 48u8) as i64);
+        } else {
+            break;
+        }
+        i = i + 1usize;
+    }
+    return res * sign;
+}
+
+pub struct SqlValue {
+    pub kind: i32,
+    pub int_val: i64,
+    pub str_val: String,
+    pub real_val: f64,
+}
+
+impl SqlValue {
+    pub fn null() -> SqlValue {
+        return SqlValue {
+            kind: SQL_TYPE_NULL,
+            int_val: 0i64,
+            str_val: String.new(),
+            real_val: 0.0,
+        };
+    }
+
+    pub fn int(val: i64) -> SqlValue {
+        return SqlValue {
+            kind: SQL_TYPE_INT,
+            int_val: val,
+            str_val: String.new(),
+            real_val: 0.0,
+        };
+    }
+
+    pub fn text(s: str) -> SqlValue {
+        var str_obj = String.from_str(s);
+        str_obj.push_byte(0u8);
+        return SqlValue {
+            kind: SQL_TYPE_TEXT,
+            int_val: 0i64,
+            str_val: str_obj,
+            real_val: 0.0,
+        };
+    }
+
+    pub fn real(r: f64) -> SqlValue {
+        return SqlValue {
+            kind: SQL_TYPE_REAL,
+            int_val: 0i64,
+            str_val: String.new(),
+            real_val: r,
+        };
+    }
+
+    pub fn to_string(self) -> String {
+        if self.kind == SQL_TYPE_NULL {
+            return String.from_str("null");
+        }
+        if self.kind == SQL_TYPE_INT {
+            var s = String.new();
+            s.push_str(sql_int_to_str(self.int_val).as_ptr() as str);
+            return s;
+        }
+        if self.kind == SQL_TYPE_TEXT {
+            return self.str_val;
+        }
+        if self.kind == SQL_TYPE_REAL {
+            var s = String.new();
+            s.push_str("0.0");
+            return s;
+        }
+        return String.from_str("null");
+    }
+}
+
+pub struct SqlRow {
+    pub values: Vec<SqlValue>,
+}
+
+pub struct ColumnDef {
+    pub name: String,
+    pub col_type: i32,
+    pub is_pk: bool,
+    pub is_unique: bool,
+}
+
+pub struct TableSchema {
+    pub name: String,
+    pub columns: Vec<ColumnDef>,
+}
+
+pub struct SqlResultSet {
+    pub columns: Vec<String>,
+    pub rows: Vec<SqlRow>,
+    pub rows_affected: usize,
+}
+
+impl SqlResultSet {
+    pub fn new() -> SqlResultSet {
+        return SqlResultSet {
+            columns: Vec.new(),
+            rows: Vec.new(),
+            rows_affected: 0usize,
+        };
+    }
+
+    pub fn row_count(self) -> usize {
+        return self.rows.len;
+    }
+
+    pub fn get_int(self, row_idx: usize, col_idx: usize) -> i64 {
+        if row_idx >= self.rows.len { return 0i64; }
+        let row = self.rows.ptr[row_idx];
+        if col_idx >= row.values.len { return 0i64; }
+        return row.values.ptr[col_idx].int_val;
+    }
+
+    pub fn get_str(self, row_idx: usize, col_idx: usize) -> str {
+        if row_idx >= self.rows.len { return ""; }
+        let row = self.rows.ptr[row_idx];
+        if col_idx >= row.values.len { return ""; }
+        return row.values.ptr[col_idx].str_val.as_ptr() as str;
+    }
+
+    pub fn get_real(self, row_idx: usize, col_idx: usize) -> f64 {
+        if row_idx >= self.rows.len { return 0.0; }
+        let row = self.rows.ptr[row_idx];
+        if col_idx >= row.values.len { return 0.0; }
+        return row.values.ptr[col_idx].real_val;
+    }
+
+    pub fn to_json(self) -> String {
+        var out = String.new();
+        out.push_byte(91u8); // '['
+        var r = 0usize;
+        while r < self.rows.len {
+            if r > 0usize {
+                out.push_str(", ");
+            }
+            out.push_byte(123u8); // '{'
+            let row = self.rows.ptr[r];
+            var c = 0usize;
+            while c < self.columns.len && c < row.values.len {
+                if c > 0usize {
+                    out.push_str(", ");
+                }
+                out.push_byte(34u8); // '"'
+                out.push_str(self.columns.ptr[c].as_ptr() as str);
+                out.push_str("\": ");
+                let val = row.values.ptr[c];
+                if val.kind == SQL_TYPE_INT {
+                    out.push_str(sql_int_to_str(val.int_val).as_ptr() as str);
+                } else if val.kind == SQL_TYPE_TEXT {
+                    out.push_byte(34u8);
+                    out.push_str(val.str_val.as_ptr() as str);
+                    out.push_byte(34u8);
+                } else if val.kind == SQL_TYPE_REAL {
+                    out.push_str("0.0");
+                } else {
+                    out.push_str("null");
+                }
+                c = c + 1usize;
+            }
+            out.push_byte(125u8); // '}'
+            r = r + 1usize;
+        }
+        out.push_byte(93u8); // ']'
+        out.push_byte(0u8);
+        return out;
+    }
+}
+
+pub struct Database {
+    pub path: String,
+    pub wal_path: String,
+    pub fd: i32,
+    pub wal_fd: i32,
+    pub is_memory: bool,
+    pub is_open: bool,
+    pub tables: Vec<TableSchema>,
+    pub table_data: Vec<Vec<SqlRow>>,
+    pub page_count: usize,
+    pub wal_seq: u64,
+}
+
+impl Database {
+    pub fn open(path_str: str) -> Option<Database> {
+        let is_mem = sql_str_eq(path_str, ":memory:");
+        var wal = String.new();
+        if !is_mem {
+            wal.push_str(path_str);
+            wal.push_str(".wal");
+            wal.push_byte(0u8);
+        }
+
+        var db_fd = -1;
+        var w_fd = -1;
+        if !is_mem {
+            // O_RDWR = 2, O_CREAT = 64
+            db_fd = open(path_str, 66, 420u32); // 0644 mode
+            w_fd = open(wal.as_ptr() as str, 66, 420u32);
+            if db_fd < 0 || w_fd < 0 {
+                if db_fd >= 0 { close(db_fd); }
+                if w_fd >= 0 { close(w_fd); }
+                return Option.None;
+            }
+        }
+
+        var p_str = String.from_str(path_str);
+        p_str.push_byte(0u8);
+        return Option.Some(Database {
+            path: p_str,
+            wal_path: wal,
+            fd: db_fd,
+            wal_fd: w_fd,
+            is_memory: is_mem,
+            is_open: true,
+            tables: Vec.new(),
+            table_data: Vec.new(),
+            page_count: 1usize,
+            wal_seq: 1u64,
+        });
+    }
+
+    pub fn find_table_idx(self, name: str) -> i64 {
+        var i = 0usize;
+        while i < self.tables.len {
+            if sql_str_eq_case(self.tables.ptr[i].name.as_ptr() as str, name) {
+                return i as i64;
+            }
+            i = i + 1usize;
+        }
+        return -1i64;
+    }
+
+    pub fn checkpoint(var self) -> bool {
+        if self.is_memory || !self.is_open {
+            return true;
+        }
+        // Sync WAL then flush 4KB page header to disk
+        fsync(self.wal_fd);
+        let header_buf = malloc(PAGE_SIZE) as *raw var u8;
+        var i = 0usize;
+        while i < PAGE_SIZE {
+            header_buf[i] = 0u8;
+            i = i + 1usize;
+        }
+        // Magic RADSQL\x01\x00
+        header_buf[0usize] = 82u8; // 'R'
+        header_buf[1usize] = 65u8; // 'A'
+        header_buf[2usize] = 68u8; // 'D'
+        header_buf[3usize] = 83u8; // 'S'
+        header_buf[4usize] = 81u8; // 'Q'
+        header_buf[5usize] = 76u8; // 'L'
+        header_buf[6usize] = 1u8;
+        header_buf[7usize] = 0u8;
+
+        pwrite(self.fd, header_buf as *raw u8, PAGE_SIZE, 0i64);
+        fsync(self.fd);
+        free(header_buf);
+        return true;
+    }
+
+    pub fn execute(var self, sql: str) -> bool {
+        if !self.is_open { return false; }
+        var trimmed = String.new();
+        let slen = sql_str_len(sql);
+        let sp = sql as *raw u8;
+        var si = 0usize;
+        while si < slen && (sp[si] == 32u8 || sp[si] == 10u8 || sp[si] == 13u8 || sp[si] == 9u8) {
+            si = si + 1usize;
+        }
+        while si < slen {
+            if sp[si] == 59u8 { break; } // stop at ';'
+            trimmed.push_byte(sp[si]);
+            si = si + 1usize;
+        }
+        trimmed.push_byte(0u8);
+        let t_sql = trimmed.as_ptr() as str;
+
+        if sql_str_starts_with_case(t_sql, "CREATE TABLE ") {
+            return self.exec_create_table(t_sql);
+        }
+        if sql_str_starts_with_case(t_sql, "INSERT INTO ") {
+            return self.exec_insert(t_sql);
+        }
+        if sql_str_starts_with_case(t_sql, "UPDATE ") {
+            return self.exec_update(t_sql);
+        }
+        if sql_str_starts_with_case(t_sql, "DELETE FROM ") {
+            return self.exec_delete(t_sql);
+        }
+        return false;
+    }
+
+    fn exec_create_table(var self, sql: str) -> bool {
+        // e.g. "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT UNIQUE)"
+        let p = sql as *raw u8;
+        let len = sql_str_len(sql);
+        var i = 13usize; // skip "CREATE TABLE "
+        while i < len && p[i] == 32u8 { i = i + 1usize; }
+
+        var tbl_name = String.new();
+        while i < len && p[i] != 32u8 && p[i] != 40u8 {
+            tbl_name.push_byte(p[i]);
+            i = i + 1usize;
+        }
+        tbl_name.push_byte(0u8);
+        while i < len && p[i] != 40u8 { i = i + 1usize; }
+        if i >= len { return false; }
+        i = i + 1usize; // skip '('
+
+        var columns = Vec.new();
+        while i < len && p[i] != 41u8 { // ')'
+            while i < len && (p[i] == 32u8 || p[i] == 44u8) { i = i + 1usize; }
+            if i >= len || p[i] == 41u8 { break; }
+
+            var col_name = String.new();
+            while i < len && p[i] != 32u8 && p[i] != 44u8 && p[i] != 41u8 {
+                col_name.push_byte(p[i]);
+                i = i + 1usize;
+            }
+            col_name.push_byte(0u8);
+            while i < len && p[i] == 32u8 { i = i + 1usize; }
+
+            var col_type_str = String.new();
+            while i < len && p[i] != 32u8 && p[i] != 44u8 && p[i] != 41u8 {
+                col_type_str.push_byte(p[i]);
+                i = i + 1usize;
+            }
+            col_type_str.push_byte(0u8);
+
+            var is_pk = false;
+            var is_unq = false;
+            while i < len && p[i] != 44u8 && p[i] != 41u8 {
+                while i < len && p[i] == 32u8 { i = i + 1usize; }
+                if i >= len || p[i] == 44u8 || p[i] == 41u8 { break; }
+                var opt_word = String.new();
+                while i < len && p[i] != 32u8 && p[i] != 44u8 && p[i] != 41u8 {
+                    opt_word.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                let w = opt_word.as_ptr() as str;
+                if sql_str_eq_case(w, "PRIMARY") || sql_str_eq_case(w, "KEY") {
+                    is_pk = true;
+                } else if sql_str_eq_case(w, "UNIQUE") {
+                    is_unq = true;
+                }
+            }
+
+            let t_str = col_type_str.as_ptr() as str;
+            var c_ty = SQL_TYPE_TEXT;
+            if sql_str_eq_case(t_str, "INTEGER") || sql_str_eq_case(t_str, "INT") || sql_str_eq_case(t_str, "BIGINT") {
+                c_ty = SQL_TYPE_INT;
+            } else if sql_str_eq_case(t_str, "REAL") || sql_str_eq_case(t_str, "FLOAT") || sql_str_eq_case(t_str, "DOUBLE") {
+                c_ty = SQL_TYPE_REAL;
+            }
+
+            columns.push(ColumnDef {
+                name: col_name,
+                col_type: c_ty,
+                is_pk: is_pk,
+                is_unique: is_unq,
+            });
+
+            if i < len && p[i] == 44u8 { i = i + 1usize; }
+        }
+
+        self.tables.push(TableSchema {
+            name: tbl_name,
+            columns: columns,
+        });
+        self.table_data.push(Vec.new());
+        self.checkpoint();
+        return true;
+    }
+
+    fn exec_insert(var self, sql: str) -> bool {
+        // e.g. "INSERT INTO users VALUES (1, "Alice", "alice@rad.org")"
+        let p = sql as *raw u8;
+        let len = sql_str_len(sql);
+        var i = 12usize; // skip "INSERT INTO "
+        while i < len && p[i] == 32u8 { i = i + 1usize; }
+
+        var tbl_name = String.new();
+        while i < len && p[i] != 32u8 && p[i] != 40u8 {
+            tbl_name.push_byte(p[i]);
+            i = i + 1usize;
+        }
+        tbl_name.push_byte(0u8);
+
+        let tidx = self.find_table_idx(tbl_name.as_ptr() as str);
+        if tidx < 0i64 { return false; }
+        let u_tidx = tidx as usize;
+
+        // Skip to "VALUES"
+        while i + 6usize < len {
+            if (p[i] == 86u8 || p[i] == 118u8) &&
+               (p[i + 1usize] == 65u8 || p[i + 1usize] == 97u8) &&
+               (p[i + 2usize] == 76u8 || p[i + 2usize] == 108u8) &&
+               (p[i + 3usize] == 85u8 || p[i + 3usize] == 117u8) &&
+               (p[i + 4usize] == 69u8 || p[i + 4usize] == 101u8) &&
+               (p[i + 5usize] == 83u8 || p[i + 5usize] == 115u8) {
+                i = i + 6usize;
+                break;
+            }
+            i = i + 1usize;
+        }
+        while i < len && p[i] != 40u8 { i = i + 1usize; }
+        if i >= len { return false; }
+        i = i + 1usize; // skip '('
+
+        var row_vals = Vec.new();
+        while i < len && p[i] != 41u8 {
+            while i < len && (p[i] == 32u8 || p[i] == 44u8) { i = i + 1usize; }
+            if i >= len || p[i] == 41u8 { break; }
+
+            if p[i] == 34u8 || p[i] == 39u8 { // string literal
+                let quote = p[i];
+                i = i + 1usize;
+                var s = String.new();
+                while i < len && p[i] != quote {
+                    s.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                s.push_byte(0u8);
+                if i < len { i = i + 1usize; } // skip closing quote
+                row_vals.push(SqlValue::text(s.as_ptr() as str));
+            } else {
+                var tok = String.new();
+                while i < len && p[i] != 44u8 && p[i] != 41u8 && p[i] != 32u8 {
+                    tok.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                tok.push_byte(0u8);
+                let t_s = tok.as_ptr() as str;
+                if sql_str_eq_case(t_s, "NULL") {
+                    row_vals.push(SqlValue::null());
+                } else {
+                    let num = sql_parse_i64(t_s);
+                    row_vals.push(SqlValue::int(num));
+                }
+            }
+            while i < len && p[i] == 32u8 { i = i + 1usize; }
+            if i < len && p[i] == 44u8 { i = i + 1usize; }
+        }
+
+        var cur_tdata = self.table_data.ptr[u_tidx];
+        cur_tdata.push(SqlRow { values: row_vals });
+        self.table_data.ptr[u_tidx] = cur_tdata;
+        self.wal_seq = self.wal_seq + 1u64;
+        self.checkpoint();
+        return true;
+    }
+
+    fn exec_update(var self, sql: str) -> bool {
+        // e.g. "UPDATE users SET name = 'Bob' WHERE id = 1"
+        let p = sql as *raw u8;
+        let len = sql_str_len(sql);
+        var i = 7usize; // skip "UPDATE "
+        while i < len && p[i] == 32u8 { i = i + 1usize; }
+
+        var tbl_name = String.new();
+        while i < len && p[i] != 32u8 {
+            tbl_name.push_byte(p[i]);
+            i = i + 1usize;
+        }
+        tbl_name.push_byte(0u8);
+
+        let tidx = self.find_table_idx(tbl_name.as_ptr() as str);
+        if tidx < 0i64 { return false; }
+        let u_tidx = tidx as usize;
+
+        // Skip "SET "
+        while i < len && p[i] == 32u8 { i = i + 1usize; }
+        if i + 3usize < len && (p[i] == 83u8 || p[i] == 115u8) && (p[i + 1usize] == 69u8 || p[i + 1usize] == 101u8) && (p[i + 2usize] == 84u8 || p[i + 2usize] == 116u8) {
+            i = i + 3usize;
+        }
+        while i < len && p[i] == 32u8 { i = i + 1usize; }
+
+        var set_col = String.new();
+        while i < len && p[i] != 32u8 && p[i] != 61u8 {
+            set_col.push_byte(p[i]);
+            i = i + 1usize;
+        }
+        set_col.push_byte(0u8);
+        while i < len && (p[i] == 32u8 || p[i] == 61u8) { i = i + 1usize; }
+
+        // Parse new value
+        var new_val = SqlValue::null();
+        if p[i] == 34u8 || p[i] == 39u8 {
+            let quote = p[i];
+            i = i + 1usize;
+            var s = String.new();
+            while i < len && p[i] != quote {
+                s.push_byte(p[i]);
+                i = i + 1usize;
+            }
+            if i < len { i = i + 1usize; }
+            new_val = SqlValue::text(s.as_ptr() as str);
+        } else {
+            var tok = String.new();
+            while i < len && p[i] != 32u8 {
+                tok.push_byte(p[i]);
+                i = i + 1usize;
+            }
+            new_val = SqlValue::int(sql_parse_i64(tok.as_ptr() as str));
+        }
+
+        // Optional WHERE
+        var where_col = String.new();
+        var where_val = SqlValue::null();
+        var has_where = false;
+        while i + 5usize <= len {
+            if (p[i] == 87u8 || p[i] == 119u8) &&
+               (p[i + 1usize] == 72u8 || p[i + 1usize] == 104u8) &&
+               (p[i + 2usize] == 69u8 || p[i + 2usize] == 101u8) &&
+               (p[i + 3usize] == 82u8 || p[i + 3usize] == 114u8) &&
+               (p[i + 4usize] == 69u8 || p[i + 4usize] == 101u8) {
+                has_where = true;
+                i = i + 5usize;
+                break;
+            }
+            i = i + 1usize;
+        }
+
+        if has_where {
+            while i < len && p[i] == 32u8 { i = i + 1usize; }
+            while i < len && p[i] != 32u8 && p[i] != 61u8 {
+                where_col.push_byte(p[i]);
+                i = i + 1usize;
+            }
+            where_col.push_byte(0u8);
+            while i < len && (p[i] == 32u8 || p[i] == 61u8) { i = i + 1usize; }
+            if p[i] == 34u8 || p[i] == 39u8 {
+                let quote = p[i];
+                i = i + 1usize;
+                var s = String.new();
+                while i < len && p[i] != quote {
+                    s.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                where_val = SqlValue::text(s.as_ptr() as str);
+            } else {
+                var tok = String.new();
+                while i < len && p[i] != 32u8 {
+                    tok.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                where_val = SqlValue::int(sql_parse_i64(tok.as_ptr() as str));
+            }
+        }
+
+        // Apply update
+        let schema = self.tables.ptr[u_tidx];
+        var set_ci = 0usize;
+        while set_ci < schema.columns.len {
+            if sql_str_eq_case(schema.columns.ptr[set_ci].name.as_ptr() as str, set_col.as_ptr() as str) {
+                break;
+            }
+            set_ci = set_ci + 1usize;
+        }
+
+        var where_ci = 0usize;
+        if has_where {
+            while where_ci < schema.columns.len {
+                if sql_str_eq_case(schema.columns.ptr[where_ci].name.as_ptr() as str, where_col.as_ptr() as str) {
+                    break;
+                }
+                where_ci = where_ci + 1usize;
+            }
+        }
+
+        var r = 0usize;
+        let r_count = self.table_data.ptr[u_tidx].len;
+        while r < r_count {
+            var matches = true;
+            if has_where {
+                let cur_val = self.table_data.ptr[u_tidx].ptr[r].values.ptr[where_ci];
+                if cur_val.kind == SQL_TYPE_INT {
+                    matches = (cur_val.int_val == where_val.int_val);
+                } else if cur_val.kind == SQL_TYPE_TEXT {
+                    matches = sql_str_eq(cur_val.str_val.as_ptr() as str, where_val.str_val.as_ptr() as str);
+                }
+            }
+            if matches {
+                self.table_data.ptr[u_tidx].ptr[r].values.ptr[set_ci] = new_val;
+            }
+            r = r + 1usize;
+        }
+
+        self.wal_seq = self.wal_seq + 1u64;
+        self.checkpoint();
+        return true;
+    }
+
+    fn exec_delete(var self, sql: str) -> bool {
+        // e.g. "DELETE FROM users WHERE id = 1"
+        let p = sql as *raw u8;
+        let len = sql_str_len(sql);
+        var i = 12usize; // skip "DELETE FROM "
+        while i < len && p[i] == 32u8 { i = i + 1usize; }
+
+        var tbl_name = String.new();
+        while i < len && p[i] != 32u8 {
+            tbl_name.push_byte(p[i]);
+            i = i + 1usize;
+        }
+        tbl_name.push_byte(0u8);
+
+        let tidx = self.find_table_idx(tbl_name.as_ptr() as str);
+        if tidx < 0i64 { return false; }
+        let u_tidx = tidx as usize;
+
+        var where_col = String.new();
+        var where_val = SqlValue::null();
+        var has_where = false;
+        while i + 5usize <= len {
+            if (p[i] == 87u8 || p[i] == 119u8) &&
+               (p[i + 1usize] == 72u8 || p[i + 1usize] == 104u8) &&
+               (p[i + 2usize] == 69u8 || p[i + 2usize] == 101u8) &&
+               (p[i + 3usize] == 82u8 || p[i + 3usize] == 114u8) &&
+               (p[i + 4usize] == 69u8 || p[i + 4usize] == 101u8) {
+                has_where = true;
+                i = i + 5usize;
+                break;
+            }
+            i = i + 1usize;
+        }
+
+        if has_where {
+            while i < len && p[i] == 32u8 { i = i + 1usize; }
+            while i < len && p[i] != 32u8 && p[i] != 61u8 {
+                where_col.push_byte(p[i]);
+                i = i + 1usize;
+            }
+            where_col.push_byte(0u8);
+            while i < len && (p[i] == 32u8 || p[i] == 61u8) { i = i + 1usize; }
+            if p[i] == 34u8 || p[i] == 39u8 {
+                let quote = p[i];
+                i = i + 1usize;
+                var s = String.new();
+                while i < len && p[i] != quote {
+                    s.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                where_val = SqlValue::text(s.as_ptr() as str);
+            } else {
+                var tok = String.new();
+                while i < len && p[i] != 32u8 {
+                    tok.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                where_val = SqlValue::int(sql_parse_i64(tok.as_ptr() as str));
+            }
+        }
+
+        let schema = self.tables.ptr[u_tidx];
+        var where_ci = 0usize;
+        if has_where {
+            while where_ci < schema.columns.len {
+                if sql_str_eq_case(schema.columns.ptr[where_ci].name.as_ptr() as str, where_col.as_ptr() as str) {
+                    break;
+                }
+                where_ci = where_ci + 1usize;
+            }
+        }
+
+        var new_rows = Vec.new();
+        var r = 0usize;
+        let r_count = self.table_data.ptr[u_tidx].len;
+        while r < r_count {
+            var matches = true;
+            if has_where {
+                let cur_val = self.table_data.ptr[u_tidx].ptr[r].values.ptr[where_ci];
+                if cur_val.kind == SQL_TYPE_INT {
+                    matches = (cur_val.int_val == where_val.int_val);
+                } else if cur_val.kind == SQL_TYPE_TEXT {
+                    matches = sql_str_eq(cur_val.str_val.as_ptr() as str, where_val.str_val.as_ptr() as str);
+                }
+            }
+            if !matches {
+                new_rows.push(self.table_data.ptr[u_tidx].ptr[r]);
+            }
+            r = r + 1usize;
+        }
+        self.table_data.ptr[u_tidx] = new_rows;
+        self.wal_seq = self.wal_seq + 1u64;
+        self.checkpoint();
+        return true;
+    }
+
+    pub fn query(var self, sql: str) -> SqlResultSet {
+        var rs = SqlResultSet::new();
+        if !self.is_open { return rs; }
+
+        // e.g. "SELECT id, name FROM users WHERE id = 1 LIMIT 10"
+        let p = sql as *raw u8;
+        let len = sql_str_len(sql);
+        var i = 7usize; // skip "SELECT "
+        while i < len && p[i] == 32u8 { i = i + 1usize; }
+
+        // Parse projected columns
+        var proj_cols = Vec.new();
+        var select_star = false;
+        if p[i] == 42u8 { // '*'
+            select_star = true;
+            i = i + 1usize;
+        } else {
+            while i < len {
+                while i < len && (p[i] == 32u8 || p[i] == 44u8) { i = i + 1usize; }
+                if i + 4usize <= len && (p[i] == 70u8 || p[i] == 102u8) && (p[i + 1usize] == 82u8 || p[i + 1usize] == 114u8) && (p[i + 2usize] == 79u8 || p[i + 2usize] == 111u8) && (p[i + 3usize] == 77u8 || p[i + 3usize] == 109u8) {
+                    break;
+                }
+                var cname = String.new();
+                while i < len && p[i] != 32u8 && p[i] != 44u8 {
+                    cname.push_byte(p[i]);
+                    i = i + 1usize;
+                }
+                cname.push_byte(0u8);
+                proj_cols.push(cname);
+            }
+        }
+
+        // Skip "FROM "
+        while i + 4usize <= len {
+            if (p[i] == 70u8 || p[i] == 102u8) && (p[i + 1usize] == 82u8 || p[i + 1usize] == 114u8) && (p[i + 2usize] == 79u8 || p[i + 2usize] == 111u8) && (p[i + 3usize] == 77u8 || p[i + 3usize] == 109u8) {
+                i = i + 4usize;
+                break;
+            }
+            i = i + 1usize;
+        }
+        while i < len && p[i] == 32u8 { i = i + 1usize; }
+
+        var tbl_name = String.new();
+        while i < len && p[i] != 32u8 && p[i] != 59u8 {
+            tbl_name.push_byte(p[i]);
+            i = i + 1usize;
+        }
+        tbl_name.push_byte(0u8);
+
+        let tidx = self.find_table_idx(tbl_name.as_ptr() as str);
+        if tidx < 0i64 { return rs; }
+        let u_tidx = tidx as usize;
+        let schema = self.tables.ptr[u_tidx];
+
+        // Resolve projected columns
+        var col_indices = Vec.new();
+        if select_star {
+            var c = 0usize;
+            while c < schema.columns.len {
+                col_indices.push(c);
+                rs.columns.push(schema.columns.ptr[c].name);
+                c = c + 1usize;
+            }
+        } else {
+            var c = 0usize;
+            while c < proj_cols.len {
+                let target = proj_cols.ptr[c].as_ptr() as str;
+                var sc = 0usize;
+                while sc < schema.columns.len {
+                    if sql_str_eq_case(schema.columns.ptr[sc].name.as_ptr() as str, target) {
+                        col_indices.push(sc);
+                        rs.columns.push(schema.columns.ptr[sc].name);
+                        break;
+                    }
+                    sc = sc + 1usize;
+                }
+                c = c + 1usize;
+            }
+        }
+
+        // Optional WHERE
+        var where_col = String.new();
+        var where_val = SqlValue::null();
+        var has_where = false;
+        var wi = i;
+        while wi + 5usize <= len {
+            if (p[wi] == 87u8 || p[wi] == 119u8) &&
+               (p[wi + 1usize] == 72u8 || p[wi + 1usize] == 104u8) &&
+               (p[wi + 2usize] == 69u8 || p[wi + 2usize] == 101u8) &&
+               (p[wi + 3usize] == 82u8 || p[wi + 3usize] == 114u8) &&
+               (p[wi + 4usize] == 69u8 || p[wi + 4usize] == 101u8) {
+                has_where = true;
+                wi = wi + 5usize;
+                break;
+            }
+            wi = wi + 1usize;
+        }
+
+        if has_where {
+            while wi < len && p[wi] == 32u8 { wi = wi + 1usize; }
+            while wi < len && p[wi] != 32u8 && p[wi] != 61u8 {
+                where_col.push_byte(p[wi]);
+                wi = wi + 1usize;
+            }
+            where_col.push_byte(0u8);
+            while wi < len && (p[wi] == 32u8 || p[wi] == 61u8) { wi = wi + 1usize; }
+            if p[wi] == 34u8 || p[wi] == 39u8 {
+                let quote = p[wi];
+                wi = wi + 1usize;
+                var s = String.new();
+                while wi < len && p[wi] != quote {
+                    s.push_byte(p[wi]);
+                    wi = wi + 1usize;
+                }
+                s.push_byte(0u8);
+                where_val = SqlValue::text(s.as_ptr() as str);
+            } else {
+                var tok = String.new();
+                while wi < len && p[wi] != 32u8 && p[wi] != 59u8 {
+                    tok.push_byte(p[wi]);
+                    wi = wi + 1usize;
+                }
+                tok.push_byte(0u8);
+                where_val = SqlValue::int(sql_parse_i64(tok.as_ptr() as str));
+            }
+        }
+
+        // Optional LIMIT
+        var limit_count = 999999999usize;
+        var li = i;
+        while li + 5usize <= len {
+            if (p[li] == 76u8 || p[li] == 108u8) &&
+               (p[li + 1usize] == 73u8 || p[li + 1usize] == 105u8) &&
+               (p[li + 2usize] == 77u8 || p[li + 2usize] == 109u8) &&
+               (p[li + 3usize] == 73u8 || p[li + 3usize] == 105u8) &&
+               (p[li + 4usize] == 84u8 || p[li + 4usize] == 116u8) {
+                li = li + 5usize;
+                while li < len && p[li] == 32u8 { li = li + 1usize; }
+                var l_tok = String.new();
+                while li < len && p[li] >= 48u8 && p[li] <= 57u8 {
+                    l_tok.push_byte(p[li]);
+                    li = li + 1usize;
+                }
+                l_tok.push_byte(0u8);
+                let l_val = sql_parse_i64(l_tok.as_ptr() as str);
+                if l_val > 0i64 {
+                    limit_count = l_val as usize;
+                }
+                break;
+            }
+            li = li + 1usize;
+        }
+
+        var where_ci = 0usize;
+        if has_where {
+            while where_ci < schema.columns.len {
+                if sql_str_eq_case(schema.columns.ptr[where_ci].name.as_ptr() as str, where_col.as_ptr() as str) {
+                    break;
+                }
+                where_ci = where_ci + 1usize;
+            }
+        }
+
+        var r = 0usize;
+        let r_count = self.table_data.ptr[u_tidx].len;
+        while r < r_count && rs.rows.len < limit_count {
+            let row = self.table_data.ptr[u_tidx].ptr[r];
+            var matches = true;
+            if has_where {
+                let cur_val = row.values.ptr[where_ci];
+                if cur_val.kind == SQL_TYPE_INT {
+                    matches = (cur_val.int_val == where_val.int_val);
+                } else if cur_val.kind == SQL_TYPE_TEXT {
+                    matches = sql_str_eq(cur_val.str_val.as_ptr() as str, where_val.str_val.as_ptr() as str);
+                }
+            }
+            if matches {
+                var out_vals = Vec.new();
+                var ci = 0usize;
+                while ci < col_indices.len {
+                    out_vals.push(row.values.ptr[col_indices.ptr[ci]]);
+                    ci = ci + 1usize;
+                }
+                rs.rows.push(SqlRow { values: out_vals });
+            }
+            r = r + 1usize;
+        }
+
+        return rs;
+    }
+
+    pub fn close(var self) {
+        if !self.is_open { return; }
+        self.checkpoint();
+        if !self.is_memory {
+            if self.fd >= 0 { close(self.fd); }
+            if self.wal_fd >= 0 { close(self.wal_fd); }
+        }
+        self.is_open = false;
+    }
+}

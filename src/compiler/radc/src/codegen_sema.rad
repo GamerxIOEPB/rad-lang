@@ -1,0 +1,1114 @@
+// radc/src/codegen_sema.rad - Semantic Analysis & Lambda Pass
+import util;
+import token;
+import ast;
+import parser;
+
+impl Codegen {
+    fn collect_mutations_in_expr(self, expr_id: usize, var mutated: Vec<String>) {
+        if expr_id == 0usize {
+            return
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if k == EXPR_METHOD_CALL {
+            let left_id = ep[expr_id].left
+            if ep[left_id].kind == EXPR_IDENT {
+                mutated.push(ep[left_id].str_val)
+            }
+            self.collect_mutations_in_expr(left_id, mutated)
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.collect_mutations_in_expr(ep[expr_id].args.ptr[ai], mutated)
+                ai = ai + 1usize
+            }
+        } else if k == EXPR_CALL {
+            let callee_id = ep[expr_id].left
+            if ep[callee_id].kind == EXPR_IDENT {
+                let cname = ep[callee_id].str_val.as_ptr() as str
+                if str_eq(cname, "swap") {
+                    var si = 0usize
+                    while si < ep[expr_id].args.len {
+                        let arg_id = ep[expr_id].args.ptr[si]
+                        if ep[arg_id].kind == EXPR_IDENT {
+                            mutated.push(ep[arg_id].str_val)
+                        } else if ep[arg_id].kind == EXPR_UNARY && ep[ep[arg_id].left].kind == EXPR_IDENT {
+                            mutated.push(ep[ep[arg_id].left].str_val)
+                        }
+                        si = si + 1usize
+                    }
+                }
+            }
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.collect_mutations_in_expr(ep[expr_id].args.ptr[ai], mutated)
+                ai = ai + 1usize
+            }
+        } else if k == EXPR_BINARY {
+            self.collect_mutations_in_expr(ep[expr_id].left, mutated)
+            self.collect_mutations_in_expr(ep[expr_id].right, mutated)
+        } else if k == EXPR_LAMBDA {
+            let l_idx = ep[expr_id].int_val as usize
+            if l_idx < self.parser.functions.len {
+                let ldef = self.parser.functions.ptr[l_idx]
+                var bi = 0usize
+                while bi < ldef.body.len {
+                    self.collect_mutated_vars(ldef.body.ptr[bi], mutated)
+                    bi = bi + 1usize
+                }
+            }
+        } else if k == EXPR_UNARY || k == EXPR_CAST || k == EXPR_FIELD_ACCESS || k == EXPR_AWAIT {
+            if k == EXPR_FIELD_ACCESS && ep[ep[expr_id].left].kind == EXPR_IDENT {
+                mutated.push(ep[ep[expr_id].left].str_val)
+            }
+            self.collect_mutations_in_expr(ep[expr_id].left, mutated)
+        } else if k == EXPR_INDEX {
+            self.collect_mutations_in_expr(ep[expr_id].left, mutated)
+            self.collect_mutations_in_expr(ep[expr_id].right, mutated)
+        } else if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE {
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.collect_mutations_in_expr(ep[expr_id].args.ptr[ai], mutated)
+                ai = ai + 1usize
+            }
+        } else if k == EXPR_RANGE {
+            self.collect_mutations_in_expr(ep[expr_id].left, mutated)
+            self.collect_mutations_in_expr(ep[expr_id].right, mutated)
+        }
+    }
+
+    fn collect_mutated_vars(self, stmt_id: usize, var mutated: Vec<String>) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_ASSIGN {
+            mutated.push(sp[stmt_id].name)
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+        } else if k == STMT_ASSIGN_INDEX {
+            mutated.push(sp[stmt_id].name)
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+            self.collect_mutations_in_expr(sp[stmt_id].index_expr, mutated)
+            if sp[stmt_id].then_stmts.len > 0usize {
+                self.collect_mutations_in_expr(sp[stmt_id].then_stmts.ptr[0usize], mutated)
+            }
+        } else if k == STMT_ASSIGN_FIELD {
+            let recv = sp[stmt_id].index_expr
+            if self.parser.exprs.ptr[recv].kind == EXPR_IDENT {
+                mutated.push(self.parser.exprs.ptr[recv].str_val)
+            }
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+            self.collect_mutations_in_expr(recv, mutated)
+        } else if k == STMT_EXPR || k == STMT_RETURN {
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+        } else if k == STMT_LET || k == STMT_VAR {
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+        } else if k == STMT_IF {
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.collect_mutated_vars(sp[stmt_id].then_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.collect_mutated_vars(sp[stmt_id].else_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE {
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_mutated_vars(sp[stmt_id].body_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+        } else if k == STMT_FOR_RANGE {
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+            self.collect_mutations_in_expr(sp[stmt_id].index_expr, mutated)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_mutated_vars(sp[stmt_id].body_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+        } else if k == STMT_FOR_IN {
+            self.collect_mutations_in_expr(sp[stmt_id].expr_id, mutated)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_mutated_vars(sp[stmt_id].body_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+        } else if k == STMT_DEFER {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_mutated_vars(sp[stmt_id].body_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+        }
+    }
+
+    fn check_unused_var_mutability(var self, stmt_id: usize, mutated: Vec<String>) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_VAR {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            if !str_starts_with(vname, "_") {
+                var was_mutated = false
+                var mi = 0usize
+                while mi < mutated.len {
+                    if str_eq(mutated.ptr[mi].as_ptr() as str, vname) {
+                        was_mutated = true
+                        break
+                    }
+                    mi = mi + 1usize
+                }
+                if !was_mutated {
+                    var warn_msg = String.new()
+                    warn_msg.push_str("variable does not need to be mutable: 'var ")
+                    warn_msg.push_str(vname)
+                    warn_msg.push_str("' (consider using 'let ")
+                    warn_msg.push_str(vname)
+                    warn_msg.push_str("')")
+                    let span = 4i64 + str_len(vname) as i64
+                    let diag_source_id_7 = self.parser.stmt_source_ids.ptr[stmt_id]
+                    self.parser.report_warning_span_for_source(diag_source_id_7, "W0001", warn_msg.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, span)
+                }
+            }
+        } else if k == STMT_IF {
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.check_unused_var_mutability(sp[stmt_id].then_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.check_unused_var_mutability(sp[stmt_id].else_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN || k == STMT_DEFER {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.check_unused_var_mutability(sp[stmt_id].body_stmts.ptr[i], mutated)
+                i = i + 1usize
+            }
+        }
+    }
+
+    fn vec_contains_str(self, v: Vec<String>, target: str) -> bool {
+        var i = 0usize
+        while i < v.len {
+            if str_eq(v.ptr[i].as_ptr() as str, target) {
+                return true
+            }
+            i = i + 1usize
+        }
+        return false
+    }
+
+    fn has_defer_meta(self, stmt_id: usize) -> bool {
+        var i = 0usize
+        while i < self.fn_defer_metas.len {
+            if self.fn_defer_metas.ptr[i].stmt_id == stmt_id {
+                return true
+            }
+            i = i + 1usize
+        }
+        return false
+    }
+
+    fn collect_decl_vars_stmt(self, stmt_id: usize, var decls: Vec<String>, skip_defer: bool) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_LET || k == STMT_VAR {
+            decls.push(String.from_str(sp[stmt_id].name.as_ptr() as str))
+        } else if k == STMT_FOR_RANGE || k == STMT_FOR_IN {
+            decls.push(String.from_str(sp[stmt_id].name.as_ptr() as str))
+            var bi = 0usize
+            while bi < sp[stmt_id].body_stmts.len {
+                self.collect_decl_vars_stmt(sp[stmt_id].body_stmts.ptr[bi], decls, skip_defer)
+                bi = bi + 1usize
+            }
+        } else if k == STMT_IF {
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.collect_decl_vars_stmt(sp[stmt_id].then_stmts.ptr[i], decls, skip_defer)
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.collect_decl_vars_stmt(sp[stmt_id].else_stmts.ptr[i], decls, skip_defer)
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_decl_vars_stmt(sp[stmt_id].body_stmts.ptr[i], decls, skip_defer)
+                i = i + 1usize
+            }
+        } else if k == STMT_DEFER {
+            if !skip_defer {
+                var i = 0usize
+                while i < sp[stmt_id].body_stmts.len {
+                    self.collect_decl_vars_stmt(sp[stmt_id].body_stmts.ptr[i], decls, skip_defer)
+                    i = i + 1usize
+                }
+            }
+        }
+    }
+
+    fn scan_defer_caps_expr(self, expr_id: usize, outer_vars: Vec<String>, inner_decls: Vec<String>, var caps: Vec<String>) {
+        if expr_id == 0usize || expr_id >= self.parser.exprs.len {
+            return
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if k == EXPR_IDENT {
+            let vname = ep[expr_id].str_val.as_ptr() as str
+            if self.vec_contains_str(outer_vars, vname) && !self.vec_contains_str(inner_decls, vname) && !self.vec_contains_str(caps, vname) {
+                caps.push(String.from_str(vname))
+            }
+        } else if k == EXPR_BINARY || k == EXPR_INDEX || k == EXPR_RANGE {
+            self.scan_defer_caps_expr(ep[expr_id].left, outer_vars, inner_decls, caps)
+            self.scan_defer_caps_expr(ep[expr_id].right, outer_vars, inner_decls, caps)
+        } else if k == EXPR_UNARY || k == EXPR_CAST || k == EXPR_FIELD_ACCESS || k == EXPR_AWAIT || k == EXPR_TRY {
+            self.scan_defer_caps_expr(ep[expr_id].left, outer_vars, inner_decls, caps)
+        } else if k == EXPR_CALL || k == EXPR_METHOD_CALL {
+            self.scan_defer_caps_expr(ep[expr_id].left, outer_vars, inner_decls, caps)
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.scan_defer_caps_expr(ep[expr_id].args.ptr[ai], outer_vars, inner_decls, caps)
+                ai = ai + 1usize
+            }
+        } else if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE || k == EXPR_FSTRING {
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.scan_defer_caps_expr(ep[expr_id].args.ptr[ai], outer_vars, inner_decls, caps)
+                ai = ai + 1usize
+            }
+        } else if k == EXPR_LAMBDA {
+            let l_idx = ep[expr_id].int_val as usize
+            if l_idx < self.parser.functions.len {
+                let ldef = self.parser.functions.ptr[l_idx]
+                var bi = 0usize
+                while bi < ldef.body.len {
+                    self.scan_defer_caps_stmt(ldef.body.ptr[bi], outer_vars, inner_decls, caps)
+                    bi = bi + 1usize
+                }
+            }
+        }
+    }
+
+    fn scan_defer_caps_stmt(self, stmt_id: usize, outer_vars: Vec<String>, inner_decls: Vec<String>, var caps: Vec<String>) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_LET || k == STMT_VAR || k == STMT_EXPR || k == STMT_RETURN {
+            self.scan_defer_caps_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, caps)
+        } else if k == STMT_ASSIGN {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            if self.vec_contains_str(outer_vars, vname) && !self.vec_contains_str(inner_decls, vname) && !self.vec_contains_str(caps, vname) {
+                caps.push(String.from_str(vname))
+            }
+            self.scan_defer_caps_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, caps)
+        } else if k == STMT_ASSIGN_INDEX {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            if self.vec_contains_str(outer_vars, vname) && !self.vec_contains_str(inner_decls, vname) && !self.vec_contains_str(caps, vname) {
+                caps.push(String.from_str(vname))
+            }
+            self.scan_defer_caps_expr(sp[stmt_id].index_expr, outer_vars, inner_decls, caps)
+            self.scan_defer_caps_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, caps)
+        } else if k == STMT_ASSIGN_FIELD {
+            self.scan_defer_caps_expr(sp[stmt_id].index_expr, outer_vars, inner_decls, caps)
+            self.scan_defer_caps_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, caps)
+        } else if k == STMT_IF {
+            self.scan_defer_caps_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, caps)
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.scan_defer_caps_stmt(sp[stmt_id].then_stmts.ptr[i], outer_vars, inner_decls, caps)
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.scan_defer_caps_stmt(sp[stmt_id].else_stmts.ptr[i], outer_vars, inner_decls, caps)
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN {
+            self.scan_defer_caps_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, caps)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.scan_defer_caps_stmt(sp[stmt_id].body_stmts.ptr[i], outer_vars, inner_decls, caps)
+                i = i + 1usize
+            }
+        } else if k == STMT_DEFER {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.scan_defer_caps_stmt(sp[stmt_id].body_stmts.ptr[i], outer_vars, inner_decls, caps)
+                i = i + 1usize
+            }
+        }
+    }
+
+    fn report_closure_capture_if_needed(var self, vname: str, line: i64, col: i64, source_id: usize, outer_vars: Vec<String>, inner_decls: Vec<String>, var reported: Vec<String>) {
+        if !self.vec_contains_str(outer_vars, vname) {
+            return
+        }
+        if self.vec_contains_str(inner_decls, vname) {
+            return
+        }
+        var ci = 0usize
+        while ci < self.parser.const_names.len {
+            if str_eq(self.parser.const_names.ptr[ci].as_ptr() as str, vname) {
+                return
+            }
+            ci = ci + 1usize
+        }
+        if self.vec_contains_str(reported, vname) {
+            return
+        }
+        reported.push(String.from_str(vname))
+        var err = String.new()
+        err.push_str("closure captures enclosing local variable '")
+        err.push_str(vname)
+        err.push_str("': closures with captured environments are not yet supported; pass '")
+        err.push_str(vname)
+        err.push_str("' as an explicit parameter or use a named function with function pointer type fn(...) -> Ret")
+        self.parser.report_error_span_for_source(source_id, "E0029", err.as_ptr() as str, line, col, str_len(vname) as i64)
+    }
+
+    fn check_lambda_body_expr(var self, expr_id: usize, outer_vars: Vec<String>, inner_decls: Vec<String>, var reported: Vec<String>) {
+        if expr_id == 0usize || expr_id >= self.parser.exprs.len {
+            return
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        let src_id = self.parser.expr_source_ids.ptr[expr_id]
+        if k == EXPR_IDENT {
+            let vname = ep[expr_id].str_val.as_ptr() as str
+            self.report_closure_capture_if_needed(vname, ep[expr_id].expr_line, ep[expr_id].expr_col, src_id, outer_vars, inner_decls, reported)
+        } else if k == EXPR_LAMBDA {
+            var nested_outer = Vec.new()
+            var oi = 0usize
+            while oi < outer_vars.len {
+                nested_outer.push(String.from_str(outer_vars.ptr[oi].as_ptr() as str))
+                oi = oi + 1usize
+            }
+            var ii = 0usize
+            while ii < inner_decls.len {
+                let s = inner_decls.ptr[ii].as_ptr() as str
+                if !self.vec_contains_str(nested_outer, s) {
+                    nested_outer.push(String.from_str(s))
+                }
+                ii = ii + 1usize
+            }
+            self.check_lambda_capture_fn(ep[expr_id].int_val as usize, nested_outer)
+        } else if k == EXPR_BINARY || k == EXPR_INDEX || k == EXPR_RANGE {
+            self.check_lambda_body_expr(ep[expr_id].left, outer_vars, inner_decls, reported)
+            self.check_lambda_body_expr(ep[expr_id].right, outer_vars, inner_decls, reported)
+        } else if k == EXPR_UNARY || k == EXPR_CAST || k == EXPR_FIELD_ACCESS || k == EXPR_AWAIT || k == EXPR_TRY {
+            self.check_lambda_body_expr(ep[expr_id].left, outer_vars, inner_decls, reported)
+        } else if k == EXPR_CALL || k == EXPR_METHOD_CALL {
+            self.check_lambda_body_expr(ep[expr_id].left, outer_vars, inner_decls, reported)
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.check_lambda_body_expr(ep[expr_id].args.ptr[ai], outer_vars, inner_decls, reported)
+                ai = ai + 1usize
+            }
+        } else if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE || k == EXPR_FSTRING {
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.check_lambda_body_expr(ep[expr_id].args.ptr[ai], outer_vars, inner_decls, reported)
+                ai = ai + 1usize
+            }
+        }
+    }
+
+    fn check_lambda_body_stmt(var self, stmt_id: usize, outer_vars: Vec<String>, inner_decls: Vec<String>, var reported: Vec<String>) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        let src_id = self.parser.stmt_source_ids.ptr[stmt_id]
+        if k == STMT_LET || k == STMT_VAR || k == STMT_EXPR || k == STMT_RETURN {
+            self.check_lambda_body_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, reported)
+        } else if k == STMT_ASSIGN {
+            self.report_closure_capture_if_needed(sp[stmt_id].name.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, src_id, outer_vars, inner_decls, reported)
+            self.check_lambda_body_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, reported)
+        } else if k == STMT_ASSIGN_INDEX {
+            self.report_closure_capture_if_needed(sp[stmt_id].name.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, src_id, outer_vars, inner_decls, reported)
+            self.check_lambda_body_expr(sp[stmt_id].index_expr, outer_vars, inner_decls, reported)
+            self.check_lambda_body_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, reported)
+        } else if k == STMT_ASSIGN_FIELD {
+            self.check_lambda_body_expr(sp[stmt_id].index_expr, outer_vars, inner_decls, reported)
+            self.check_lambda_body_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, reported)
+        } else if k == STMT_IF {
+            self.check_lambda_body_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, reported)
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.check_lambda_body_stmt(sp[stmt_id].then_stmts.ptr[i], outer_vars, inner_decls, reported)
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.check_lambda_body_stmt(sp[stmt_id].else_stmts.ptr[i], outer_vars, inner_decls, reported)
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN || k == STMT_DEFER {
+            self.check_lambda_body_expr(sp[stmt_id].expr_id, outer_vars, inner_decls, reported)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.check_lambda_body_stmt(sp[stmt_id].body_stmts.ptr[i], outer_vars, inner_decls, reported)
+                i = i + 1usize
+            }
+        }
+    }
+
+    fn check_lambda_capture_fn(var self, fn_idx: usize, outer_vars: Vec<String>) {
+        if fn_idx >= self.parser.functions.len {
+            return
+        }
+        let ldef = self.parser.functions.ptr[fn_idx]
+        var inner_decls = Vec.new()
+        var pi = 0usize
+        while pi < ldef.param_names.len {
+            inner_decls.push(String.from_str(ldef.param_names.ptr[pi].as_ptr() as str))
+            pi = pi + 1usize
+        }
+        var bi = 0usize
+        while bi < ldef.body.len {
+            self.collect_decl_vars_stmt(ldef.body.ptr[bi], inner_decls, false)
+            bi = bi + 1usize
+        }
+        var raw_caps = Vec.new()
+        bi = 0usize
+        while bi < ldef.body.len {
+            self.scan_defer_caps_stmt(ldef.body.ptr[bi], outer_vars, inner_decls, raw_caps)
+            bi = bi + 1usize
+        }
+        var filtered_caps = Vec.new()
+        var ci = 0usize
+        while ci < raw_caps.len {
+            let cname = raw_caps.ptr[ci].as_ptr() as str
+            var is_c = false
+            var cki = 0usize
+            while cki < self.parser.const_names.len {
+                if str_eq(self.parser.const_names.ptr[cki].as_ptr() as str, cname) {
+                    is_c = true
+                    break
+                }
+                cki = cki + 1usize
+            }
+            if !is_c {
+                filtered_caps.push(String.from_str(cname))
+            }
+            ci = ci + 1usize
+        }
+        var found = false
+        var mi = 0usize
+        while mi < self.closure_metas.len {
+            if self.closure_metas.ptr[mi].fn_idx == fn_idx {
+                self.closure_metas.ptr[mi].cap_vars = filtered_caps
+                found = true
+                break
+            }
+            mi = mi + 1usize
+        }
+        if !found {
+            self.closure_metas.push(ClosureMeta { fn_idx: fn_idx, cap_vars: filtered_caps })
+        }
+        bi = 0usize
+        while bi < ldef.body.len {
+            var nested_outer = Vec.new()
+            var oi = 0usize
+            while oi < outer_vars.len {
+                nested_outer.push(String.from_str(outer_vars.ptr[oi].as_ptr() as str))
+                oi = oi + 1usize
+            }
+            var ii = 0usize
+            while ii < inner_decls.len {
+                let s = inner_decls.ptr[ii].as_ptr() as str
+                if !self.vec_contains_str(nested_outer, s) {
+                    nested_outer.push(String.from_str(s))
+                }
+                ii = ii + 1usize
+            }
+            self.walk_fn_for_lambda_captures_stmt(ldef.body.ptr[bi], nested_outer)
+            bi = bi + 1usize
+        }
+    }
+
+    fn walk_fn_for_lambda_captures_expr(var self, expr_id: usize, outer_vars: Vec<String>) {
+        if expr_id == 0usize || expr_id >= self.parser.exprs.len {
+            return
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if k == EXPR_LAMBDA {
+            self.check_lambda_capture_fn(ep[expr_id].int_val as usize, outer_vars)
+        } else if k == EXPR_BINARY || k == EXPR_INDEX || k == EXPR_RANGE {
+            self.walk_fn_for_lambda_captures_expr(ep[expr_id].left, outer_vars)
+            self.walk_fn_for_lambda_captures_expr(ep[expr_id].right, outer_vars)
+        } else if k == EXPR_UNARY || k == EXPR_CAST || k == EXPR_FIELD_ACCESS || k == EXPR_AWAIT || k == EXPR_TRY {
+            self.walk_fn_for_lambda_captures_expr(ep[expr_id].left, outer_vars)
+        } else if k == EXPR_CALL || k == EXPR_METHOD_CALL {
+            self.walk_fn_for_lambda_captures_expr(ep[expr_id].left, outer_vars)
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.walk_fn_for_lambda_captures_expr(ep[expr_id].args.ptr[ai], outer_vars)
+                ai = ai + 1usize
+            }
+        } else if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE || k == EXPR_FSTRING {
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.walk_fn_for_lambda_captures_expr(ep[expr_id].args.ptr[ai], outer_vars)
+                ai = ai + 1usize
+            }
+        }
+    }
+
+    fn walk_fn_for_lambda_captures_stmt(var self, stmt_id: usize, outer_vars: Vec<String>) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_LET || k == STMT_VAR || k == STMT_EXPR || k == STMT_RETURN || k == STMT_ASSIGN {
+            self.walk_fn_for_lambda_captures_expr(sp[stmt_id].expr_id, outer_vars)
+        } else if k == STMT_ASSIGN_INDEX || k == STMT_ASSIGN_FIELD {
+            self.walk_fn_for_lambda_captures_expr(sp[stmt_id].index_expr, outer_vars)
+            self.walk_fn_for_lambda_captures_expr(sp[stmt_id].expr_id, outer_vars)
+        } else if k == STMT_IF {
+            self.walk_fn_for_lambda_captures_expr(sp[stmt_id].expr_id, outer_vars)
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.walk_fn_for_lambda_captures_stmt(sp[stmt_id].then_stmts.ptr[i], outer_vars)
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.walk_fn_for_lambda_captures_stmt(sp[stmt_id].else_stmts.ptr[i], outer_vars)
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN || k == STMT_DEFER {
+            self.walk_fn_for_lambda_captures_expr(sp[stmt_id].expr_id, outer_vars)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.walk_fn_for_lambda_captures_stmt(sp[stmt_id].body_stmts.ptr[i], outer_vars)
+                i = i + 1usize
+            }
+        }
+    }
+
+    fn extract_fn_ptr_ret_raw(self, fty: str) -> str {
+        if !str_starts_with(fty, "fn(") && !str_starts_with(fty, "closure(") {
+            return ""
+        }
+        let p = fty as *raw u8
+        let flen = str_len(fty)
+        var i = 0usize
+        while i + 1usize < flen {
+            if p[i] == 45u8 && p[i + 1usize] == 62u8 {
+                var start = i + 2usize
+                while start < flen && (p[start] == 32u8 || p[start] == 9u8) {
+                    start = start + 1usize
+                }
+                var ret_ty = String.new()
+                var j = start
+                while j < flen {
+                    ret_ty.push_byte(p[j])
+                    j = j + 1usize
+                }
+                ret_ty.push_byte(0u8)
+                return ret_ty.as_ptr() as str
+            }
+            i = i + 1usize
+        }
+        return "void"
+    }
+
+    fn is_generic_placeholder_ty(self, ty: str) -> bool {
+        if str_eq(ty, "T") || str_eq(ty, "U") || str_eq(ty, "V") || str_eq(ty, "K") || str_eq(ty, "E") || str_eq(ty, "R") {
+            return true
+        }
+        return false
+    }
+
+    fn apply_expected_fn_type_to_lambda(var self, fn_idx: usize, expected_fty: str) {
+        if fn_idx >= self.parser.functions.len {
+            return
+        }
+        let is_fn_ptr = str_starts_with(expected_fty, "fn(")
+        let is_clos = str_starts_with(expected_fty, "closure(")
+        if !is_fn_ptr && !is_clos {
+            return
+        }
+        if is_fn_ptr && self.is_lambda_capturing(fn_idx) {
+            let ldef = self.parser.functions.ptr[fn_idx]
+            var err = String.new()
+            err.push_str("closure captures enclosing local variable: closures with captured environments cannot be converted to function pointer type '")
+            err.push_str(expected_fty)
+            err.push_str("'")
+            let diag_src = ldef.source_id
+            self.parser.report_error_span_for_source(diag_src, "E0029", err.as_ptr() as str, 1, 1, 1)
+            return
+        }
+        var ptypes = self.parser.functions.ptr[fn_idx].param_types
+        var pi = 0usize
+        while pi < ptypes.len {
+            if str_eq(ptypes.ptr[pi].as_ptr() as str, "__rad_infer") {
+                let raw_pt = self.parse_fn_ptr_param_type(expected_fty, pi)
+                if str_len(raw_pt) > 0usize && !self.is_generic_placeholder_ty(raw_pt) {
+                    ptypes.ptr[pi] = String.from_str(raw_pt)
+                }
+            }
+            pi = pi + 1usize
+        }
+        if str_eq(self.parser.functions.ptr[fn_idx].ret_type.as_ptr() as str, "__rad_infer") {
+            let exp_ret = self.extract_fn_ptr_ret_raw(expected_fty)
+            if str_len(exp_ret) > 0usize && !self.is_generic_placeholder_ty(exp_ret) {
+                self.parser.functions.ptr[fn_idx].ret_type = String.from_str(exp_ret)
+            }
+        }
+    }
+
+    fn check_fn_ptr_closure_coercion_stmt(var self, stmt_id: usize) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_LET || k == STMT_VAR {
+            let tname = sp[stmt_id].type_name.as_ptr() as str
+            if str_starts_with(tname, "fn(") {
+                let eid = sp[stmt_id].expr_id
+                if eid != 0usize && eid < self.parser.exprs.len {
+                    if self.parser.exprs.ptr[eid].kind == EXPR_LAMBDA {
+                        let l_idx = self.parser.exprs.ptr[eid].int_val as usize
+                        if self.is_lambda_capturing(l_idx) {
+                            let src_id = self.parser.stmt_source_ids.ptr[stmt_id]
+                            var err = String.new()
+                            err.push_str("closure captures enclosing local variable: closures with captured environments cannot be converted to function pointer type '")
+                            err.push_str(tname)
+                            err.push_str("'")
+                            self.parser.report_error_span_for_source(src_id, "E0029", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, str_len(sp[stmt_id].name.as_ptr() as str) as i64)
+                        }
+                    }
+                }
+            }
+        } else if k == STMT_IF {
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.check_fn_ptr_closure_coercion_stmt(sp[stmt_id].then_stmts.ptr[i])
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.check_fn_ptr_closure_coercion_stmt(sp[stmt_id].else_stmts.ptr[i])
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.check_fn_ptr_closure_coercion_stmt(sp[stmt_id].body_stmts.ptr[i])
+                i = i + 1usize
+            }
+        }
+    }
+
+    fn find_fn_param_raw_type(self, fname: str, arg_idx: usize) -> str {
+        let clean = self.clean_type_name(fname)
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let fn_s = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if str_eq(fn_s, fname) || str_eq(fn_s, clean) {
+                if arg_idx < self.parser.functions.ptr[fi].param_types.len {
+                    return self.parser.functions.ptr[fi].param_types.ptr[arg_idx].as_ptr() as str
+                }
+            }
+            fi = fi + 1usize
+        }
+        return ""
+    }
+
+    fn infer_expr_rad_type(self, eid: usize) -> str {
+        if eid == 0usize { return "void" }
+        if self.is_expr_f32(eid) { return "f32" }
+        if self.is_expr_float(eid) { return "f64" }
+        let ep = self.parser.exprs.ptr
+        if ep[eid].kind == EXPR_LAMBDA {
+            return self.build_lambda_fn_type_str(ep[eid].int_val as usize)
+        }
+        if self.is_expr_ptr(eid) {
+            let sname = self.get_expr_struct_name(eid)
+            if str_len(sname) > 0usize {
+                return sname
+            }
+            return "ptr"
+        }
+        return "i64"
+    }
+
+    fn is_expr_void(self, eid: usize) -> bool {
+        if eid == 0usize { return true }
+        let ep = self.parser.exprs.ptr
+        let k = ep[eid].kind
+        if k == EXPR_CALL {
+            let callee_id = ep[eid].left
+            if ep[callee_id].kind == EXPR_LAMBDA {
+                let l_idx = ep[callee_id].int_val as usize
+                if l_idx < self.parser.functions.len {
+                    return str_eq(self.parser.functions.ptr[l_idx].ret_type.as_ptr() as str, "void")
+                }
+                return false
+            }
+            if ep[callee_id].kind == EXPR_IDENT {
+                let fname = ep[callee_id].str_val.as_ptr() as str
+                let raw_var = self.get_raw_var_type(fname)
+                if str_starts_with(raw_var, "fn(") || str_starts_with(raw_var, "closure(") {
+                    return str_eq(self.get_func_ptr_ret_type(raw_var), "void")
+                }
+                if str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "eprintln") || str_eq(fname, "panic") || str_eq(fname, "free") || str_eq(fname, "exit") || str_eq(fname, "push") || str_eq(fname, "push_byte") || str_eq(fname, "push_str") || str_eq(fname, "clear") || str_eq(fname, "drop") || str_eq(fname, "swap") || str_eq(fname, "reverse") || str_eq(fname, "for_each") || str_eq(fname, "Vec__for_each") || str_eq(fname, "ptr_write") || str_eq(fname, "write_volatile") || str_eq(fname, "insert") {
+                    return true
+                }
+                return str_eq(self.get_func_ret_type(fname), "void")
+            }
+            if ep[callee_id].kind == EXPR_FIELD_ACCESS {
+                let recv_id = ep[callee_id].left
+                let tname = ep[recv_id].str_val.as_ptr() as str
+                let mname = ep[callee_id].field_name.as_ptr() as str
+                var full = String.new()
+                full.push_str(tname)
+                full.push_str("__")
+                full.push_str(mname)
+                full.push_byte(0u8)
+                return str_eq(self.get_func_ret_type(full.as_ptr() as str), "void")
+            }
+        }
+        if k == EXPR_METHOD_CALL {
+            let recv_id = ep[eid].left
+            let member = self.clean_type_name(ep[eid].str_val.as_ptr() as str)
+            var raw_ty = self.get_expr_struct_name(recv_id)
+            if str_len(raw_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                raw_ty = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+            }
+            let clean_ty = self.clean_type_name(raw_ty)
+            if str_len(clean_ty) > 0usize {
+                var mangled = String.new()
+                mangled.push_str(clean_ty)
+                mangled.push_str("__")
+                mangled.push_str(member)
+                mangled.push_byte(0u8)
+                let m_str = mangled.as_ptr() as str
+                var fi = 0usize
+                while fi < self.parser.functions.len {
+                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, m_str) {
+                        return str_eq(self.parser.functions.ptr[fi].ret_type.as_ptr() as str, "void")
+                    }
+                    fi = fi + 1usize
+                }
+            }
+            if str_eq(member, "push") || str_eq(member, "push_byte") || str_eq(member, "push_str") || str_eq(member, "clear") || str_eq(member, "drop") || str_eq(member, "swap") || str_eq(member, "reverse") || str_eq(member, "for_each") || str_eq(member, "set") {
+                return true
+            }
+        }
+        return false
+    }
+
+    fn propagate_lambda_ctx_expr(var self, expr_id: usize, expected_ty: str) {
+        if expr_id == 0usize || expr_id >= self.parser.exprs.len {
+            return
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if k == EXPR_LAMBDA {
+            let fn_idx = ep[expr_id].int_val as usize
+            self.apply_expected_fn_type_to_lambda(fn_idx, expected_ty)
+            if fn_idx < self.parser.functions.len {
+                let ldef = self.parser.functions.ptr[fn_idx]
+                var bi = 0usize
+                while bi < ldef.body.len {
+                    self.propagate_lambda_ctx_stmt(ldef.body.ptr[bi], ldef.ret_type.as_ptr() as str)
+                    bi = bi + 1usize
+                }
+            }
+        } else if k == EXPR_CALL {
+            let callee_id = ep[expr_id].left
+            if ep[callee_id].kind == EXPR_LAMBDA {
+                let l_idx = ep[callee_id].int_val as usize
+                if l_idx < self.parser.functions.len {
+                    var ptypes = self.parser.functions.ptr[l_idx].param_types
+                    var ai = 0usize
+                    while ai < ep[expr_id].args.len && ai < ptypes.len {
+                        let a_id = ep[expr_id].args.ptr[ai]
+                        self.propagate_lambda_ctx_expr(a_id, "")
+                        if str_eq(ptypes.ptr[ai].as_ptr() as str, "__rad_infer") {
+                            ptypes.ptr[ai] = String.from_str(self.infer_expr_rad_type(a_id))
+                        }
+                        ai = ai + 1usize
+                    }
+                }
+                self.propagate_lambda_ctx_expr(callee_id, "")
+            } else {
+                var callee_name = ""
+                if ep[callee_id].kind == EXPR_IDENT {
+                    callee_name = ep[callee_id].str_val.as_ptr() as str
+                } else if ep[callee_id].kind == EXPR_FIELD_ACCESS {
+                    let r_id = ep[callee_id].left
+                    if ep[r_id].kind == EXPR_IDENT {
+                        var full = String.new()
+                        full.push_str(ep[r_id].str_val.as_ptr() as str)
+                        full.push_str("__")
+                        full.push_str(ep[callee_id].field_name.as_ptr() as str)
+                        full.push_byte(0u8)
+                        callee_name = full.as_ptr() as str
+                    }
+                }
+                self.propagate_lambda_ctx_expr(callee_id, "")
+                var ai = 0usize
+                while ai < ep[expr_id].args.len {
+                    var exp_arg_ty = self.find_fn_param_raw_type(callee_name, ai)
+                    if str_len(exp_arg_ty) == 0usize && ai == 1usize {
+                        if str_eq(callee_name, "for_each") || str_eq(callee_name, "Vec__for_each") {
+                            exp_arg_ty = "fn(i64)"
+                        } else if str_eq(callee_name, "map") || str_eq(callee_name, "Vec__map") {
+                            exp_arg_ty = "fn(i64) -> i64"
+                        } else if str_eq(callee_name, "filter") || str_eq(callee_name, "Vec__filter") {
+                            exp_arg_ty = "fn(i64) -> i64"
+                        }
+                    }
+                    self.propagate_lambda_ctx_expr(ep[expr_id].args.ptr[ai], exp_arg_ty)
+                    ai = ai + 1usize
+                }
+            }
+        } else if k == EXPR_METHOD_CALL {
+            let recv_id = ep[expr_id].left
+            self.propagate_lambda_ctx_expr(recv_id, "")
+            let member = self.clean_type_name(ep[expr_id].str_val.as_ptr() as str)
+            var raw_ty = self.get_expr_struct_name(recv_id)
+            if str_len(raw_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                raw_ty = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+            }
+            let clean_ty = self.clean_type_name(raw_ty)
+            var is_static = false
+            if ep[recv_id].kind == EXPR_IDENT {
+                let rn = ep[recv_id].str_val.as_ptr() as str
+                if self.is_struct_name(rn) || str_eq(rn, "Vec") || str_eq(rn, "String") || str_eq(rn, "Option") || str_eq(rn, "Result") {
+                    is_static = true
+                }
+            }
+            var mangled_name = ""
+            if str_len(clean_ty) > 0usize {
+                var full = String.new()
+                full.push_str(clean_ty)
+                full.push_str("__")
+                full.push_str(member)
+                full.push_byte(0u8)
+                mangled_name = full.as_ptr() as str
+            }
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                var p_idx = ai + 1usize
+                if is_static {
+                    p_idx = ai
+                }
+                var exp_arg_ty = self.find_fn_param_raw_type(mangled_name, p_idx)
+                if str_len(exp_arg_ty) == 0usize && ai == 0usize {
+                    if str_eq(member, "for_each") {
+                        exp_arg_ty = "fn(i64)"
+                    } else if str_eq(member, "map") {
+                        exp_arg_ty = "fn(i64) -> i64"
+                    } else if str_eq(member, "filter") {
+                        exp_arg_ty = "fn(i64) -> i64"
+                    }
+                }
+                self.propagate_lambda_ctx_expr(ep[expr_id].args.ptr[ai], exp_arg_ty)
+                ai = ai + 1usize
+            }
+        } else if k == EXPR_BINARY || k == EXPR_INDEX || k == EXPR_RANGE {
+            self.propagate_lambda_ctx_expr(ep[expr_id].left, "")
+            self.propagate_lambda_ctx_expr(ep[expr_id].right, "")
+        } else if k == EXPR_UNARY || k == EXPR_CAST || k == EXPR_FIELD_ACCESS || k == EXPR_AWAIT || k == EXPR_TRY {
+            self.propagate_lambda_ctx_expr(ep[expr_id].left, "")
+        } else if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE || k == EXPR_FSTRING {
+            var ai = 0usize
+            while ai < ep[expr_id].args.len {
+                self.propagate_lambda_ctx_expr(ep[expr_id].args.ptr[ai], "")
+                ai = ai + 1usize
+            }
+        }
+    }
+
+    fn propagate_lambda_ctx_stmt(var self, stmt_id: usize, cur_ret_ty: str) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_LET || k == STMT_VAR {
+            self.propagate_lambda_ctx_expr(sp[stmt_id].expr_id, sp[stmt_id].type_name.as_ptr() as str)
+        } else if k == STMT_RETURN {
+            self.propagate_lambda_ctx_expr(sp[stmt_id].expr_id, cur_ret_ty)
+        } else if k == STMT_ASSIGN || k == STMT_EXPR {
+            self.propagate_lambda_ctx_expr(sp[stmt_id].expr_id, "")
+        } else if k == STMT_ASSIGN_INDEX || k == STMT_ASSIGN_FIELD {
+            self.propagate_lambda_ctx_expr(sp[stmt_id].index_expr, "")
+            self.propagate_lambda_ctx_expr(sp[stmt_id].expr_id, "")
+        } else if k == STMT_IF {
+            self.propagate_lambda_ctx_expr(sp[stmt_id].expr_id, "")
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.propagate_lambda_ctx_stmt(sp[stmt_id].then_stmts.ptr[i], cur_ret_ty)
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.propagate_lambda_ctx_stmt(sp[stmt_id].else_stmts.ptr[i], cur_ret_ty)
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN || k == STMT_DEFER {
+            self.propagate_lambda_ctx_expr(sp[stmt_id].expr_id, "")
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.propagate_lambda_ctx_stmt(sp[stmt_id].body_stmts.ptr[i], cur_ret_ty)
+                i = i + 1usize
+            }
+        }
+    }
+
+    fn find_return_ret_type_in_stmt(self, stmt_id: usize) -> str {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_RETURN {
+            if sp[stmt_id].expr_id == 0usize {
+                return "void"
+            }
+            return self.infer_expr_rad_type(sp[stmt_id].expr_id)
+        }
+        if k == STMT_IF {
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                let r = self.find_return_ret_type_in_stmt(sp[stmt_id].then_stmts.ptr[i])
+                if str_len(r) > 0usize { return r }
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                let r = self.find_return_ret_type_in_stmt(sp[stmt_id].else_stmts.ptr[i])
+                if str_len(r) > 0usize { return r }
+                i = i + 1usize
+            }
+        }
+        if k == STMT_WHILE || k == STMT_FOR_RANGE || k == STMT_FOR_IN {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                let r = self.find_return_ret_type_in_stmt(sp[stmt_id].body_stmts.ptr[i])
+                if str_len(r) > 0usize { return r }
+                i = i + 1usize
+            }
+        }
+        return ""
+    }
+
+    fn prepare_lambdas(var self) {
+        let n_funcs = self.parser.functions.len
+
+        // Pass 0: Detect captures for all lambdas
+        var fi = 0usize
+        while fi < n_funcs {
+            let fdef = self.parser.functions.ptr[fi]
+            if fdef.has_body && !str_starts_with(fdef.fn_name.as_ptr() as str, "__rad_lambda_") {
+                var outer_vars = Vec.new()
+                var pi = 0usize
+                while pi < fdef.param_names.len {
+                    outer_vars.push(String.from_str(fdef.param_names.ptr[pi].as_ptr() as str))
+                    pi = pi + 1usize
+                }
+                var bi = 0usize
+                while bi < fdef.body.len {
+                    self.collect_decl_vars_stmt(fdef.body.ptr[bi], outer_vars, false)
+                    bi = bi + 1usize
+                }
+                bi = 0usize
+                while bi < fdef.body.len {
+                    self.walk_fn_for_lambda_captures_stmt(fdef.body.ptr[bi], outer_vars)
+                    bi = bi + 1usize
+                }
+            }
+            fi = fi + 1usize
+        }
+
+        // Pass 1: Context propagation from call sites, let bindings, and return statements
+        fi = 0usize
+        while fi < n_funcs {
+            let fdef = self.parser.functions.ptr[fi]
+            if fdef.has_body && !str_starts_with(fdef.fn_name.as_ptr() as str, "__rad_lambda_") {
+                let saved_fi = self.current_func_idx
+                self.current_func_idx = fi
+                var bi = 0usize
+                while bi < fdef.body.len {
+                    self.propagate_lambda_ctx_stmt(fdef.body.ptr[bi], fdef.ret_type.as_ptr() as str)
+                    bi = bi + 1usize
+                }
+                self.current_func_idx = saved_fi
+            }
+            fi = fi + 1usize
+        }
+
+        // Pass 2: Finalize lambda parameter types and infer return types
+        fi = 0usize
+        while fi < n_funcs {
+            let fdef = self.parser.functions.ptr[fi]
+            if fdef.has_body && str_starts_with(fdef.fn_name.as_ptr() as str, "__rad_lambda_") {
+                var ptypes = fdef.param_types
+                var pi = 0usize
+                while pi < ptypes.len {
+                    if str_eq(ptypes.ptr[pi].as_ptr() as str, "__rad_infer") {
+                        ptypes.ptr[pi] = String.from_str("i64")
+                    }
+                    pi = pi + 1usize
+                }
+            }
+            fi = fi + 1usize
+        }
+        fi = 0usize
+        while fi < n_funcs {
+            let fdef = self.parser.functions.ptr[fi]
+            if fdef.has_body && str_starts_with(fdef.fn_name.as_ptr() as str, "__rad_lambda_") {
+                if str_eq(fdef.ret_type.as_ptr() as str, "__rad_infer") {
+                    let saved_fi = self.current_func_idx
+                    self.current_func_idx = fi
+                    var inferred = ""
+                    var bi = 0usize
+                    while bi < fdef.body.len {
+                        let r = self.find_return_ret_type_in_stmt(fdef.body.ptr[bi])
+                        if str_len(r) > 0usize {
+                            inferred = r
+                            break
+                        }
+                        bi = bi + 1usize
+                    }
+                    if str_len(inferred) == 0usize {
+                        if fdef.body.len > 0usize {
+                            let last_sid = fdef.body.ptr[fdef.body.len - 1usize]
+                            let sp = self.parser.stmts.ptr
+                            if sp[last_sid].kind == STMT_EXPR {
+                                let e_id = sp[last_sid].expr_id
+                                if self.is_expr_void(e_id) {
+                                    inferred = "void"
+                                } else {
+                                    inferred = self.infer_expr_rad_type(e_id)
+                                }
+                            } else {
+                                inferred = "void"
+                            }
+                        } else {
+                            inferred = "void"
+                        }
+                    }
+                    self.current_func_idx = saved_fi
+                    self.parser.functions.ptr[fi].ret_type = String.from_str(inferred)
+                }
+            }
+            fi = fi + 1usize
+        }
+
+        // Pass 3: Check explicit fn(...) type annotations on capturing closures
+        fi = 0usize
+        while fi < n_funcs {
+            let fdef = self.parser.functions.ptr[fi]
+            if fdef.has_body {
+                var bi = 0usize
+                while bi < fdef.body.len {
+                    self.check_fn_ptr_closure_coercion_stmt(fdef.body.ptr[bi])
+                    bi = bi + 1usize
+                }
+            }
+            fi = fi + 1usize
+        }
+    }
+
+}

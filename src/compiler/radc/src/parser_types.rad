@@ -1,0 +1,200 @@
+// radc/src/parser_types.rad - Type Parsing Pass
+import util;
+import token;
+import ast;
+
+impl Parser {
+    fn parse_type_str(var self) -> String {
+        var ty = String.new()
+        if self.peek_kind() == TOK_AMP {
+            self.advance()
+            ty.push_str("&")
+        }
+        if self.peek_kind() == TOK_VAR {
+            ty.push_str("var ")
+            self.advance()
+        }
+        if self.peek_kind() == TOK_FN || str_eq(self.peek_text(), "fn") {
+            self.advance()
+            ty.push_str("fn")
+            if self.match_tok(TOK_LPAREN) {
+                ty.push_str("(")
+                var paren_depth = 1i64
+                while paren_depth > 0i64 && self.peek_kind() != TOK_EOF {
+                    if self.peek_kind() == TOK_LPAREN {
+                        paren_depth = paren_depth + 1i64
+                        ty.push_str("(")
+                        self.advance()
+                    } else if self.peek_kind() == TOK_RPAREN {
+                        paren_depth = paren_depth - 1i64
+                        if paren_depth > 0i64 {
+                            ty.push_str(")")
+                        }
+                        self.advance()
+                    } else if self.peek_kind() == TOK_COMMA {
+                        ty.push_str(", ")
+                        self.advance()
+                    } else {
+                        ty.push_str(self.peek_text())
+                        self.advance()
+                    }
+                }
+                ty.push_str(")")
+            }
+            if self.match_tok(TOK_ARROW) {
+                ty.push_str(" -> ")
+                ty.push_str(self.parse_type_str().as_ptr() as str)
+            }
+            return ty
+        }
+        if self.peek_kind() == TOK_LPAREN {
+            self.advance()
+            ty.push_str("(")
+            var paren_depth = 1i64
+            while paren_depth > 0i64 && self.peek_kind() != TOK_EOF {
+                if self.peek_kind() == TOK_LPAREN {
+                    paren_depth = paren_depth + 1i64
+                    ty.push_str("(")
+                    self.advance()
+                } else if self.peek_kind() == TOK_RPAREN {
+                    paren_depth = paren_depth - 1i64
+                    if paren_depth > 0i64 {
+                        ty.push_str(")")
+                    }
+                    self.advance()
+                } else if self.peek_kind() == TOK_COMMA {
+                    ty.push_str(", ")
+                    self.advance()
+                } else {
+                    ty.push_str(self.peek_text())
+                    self.advance()
+                }
+            }
+            ty.push_str(")")
+            return ty
+        }
+        if self.peek_kind() == TOK_LBRACKET {
+            ty.push_str("[")
+            self.advance()
+            while self.peek_kind() != TOK_RBRACKET && self.peek_kind() != TOK_EOF {
+                ty.push_str(self.peek_text())
+                self.advance()
+            }
+            if self.match_tok(TOK_RBRACKET) {
+                ty.push_str("]")
+            }
+            if self.peek_kind() == TOK_VAR {
+                ty.push_str("var ")
+                self.advance()
+            }
+            if self.peek_kind() == TOK_IDENT {
+                ty.push_str(self.peek_text())
+                self.advance()
+            }
+            if self.type_alias_names.len > 0usize {
+            let resolved = self.resolve_type_alias(ty.as_ptr() as str)
+            if !str_eq(resolved, ty.as_ptr() as str) {
+                return String.from_str(resolved)
+            }
+        }
+        return ty
+        }
+        // 1. Consume pointer modifiers: *raw var, *raw const, *raw, *
+        while self.peek_kind() == TOK_STAR {
+            self.advance()
+            ty.push_str("*")
+            if self.peek_kind() == TOK_IDENT {
+                let s = self.peek_text()
+                if str_eq(s, "raw") || str_eq(s, "const") {
+                    ty.push_str(" ")
+                    ty.push_str(s)
+                    self.advance()
+                }
+            }
+            if self.peek_kind() == TOK_VAR {
+                ty.push_str(" var")
+                self.advance()
+            } else if self.peek_kind() == TOK_IDENT {
+                let s = self.peek_text()
+                if str_eq(s, "const") {
+                    ty.push_str(" const")
+                    self.advance()
+                }
+            }
+        }
+        // If there are more pointer stars (e.g. *raw *raw u8)
+        while self.peek_kind() == TOK_STAR {
+            self.advance()
+            ty.push_str("*")
+            if self.peek_kind() == TOK_IDENT {
+                let s = self.peek_text()
+                if str_eq(s, "raw") || str_eq(s, "const") {
+                    ty.push_str(" ")
+                    ty.push_str(s)
+                    self.advance()
+                }
+            }
+        }
+        // 2. Consume the single base type name: e.g. u8, i32, usize, String, Vec, dyn Trait, etc.
+        if self.peek_kind() == TOK_DYN || str_eq(self.peek_text(), "dyn") {
+            self.advance()
+            if ty.len() > 0usize {
+                ty.push_str(" ")
+            }
+            ty.push_str("dyn ")
+            if self.peek_kind() == TOK_IDENT {
+                ty.push_str(self.peek_text())
+                self.advance()
+            }
+            if self.type_alias_names.len > 0usize {
+            let resolved = self.resolve_type_alias(ty.as_ptr() as str)
+            if !str_eq(resolved, ty.as_ptr() as str) {
+                return String.from_str(resolved)
+            }
+        }
+        return ty
+        }
+        if self.peek_kind() == TOK_IDENT {
+            if ty.len() > 0usize {
+                ty.push_str(" ")
+            }
+            ty.push_str(self.peek_text())
+            self.advance()
+            // Optional generics: <T, U>
+            if self.peek_kind() == TOK_LT {
+                ty.push_str("<")
+                self.advance()
+                var depth = 1
+                while depth > 0 && self.peek_kind() != TOK_EOF {
+                    if self.peek_kind() == TOK_LT {
+                        depth = depth + 1
+                        ty.push_str("<")
+                        self.advance()
+                    } else if self.peek_kind() == TOK_GT {
+                        depth = depth - 1
+                        ty.push_str(">")
+                        self.advance()
+                    } else if self.peek_kind() == TOK_SHR {
+                        depth = depth - 2
+                        ty.push_str(">>")
+                        self.advance()
+                    } else if str_eq(self.peek_text(), "dyn") || self.peek_kind() == TOK_DYN {
+                        ty.push_str("dyn ")
+                        self.advance()
+                    } else {
+                        ty.push_str(self.peek_text())
+                        self.advance()
+                    }
+                }
+            }
+        }
+        if self.type_alias_names.len > 0usize {
+            let resolved = self.resolve_type_alias(ty.as_ptr() as str)
+            if !str_eq(resolved, ty.as_ptr() as str) {
+                return String.from_str(resolved)
+            }
+        }
+        return ty
+    }
+
+}

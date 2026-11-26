@@ -1,0 +1,1906 @@
+// radc/src/codegen_stmt.rad - Statement & Control Flow Emission Pass
+import util;
+import token;
+import ast;
+import parser;
+
+impl Codegen {
+    fn struct_has_drop(self, type_name: str) -> bool {
+        let clean = self.clean_type_name(type_name)
+        if str_len(clean) == 0usize || str_eq(clean, "void") || str_eq(clean, "i32") || str_eq(clean, "i64") || str_eq(clean, "bool") || str_eq(clean, "f64") || str_eq(clean, "f32") || str_eq(clean, "String") || str_eq(clean, "Vec") {
+            return false
+        }
+        // A prefix match is unsafe here: a generic placeholder such as
+        // "T" must never match an unrelated concrete destructor like
+        // "TcpStream__drop". Match the complete type-specific symbol.
+        var expected_drop = String.new()
+        expected_drop.push_str(clean)
+        expected_drop.push_str("__drop")
+        expected_drop.push_byte(0u8)
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if str_eq(fn_str, expected_drop.as_ptr() as str) {
+                return true
+            }
+            fi = fi + 1usize
+        }
+        return false
+    }
+
+    fn emit_drops_from(var self, from_idx: usize, skip_var: str) {
+        if self.active_drops_var.len <= from_idx {
+            return
+        }
+        var i = self.active_drops_var.len
+        while i > from_idx {
+            i = i - 1usize
+            let vname = self.active_drops_var.ptr[i].as_ptr() as str
+            if str_len(vname) == 0usize {
+                continue
+            }
+            let vty = self.active_drops_type.ptr[i].as_ptr() as str
+            if str_len(skip_var) > 0usize && str_eq(vname, skip_var) {
+                continue
+            }
+            let clean = self.clean_type_name(vty)
+            var expected_drop = String.new()
+            expected_drop.push_str(clean)
+            expected_drop.push_str("__drop")
+            expected_drop.push_byte(0u8)
+            var drop_fn_name = ""
+            var fi = 0usize
+            while fi < self.parser.functions.len {
+                let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+                if str_eq(fn_str, expected_drop.as_ptr() as str) {
+                    drop_fn_name = fn_str
+                    break
+                }
+                fi = fi + 1usize
+            }
+            if str_len(drop_fn_name) == 0usize {
+                continue
+            }
+
+            let inst_ptr = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(inst_ptr).as_ptr() as str)
+            self.ir.push_str(" = load ptr, ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+
+            let check_null = self.alloc_ssa()
+            let drop_lbl = self.alloc_label()
+            let cont_lbl = self.alloc_label()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(check_null).as_ptr() as str)
+            self.ir.push_str(" = icmp ne ptr %")
+            self.ir.push_str(int_to_str(inst_ptr).as_ptr() as str)
+            self.ir.push_str(", null\n")
+            self.ir.push_str("  br i1 %")
+            self.ir.push_str(int_to_str(check_null).as_ptr() as str)
+            self.ir.push_str(", label %drop.")
+            self.ir.push_str(int_to_str(drop_lbl).as_ptr() as str)
+            self.ir.push_str(", label %drop.")
+            self.ir.push_str(int_to_str(cont_lbl).as_ptr() as str)
+            self.ir.push_str("\ndrop.")
+            self.ir.push_str(int_to_str(drop_lbl).as_ptr() as str)
+            self.ir.push_str(":\n")
+            self.ir.push_str("  call void @")
+            self.ir.push_str(drop_fn_name)
+            self.ir.push_str("(ptr %")
+            self.ir.push_str(int_to_str(inst_ptr).as_ptr() as str)
+            self.ir.push_str(")\n")
+            self.ir.push_str("  store ptr null, ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+            self.ir.push_str("  br label %drop.")
+            self.ir.push_str(int_to_str(cont_lbl).as_ptr() as str)
+            self.ir.push_str("\ndrop.")
+            self.ir.push_str(int_to_str(cont_lbl).as_ptr() as str)
+            self.ir.push_str(":\n")
+        }
+    }
+
+    fn pop_drops_to(var self, to_idx: usize) {
+        while self.active_drops_var.len > to_idx {
+            let _p1 = self.active_drops_var.pop()
+            let _p2 = self.active_drops_type.pop()
+        }
+    }
+
+    fn emit_defers_from(var self, from_idx: usize) {
+        if self.active_defers.len <= from_idx {
+            return
+        }
+        var i = self.active_defers.len
+        while i > from_idx {
+            i = i - 1usize
+            let def_stmt_id = self.active_defers.ptr[i]
+            self.ir.push_str("  call void @__rad_defer_pop_and_run(ptr %__def_node_")
+            self.ir.push_str(int_to_str(def_stmt_id as i32).as_ptr() as str)
+            self.ir.push_str(")\n")
+        }
+    }
+
+    fn emit_stmt(var self, stmt_id: usize) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+
+        if k == STMT_LET || k == STMT_VAR {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            if sp[stmt_id].expr_id != 0usize {
+                let init_expr = sp[stmt_id].expr_id
+                let raw_ty = self.get_raw_var_type(vname)
+                let ik = self.parser.exprs.ptr[init_expr].kind
+                if (str_eq(raw_ty, "i32") || str_eq(raw_ty, "i64")) && ik == EXPR_STR {
+                    var err = String.new()
+                    err.push_str("type mismatch: cannot assign string literal to integer variable '")
+                    err.push_str(vname)
+                    err.push_str("'")
+                    let diag_source_id_5 = self.parser.stmt_source_ids.ptr[stmt_id]
+                    self.parser.report_error_for_source(diag_source_id_5, "E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+                }
+                var r = self.emit_expr(init_expr)
+                if str_starts_with(raw_ty, "dyn ") {
+                    let target_trait = (raw_ty as usize + 4usize) as str
+                    let src_struct = self.get_expr_struct_name(init_expr)
+                    if str_len(src_struct) > 0usize && !str_starts_with(src_struct, "dyn ") {
+                        r = self.coerce_to_trait_object(r, src_struct, target_trait)
+                    }
+                }
+                if self.is_struct_name(raw_ty) && ik == EXPR_IDENT {
+                    var s_idx = 0usize
+                    var num_f = 2usize
+                    while s_idx < self.parser.structs.len {
+                        if self.match_struct_name(self.parser.structs.ptr[s_idx].struct_name.as_ptr() as str, raw_ty) {
+                            num_f = self.parser.structs.ptr[s_idx].field_names.len
+                            break
+                        }
+                        s_idx = s_idx + 1usize
+                    }
+                    let sz = num_f * 8usize
+                    let clone_reg = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(clone_reg).as_ptr() as str)
+                    self.ir.push_str(" = call ptr @malloc(i64 ")
+                    self.ir.push_str(int_to_str(sz as i32).as_ptr() as str)
+                    self.ir.push_str(")\n")
+
+                    var src_ptr = r
+                    let src_vname = self.parser.exprs.ptr[init_expr].str_val.as_ptr() as str
+                    let src_is_ptr = str_eq(self.get_var_type(src_vname), "ptr")
+                    if !src_is_ptr {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = inttoptr i64 %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to ptr\n")
+                        src_ptr = cvt
+                    }
+
+                    var f = 0usize
+                    while f < num_f {
+                        let gep_src = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(gep_src).as_ptr() as str)
+                        self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+                        self.ir.push_str(int_to_str(src_ptr).as_ptr() as str)
+                        self.ir.push_str(", i64 ")
+                        self.ir.push_str(int_to_str(f as i32).as_ptr() as str)
+                        self.ir.push_str("\n")
+
+                        let val_load = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(val_load).as_ptr() as str)
+                        self.ir.push_str(" = load i64, ptr %")
+                        self.ir.push_str(int_to_str(gep_src).as_ptr() as str)
+                        self.ir.push_str(", align 8\n")
+
+                        let gep_dst = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(gep_dst).as_ptr() as str)
+                        self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+                        self.ir.push_str(int_to_str(clone_reg).as_ptr() as str)
+                        self.ir.push_str(", i64 ")
+                        self.ir.push_str(int_to_str(f as i32).as_ptr() as str)
+                        self.ir.push_str("\n")
+
+                        self.ir.push_str("  store i64 %")
+                        self.ir.push_str(int_to_str(val_load).as_ptr() as str)
+                        self.ir.push_str(", ptr %")
+                        self.ir.push_str(int_to_str(gep_dst).as_ptr() as str)
+                        self.ir.push_str(", align 8\n")
+
+                        f = f + 1usize
+                    }
+                    r = clone_reg
+                }
+                let llvm_ty = self.get_var_type(vname)
+                var init_is_ptr = self.is_expr_ptr(init_expr)
+                if self.is_struct_name(raw_ty) && ik == EXPR_IDENT {
+                    init_is_ptr = true
+                }
+                let init_is_float = self.is_expr_float(init_expr)
+                if (str_eq(llvm_ty, "double") || str_eq(llvm_ty, "float")) && !init_is_float {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = sitofp i64 %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(" to ")
+                    self.ir.push_str(llvm_ty)
+                    self.ir.push_str("\n")
+                    r = cvt
+                } else if str_eq(llvm_ty, "double") && self.is_expr_f32(init_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = fpext float %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(" to double\n")
+                    r = cvt
+                } else if str_eq(llvm_ty, "float") && init_is_float && !self.is_expr_f32(init_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = fptrunc double %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(" to float\n")
+                    r = cvt
+                } else if (!str_eq(llvm_ty, "double") && !str_eq(llvm_ty, "float")) && init_is_float {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    if self.is_expr_f32(sp[stmt_id].expr_id) {
+                        self.ir.push_str(" = fptosi float %")
+                    } else {
+                        self.ir.push_str(" = fptosi double %")
+                    }
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(" to i64\n")
+                    r = cvt
+                } else if str_eq(llvm_ty, "ptr") && !init_is_ptr {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = inttoptr i64 %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(" to ptr\n")
+                    r = cvt
+                } else if str_eq(llvm_ty, "i64") && init_is_ptr {
+                    let opt_ty = self.get_expr_struct_name(init_expr)
+                    if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        r = unwrapped
+                    } else if (str_eq(raw_ty, "int") || str_eq(raw_ty, "i64")) && self.is_expr_string_obj(init_expr) {
+                        let parsed = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        r = parsed
+                    } else if str_eq(raw_ty, "int") && self.is_expr_str_type(init_expr) {
+                        let parsed = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @parse_int(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        r = parsed
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        r = cvt
+                    }
+                } else if str_eq(llvm_ty, "i32") {
+                    var cur_r = r
+                    if init_is_ptr {
+                        let opt_ty = self.get_expr_struct_name(init_expr)
+                        if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                            let unwrapped = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            cur_r = unwrapped
+                        } else if (str_eq(raw_ty, "i32") || str_eq(raw_ty, "u32")) && self.is_expr_string_obj(init_expr) {
+                            let parsed = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            cur_r = parsed
+                        } else {
+                            let cvt = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                            self.ir.push_str(" = ptrtoint ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(" to i64\n")
+                            cur_r = cvt
+                        }
+                    }
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = trunc i64 %")
+                    self.ir.push_str(int_to_str(cur_r).as_ptr() as str)
+                    self.ir.push_str(" to i32\n")
+                    r = cvt
+                }
+                if r == 0 {
+                    self.ir.push_str("  store ")
+                    self.ir.push_str(llvm_ty)
+                    if str_eq(llvm_ty, "ptr") {
+                        self.ir.push_str(" null, ptr %")
+                    } else if str_eq(llvm_ty, "double") {
+                        self.ir.push_str(" 0.0, ptr %")
+                    } else {
+                        self.ir.push_str(" 0, ptr %")
+                    }
+                    self.ir.push_str(vname)
+                    self.ir.push_str(".addr, align 8\n")
+                } else {
+                    self.ir.push_str("  store ")
+                    self.ir.push_str(llvm_ty)
+                    self.ir.push_str(" %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(", ptr %")
+                    self.ir.push_str(vname)
+                    self.ir.push_str(".addr, align 8\n")
+                }
+            }
+            var raw_drop_ty = self.get_raw_var_type(vname)
+            if str_len(raw_drop_ty) == 0usize && sp[stmt_id].expr_id != 0usize {
+                raw_drop_ty = self.get_expr_struct_name(sp[stmt_id].expr_id)
+            }
+            if self.struct_has_drop(raw_drop_ty) {
+                self.active_drops_var.push(String.from_str(vname))
+                self.active_drops_type.push(String.from_str(raw_drop_ty))
+            }
+        } else if k == STMT_ASSIGN {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            let init_expr = sp[stmt_id].expr_id
+
+            // Semantic check: ensure variable was declared
+            var is_alloc = false
+            var ai = 0usize
+            while ai < self.allocated_vars.len {
+                if str_eq(self.allocated_vars.ptr[ai].as_ptr() as str, vname) {
+                    is_alloc = true
+                    break
+                }
+                ai = ai + 1usize
+            }
+            if !is_alloc {
+                var err = String.new()
+                err.push_str("cannot assign to undeclared variable '")
+                err.push_str(vname)
+                err.push_str("' (declare with 'let' or 'var' first)")
+                let sug = self.find_similar_ident(vname)
+                if str_len(sug) > 0usize {
+                    err.push_str(" (did you mean '")
+                    err.push_str(sug)
+                    err.push_str("'?)")
+                }
+                let diag_source_id_3 = self.parser.stmt_source_ids.ptr[stmt_id]
+                self.parser.report_error_span_for_source(diag_source_id_3, "E0020", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col, str_len(vname) as i64)
+                let _r = self.emit_expr(init_expr)
+                return
+            }
+
+            let raw_ty = self.get_raw_var_type(vname)
+            let ik = self.parser.exprs.ptr[init_expr].kind
+            if (str_eq(raw_ty, "i32") || str_eq(raw_ty, "i64")) && ik == EXPR_STR {
+                var err = String.new()
+                err.push_str("type mismatch: cannot assign string literal to integer variable '")
+                err.push_str(vname)
+                err.push_str("'")
+                let diag_source_id_6 = self.parser.stmt_source_ids.ptr[stmt_id]
+                self.parser.report_error_for_source(diag_source_id_6, "E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+            }
+            var r = self.emit_expr(init_expr)
+            if str_starts_with(raw_ty, "dyn ") {
+                let target_trait = (raw_ty as usize + 4usize) as str
+                let src_struct = self.get_expr_struct_name(init_expr)
+                if str_len(src_struct) > 0usize && !str_starts_with(src_struct, "dyn ") {
+                    r = self.coerce_to_trait_object(r, src_struct, target_trait)
+                }
+            }
+            let llvm_ty = self.get_var_type(vname)
+            let init_is_ptr = self.is_expr_ptr(init_expr)
+            let init_is_float = self.is_expr_float(init_expr)
+            if (str_eq(llvm_ty, "double") || str_eq(llvm_ty, "float")) && !init_is_float {
+                let cvt = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                self.ir.push_str(" = sitofp i64 %")
+                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                self.ir.push_str(" to ")
+                self.ir.push_str(llvm_ty)
+                self.ir.push_str("\n")
+                r = cvt
+            } else if str_eq(llvm_ty, "double") && self.is_expr_f32(init_expr) {
+                let cvt = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                self.ir.push_str(" = fpext float %")
+                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                self.ir.push_str(" to double\n")
+                r = cvt
+            } else if str_eq(llvm_ty, "float") && init_is_float && !self.is_expr_f32(init_expr) {
+                let cvt = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                self.ir.push_str(" = fptrunc double %")
+                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                self.ir.push_str(" to float\n")
+                r = cvt
+            } else if (!str_eq(llvm_ty, "double") && !str_eq(llvm_ty, "float")) && init_is_float {
+                let cvt = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                if self.is_expr_f32(sp[stmt_id].expr_id) {
+                    self.ir.push_str(" = fptosi float %")
+                } else {
+                    self.ir.push_str(" = fptosi double %")
+                }
+                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                self.ir.push_str(" to i64\n")
+                r = cvt
+            } else if str_eq(llvm_ty, "ptr") && !init_is_ptr {
+                let cvt = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                self.ir.push_str(" = inttoptr i64 %")
+                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                self.ir.push_str(" to ptr\n")
+                r = cvt
+            } else if str_eq(llvm_ty, "i64") && init_is_ptr {
+                let raw_ty = self.get_raw_var_type(vname)
+                let opt_ty = self.get_expr_struct_name(init_expr)
+                if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                    let unwrapped = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    r = unwrapped
+                } else if (str_eq(raw_ty, "int") || str_eq(raw_ty, "i64")) && self.is_expr_string_obj(init_expr) {
+                    let parsed = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    r = parsed
+                } else if str_eq(raw_ty, "int") && self.is_expr_str_type(init_expr) {
+                    let parsed = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                    self.ir.push_str(" = call i64 @parse_int(ptr %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(")\n")
+                    r = parsed
+                } else {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = ptrtoint ptr %")
+                    self.ir.push_str(int_to_str(r).as_ptr() as str)
+                    self.ir.push_str(" to i64\n")
+                    r = cvt
+                }
+            } else if str_eq(llvm_ty, "i32") {
+                let raw_ty = self.get_raw_var_type(vname)
+                var cur_r = r
+                if init_is_ptr {
+                    let opt_ty = self.get_expr_struct_name(init_expr)
+                    if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        cur_r = unwrapped
+                    } else if (str_eq(raw_ty, "i32") || str_eq(raw_ty, "u32")) && self.is_expr_string_obj(init_expr) {
+                        let parsed = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(parsed).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @String__to_int(ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        cur_r = parsed
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        cur_r = cvt
+                    }
+                }
+                let cvt = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                self.ir.push_str(" = trunc i64 %")
+                self.ir.push_str(int_to_str(cur_r).as_ptr() as str)
+                self.ir.push_str(" to i32\n")
+                r = cvt
+            }
+            if r == 0 {
+                self.ir.push_str("  store ")
+                self.ir.push_str(llvm_ty)
+                if str_eq(llvm_ty, "ptr") {
+                    self.ir.push_str(" null, ptr %")
+                } else if str_eq(llvm_ty, "double") {
+                    self.ir.push_str(" 0.0, ptr %")
+                } else {
+                    self.ir.push_str(" 0, ptr %")
+                }
+                self.ir.push_str(vname)
+                self.ir.push_str(".addr, align 8\n")
+            } else {
+                self.ir.push_str("  store ")
+                self.ir.push_str(llvm_ty)
+                self.ir.push_str(" %")
+                self.ir.push_str(int_to_str(r).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(vname)
+                self.ir.push_str(".addr, align 8\n")
+            }
+            var raw_drop_ty = self.get_raw_var_type(vname)
+            if str_len(raw_drop_ty) == 0usize && sp[stmt_id].expr_id != 0usize {
+                raw_drop_ty = self.get_expr_struct_name(sp[stmt_id].expr_id)
+            }
+            if self.struct_has_drop(raw_drop_ty) {
+                var found = false
+                var di = 0usize
+                while di < self.active_drops_var.len {
+                    if str_eq(self.active_drops_var.ptr[di].as_ptr() as str, vname) {
+                        found = true
+                        break
+                    }
+                    di = di + 1usize
+                }
+                if !found {
+                    self.active_drops_var.push(String.from_str(vname))
+                    self.active_drops_type.push(String.from_str(raw_drop_ty))
+                }
+            }
+        } else if k == STMT_ASSIGN_INDEX {
+            let val_expr = sp[stmt_id].expr_id
+            var val_reg = self.emit_expr(val_expr)
+            let idx_reg = self.emit_expr(sp[stmt_id].index_expr)
+            var arr_reg = 0
+            var is_byte = false
+            var is_i32 = false
+            var is_i16 = false
+            var is_vec = false
+            let vname = sp[stmt_id].name.as_ptr() as str
+            if str_len(vname) > 0usize {
+                let raw_ty = self.get_raw_var_type(vname)
+                if str_starts_with(raw_ty, "Vec") || str_starts_with(raw_ty, "[]") || str_starts_with(raw_ty, "var []") || str_starts_with(raw_ty, "[") {
+                    is_vec = true
+                }
+                if str_ends_with(raw_ty, "u8") || str_ends_with(raw_ty, "i8") || str_eq(raw_ty, "str") || str_ends_with(raw_ty, "bool") {
+                    is_byte = true
+                } else if str_ends_with(raw_ty, "u32") {
+                    is_i32 = true
+                } else if str_ends_with(raw_ty, "u16") || str_ends_with(raw_ty, "i16") {
+                    is_i16 = true
+                }
+            }
+            if self.parser.exprs.ptr[val_expr].kind == EXPR_CAST {
+                let tgt = self.parser.exprs.ptr[val_expr].target_type.as_ptr() as str
+                if str_eq(tgt, "u8") || str_eq(tgt, "i8") {
+                    is_byte = true
+                } else if str_eq(tgt, "u32") {
+                    is_i32 = true
+                } else if str_eq(tgt, "u16") || str_eq(tgt, "i16") {
+                    is_i16 = true
+                }
+            }
+            if sp[stmt_id].then_stmts.len > 0usize {
+                let arr_expr = sp[stmt_id].then_stmts.ptr[0usize]
+                if self.parser.exprs.ptr[arr_expr].kind == EXPR_IDENT {
+                    let raw_ty = self.get_raw_var_type(self.parser.exprs.ptr[arr_expr].str_val.as_ptr() as str)
+                    if str_starts_with(raw_ty, "Vec") || str_starts_with(raw_ty, "[]") || str_starts_with(raw_ty, "var []") || str_starts_with(raw_ty, "[") {
+                        is_vec = true
+                    }
+                    if str_ends_with(raw_ty, "u8") || str_ends_with(raw_ty, "i8") || str_eq(raw_ty, "str") || str_ends_with(raw_ty, "bool") {
+                        is_byte = true
+                    } else if str_ends_with(raw_ty, "u32") {
+                        is_i32 = true
+                    } else if str_ends_with(raw_ty, "u16") || str_ends_with(raw_ty, "i16") {
+                        is_i16 = true
+                    }
+                } else if self.parser.exprs.ptr[arr_expr].kind == EXPR_FIELD_ACCESS {
+                    let fname = self.parser.exprs.ptr[arr_expr].field_name.as_ptr() as str
+                    let recv_id = self.parser.exprs.ptr[arr_expr].left
+                    var s_type = self.get_expr_struct_name(recv_id)
+                    if str_len(s_type) == 0usize && self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
+                        s_type = self.get_raw_var_type(self.parser.exprs.ptr[recv_id].str_val.as_ptr() as str)
+                    }
+                    var si = 0usize
+                    var matched_field = false
+                    while si < self.parser.structs.len && !matched_field {
+                        let sdef = self.parser.structs.ptr[si]
+                        if str_len(s_type) == 0usize || str_starts_with(s_type, "*") || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                            var fi = 0usize
+                            while fi < sdef.field_names.len {
+                                if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                    let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                                    if str_starts_with(fty, "Vec") || str_starts_with(fty, "[]") || str_starts_with(fty, "var []") || str_starts_with(fty, "[") {
+                                        is_vec = true
+                                    }
+                                    if str_ends_with(fty, "u8") || str_ends_with(fty, "i8") || str_eq(fty, "str") || str_ends_with(fty, "bool") {
+                                        is_byte = true
+                                    } else if str_ends_with(fty, "u32") {
+                                        is_i32 = true
+                                    } else if str_ends_with(fty, "u16") || str_ends_with(fty, "i16") {
+                                        is_i16 = true
+                                    } else if str_starts_with(s_type, "Vec<u8") || str_starts_with(s_type, "Vec<i8") || str_starts_with(s_type, "Vec<bool") {
+                                        is_byte = true
+                                    } else if str_starts_with(s_type, "Vec<u32") {
+                                        is_i32 = true
+                                    } else if str_starts_with(s_type, "Vec<u16") || str_starts_with(s_type, "Vec<i16") {
+                                        is_i16 = true
+                                    }
+                                    matched_field = true
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
+                        }
+                        si = si + 1usize
+                    }
+                } else if self.parser.exprs.ptr[arr_expr].kind == EXPR_CAST {
+                    let tgt = self.parser.exprs.ptr[arr_expr].target_type.as_ptr() as str
+                    if str_ends_with(tgt, "u8") || str_ends_with(tgt, "i8") || str_eq(tgt, "str") || str_ends_with(tgt, "bool") {
+                        is_byte = true
+                    } else if str_ends_with(tgt, "u32") {
+                        is_i32 = true
+                    } else if str_ends_with(tgt, "u16") || str_ends_with(tgt, "i16") {
+                        is_i16 = true
+                    }
+                }
+                arr_reg = self.emit_expr(arr_expr)
+                if !self.is_expr_ptr(arr_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = inttoptr i64 %")
+                    self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                    self.ir.push_str(" to ptr\n")
+                    arr_reg = cvt
+                }
+            } else {
+                arr_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(" = load ptr, ptr %")
+                self.ir.push_str(vname)
+                self.ir.push_str(".addr, align 8\n")
+            }
+
+            if is_vec {
+                let len_gep = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(len_gep).as_ptr() as str)
+                self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(", i64 2\n")
+                let len_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(len_reg).as_ptr() as str)
+                self.ir.push_str(" = load i64, ptr %")
+                self.ir.push_str(int_to_str(len_gep).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+
+                let is_neg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(is_neg).as_ptr() as str)
+                self.ir.push_str(" = icmp slt i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str(", 0\n")
+
+                let is_oob = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(is_oob).as_ptr() as str)
+                self.ir.push_str(" = icmp sge i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str(", %")
+                self.ir.push_str(int_to_str(len_reg).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                let bad = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(bad).as_ptr() as str)
+                self.ir.push_str(" = or i1 %")
+                self.ir.push_str(int_to_str(is_neg).as_ptr() as str)
+                self.ir.push_str(", %")
+                self.ir.push_str(int_to_str(is_oob).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                let p_lbl = self.alloc_label()
+                let ok_lbl = self.alloc_label()
+                self.ir.push_str("  br i1 %")
+                self.ir.push_str(int_to_str(bad).as_ptr() as str)
+                self.ir.push_str(", label %panic_bounds_")
+                self.ir.push_str(int_to_str(p_lbl).as_ptr() as str)
+                self.ir.push_str(", label %ok_bounds_")
+                self.ir.push_str(int_to_str(ok_lbl).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                self.ir.push_str("panic_bounds_")
+                self.ir.push_str(int_to_str(p_lbl).as_ptr() as str)
+                self.ir.push_str(":\n")
+                self.ir.push_str("  call void @__rad_panic_bounds(i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str(", i64 %")
+                self.ir.push_str(int_to_str(len_reg).as_ptr() as str)
+                self.ir.push_str(")\n  unreachable\n")
+
+                self.ir.push_str("ok_bounds_")
+                self.ir.push_str(int_to_str(ok_lbl).as_ptr() as str)
+                self.ir.push_str(":\n")
+
+                let buf_load = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(buf_load).as_ptr() as str)
+                self.ir.push_str(" = load ptr, ptr %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+                arr_reg = buf_load
+            }
+
+            if is_byte {
+                let gep = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(" = getelementptr inbounds i8, ptr %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(", i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                let trunc_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
+                self.ir.push_str(" = trunc i64 %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(" to i8\n")
+
+                self.ir.push_str("  store i8 %")
+                self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 1\n")
+            } else if is_i32 {
+                let gep = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(" = getelementptr inbounds i32, ptr %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(", i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                let trunc_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
+                self.ir.push_str(" = trunc i64 %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(" to i32\n")
+
+                self.ir.push_str("  store i32 %")
+                self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 4\n")
+            } else if is_i16 {
+                let gep = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(" = getelementptr inbounds i16, ptr %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(", i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                let trunc_reg = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
+                self.ir.push_str(" = trunc i64 %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(" to i16\n")
+
+                self.ir.push_str("  store i16 %")
+                self.ir.push_str(int_to_str(trunc_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 2\n")
+            } else if self.is_expr_float(val_expr) {
+                if self.is_expr_f32(val_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = fpext float %")
+                    self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                    self.ir.push_str(" to double\n")
+                    val_reg = cvt
+                }
+                let gep = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(" = getelementptr inbounds double, ptr %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(", i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                self.ir.push_str("  store double %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+            } else {
+                let gep = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+                self.ir.push_str(int_to_str(arr_reg).as_ptr() as str)
+                self.ir.push_str(", i64 %")
+                self.ir.push_str(int_to_str(idx_reg).as_ptr() as str)
+                self.ir.push_str("\n")
+
+                if self.is_expr_ptr(val_expr) {
+                    let opt_ty = self.get_expr_struct_name(val_expr)
+                    if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        val_reg = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        val_reg = cvt
+                    }
+                }
+
+                self.ir.push_str("  store i64 %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+            }
+        } else if k == STMT_ASSIGN_FIELD {
+            let fname = sp[stmt_id].name.as_ptr() as str
+            let recv_expr = sp[stmt_id].index_expr
+            let val_expr = sp[stmt_id].expr_id
+            var recv_reg = self.emit_expr(recv_expr)
+            var val_reg = self.emit_expr(val_expr)
+
+            var f_idx = -1i64
+            let fname_p = fname as *raw u8
+            if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                f_idx = parse_int(fname)
+            } else {
+                let s_type = self.get_expr_struct_name(recv_expr)
+                if str_len(s_type) > 0usize {
+                    var si = 0usize
+                    while si < self.parser.structs.len {
+                        let sdef = self.parser.structs.ptr[si]
+                        if self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                            var fi = 0usize
+                            while fi < sdef.field_names.len {
+                                if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                    f_idx = fi as i64
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
+                            break
+                        }
+                        si = si + 1usize
+                    }
+                }
+                if f_idx < 0i64 {
+                    f_idx = self.get_struct_field_idx(fname)
+                }
+            }
+            if f_idx < 0i64 {
+                var err = String.new()
+                err.push_str("no field '")
+                err.push_str(fname)
+                err.push_str("'")
+                let sug = self.find_similar_field(fname, s_type)
+                if str_len(sug) > 0usize {
+                    err.push_str(" (did you mean '")
+                    err.push_str(sug)
+                    err.push_str("'?)")
+                }
+                self.parser.report_error("E0023", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+            }
+
+            if !self.is_expr_ptr(recv_expr) {
+                let cvt = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                self.ir.push_str(" = inttoptr i64 %")
+                self.ir.push_str(int_to_str(recv_reg).as_ptr() as str)
+                self.ir.push_str(" to ptr\n")
+                recv_reg = cvt
+            }
+
+            let gep = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(gep).as_ptr() as str)
+            self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+            self.ir.push_str(int_to_str(recv_reg).as_ptr() as str)
+            self.ir.push_str(", i64 ")
+            self.ir.push_str(int_to_str(f_idx as i32).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            var field_is_float = false
+            var si = 0usize
+            while si < self.parser.structs.len {
+                let sdef = self.parser.structs.ptr[si]
+                var fi = 0usize
+                while fi < sdef.field_names.len {
+                    if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                        let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                        if str_eq(fty, "f64") || str_eq(fty, "f32") {
+                            field_is_float = true
+                        }
+                        break
+                    }
+                    fi = fi + 1usize
+                }
+                si = si + 1usize
+            }
+
+            if field_is_float {
+                if !self.is_expr_float(val_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = sitofp i64 %")
+                    self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                    self.ir.push_str(" to double\n")
+                    val_reg = cvt
+                } else if self.is_expr_f32(val_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                    self.ir.push_str(" = fpext float %")
+                    self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                    self.ir.push_str(" to double\n")
+                    val_reg = cvt
+                }
+                self.ir.push_str("  store double %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+            } else {
+                if self.is_expr_ptr(val_expr) {
+                    let opt_ty = self.get_expr_struct_name(val_expr)
+                    if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                        let unwrapped = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                        self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                        self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                        self.ir.push_str(")\n")
+                        val_reg = unwrapped
+                    } else {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = ptrtoint ptr %")
+                        self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        val_reg = cvt
+                    }
+                }
+
+                self.ir.push_str("  store i64 %")
+                self.ir.push_str(int_to_str(val_reg).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(gep).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+            }
+        } else if k == STMT_IF {
+            let cond_reg = self.emit_expr(sp[stmt_id].expr_id)
+            let bool_reg = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(bool_reg).as_ptr() as str)
+            self.ir.push_str(" = icmp ne i64 %")
+            self.ir.push_str(int_to_str(cond_reg).as_ptr() as str)
+            self.ir.push_str(", 0\n")
+
+            let lbl_then = self.alloc_label()
+            let lbl_else = self.alloc_label()
+            let lbl_merge = self.alloc_label()
+
+            self.ir.push_str("  br i1 %")
+            self.ir.push_str(int_to_str(bool_reg).as_ptr() as str)
+            self.ir.push_str(", label %if.then.")
+            self.ir.push_str(int_to_str(lbl_then).as_ptr() as str)
+            self.ir.push_str(", label %if.else.")
+            self.ir.push_str(int_to_str(lbl_else).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("if.then.")
+            self.ir.push_str(int_to_str(lbl_then).as_ptr() as str)
+            self.ir.push_str(":\n")
+            var shadowed_names = Vec.new()
+            var shadowed_saved = Vec.new()
+            var si = 0usize
+            while si < sp[stmt_id].then_stmts.len {
+                let ts_id = sp[stmt_id].then_stmts.ptr[si]
+                let t_k = sp[ts_id].kind
+                if t_k == STMT_LET || t_k == STMT_VAR {
+                    let sname = sp[ts_id].name.as_ptr() as str
+                    var was_declared = false
+                    var vi = 0usize
+                    while vi < stmt_id {
+                        let vk = sp[vi].kind
+                        if vk == STMT_LET || vk == STMT_VAR {
+                            if str_eq(sp[vi].name.as_ptr() as str, sname) {
+                                was_declared = true
+                                break
+                            }
+                        }
+                        vi = vi + 1usize
+                    }
+                    if was_declared {
+                        shadowed_names.push(String.from_str(sname))
+                        let l_ty = self.get_var_type(sname)
+                        let saved_r = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(saved_r).as_ptr() as str)
+                        self.ir.push_str(" = load ")
+                        self.ir.push_str(l_ty)
+                        self.ir.push_str(", ptr %")
+                        self.ir.push_str(sname)
+                        self.ir.push_str(".addr, align 8\n")
+                        shadowed_saved.push(saved_r)
+                    }
+                }
+                si = si + 1usize
+            }
+
+            let prev_defers_then = self.active_defers.len
+            let prev_drops_then = self.active_drops_var.len
+            var i = 0usize
+            var then_terminates = false
+            while i < sp[stmt_id].then_stmts.len {
+                let sid = sp[stmt_id].then_stmts.ptr[i]
+                if !then_terminates {
+                    self.emit_stmt(sid)
+                    if self.stmt_terminates(sid) {
+                        then_terminates = true
+                    }
+                }
+                i = i + 1usize
+            }
+            if !then_terminates {
+                self.emit_defers_from(prev_defers_then)
+                self.emit_drops_from(prev_drops_then, "")
+                var ri = 0usize
+                while ri < shadowed_names.len {
+                    let sname = shadowed_names.ptr[ri].as_ptr() as str
+                    let saved_r = shadowed_saved.ptr[ri]
+                    let l_ty = self.get_var_type(sname)
+                    self.ir.push_str("  store ")
+                    self.ir.push_str(l_ty)
+                    self.ir.push_str(" %")
+                    self.ir.push_str(int_to_str(saved_r).as_ptr() as str)
+                    self.ir.push_str(", ptr %")
+                    self.ir.push_str(sname)
+                    self.ir.push_str(".addr, align 8\n")
+                    ri = ri + 1usize
+                }
+                self.ir.push_str("  br label %if.merge.")
+                self.ir.push_str(int_to_str(lbl_merge).as_ptr() as str)
+                self.ir.push_str("\n")
+            }
+            self.pop_drops_to(prev_drops_then)
+            while self.active_defers.len > prev_defers_then {
+                let _pop_d = self.active_defers.pop()
+            }
+
+            self.ir.push_str("if.else.")
+            self.ir.push_str(int_to_str(lbl_else).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let prev_defers_else = self.active_defers.len
+            let prev_drops_else = self.active_drops_var.len
+            var j = 0usize
+            var else_terminates = false
+            while j < sp[stmt_id].else_stmts.len {
+                let sid = sp[stmt_id].else_stmts.ptr[j]
+                if !else_terminates {
+                    self.emit_stmt(sid)
+                    if self.stmt_terminates(sid) {
+                        else_terminates = true
+                    }
+                }
+                j = j + 1usize
+            }
+            if !else_terminates {
+                self.emit_defers_from(prev_defers_else)
+                self.emit_drops_from(prev_drops_else, "")
+                self.ir.push_str("  br label %if.merge.")
+                self.ir.push_str(int_to_str(lbl_merge).as_ptr() as str)
+                self.ir.push_str("\n")
+            }
+            self.pop_drops_to(prev_drops_else)
+            while self.active_defers.len > prev_defers_else {
+                let _pop_d = self.active_defers.pop()
+            }
+
+            if !then_terminates || !else_terminates {
+                self.ir.push_str("if.merge.")
+                self.ir.push_str(int_to_str(lbl_merge).as_ptr() as str)
+                self.ir.push_str(":\n")
+            }
+        } else if k == STMT_WHILE {
+            let lbl_cond = self.alloc_label()
+            let lbl_body = self.alloc_label()
+            let lbl_end = self.alloc_label()
+
+            self.loop_cond_labels.push(lbl_cond)
+            self.loop_end_labels.push(lbl_end)
+
+            self.ir.push_str("  br label %while.cond.")
+            self.ir.push_str(int_to_str(lbl_cond).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("while.cond.")
+            self.ir.push_str(int_to_str(lbl_cond).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let cond_reg = self.emit_expr(sp[stmt_id].expr_id)
+            let bool_reg = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(bool_reg).as_ptr() as str)
+            self.ir.push_str(" = icmp ne i64 %")
+            self.ir.push_str(int_to_str(cond_reg).as_ptr() as str)
+            self.ir.push_str(", 0\n")
+            self.ir.push_str("  br i1 %")
+            self.ir.push_str(int_to_str(bool_reg).as_ptr() as str)
+            self.ir.push_str(", label %while.body.")
+            self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
+            self.ir.push_str(", label %while.end.")
+            self.ir.push_str(int_to_str(lbl_end).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("while.body.")
+            self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let prev_defers_while = self.active_defers.len
+            let prev_drops_while = self.active_drops_var.len
+            self.loop_drop_stack.push(prev_drops_while)
+            self.loop_defer_stack.push(prev_defers_while)
+            var i = 0usize
+            var body_terminates = false
+            while i < sp[stmt_id].body_stmts.len {
+                let sid = sp[stmt_id].body_stmts.ptr[i]
+                if !body_terminates {
+                    self.emit_stmt(sid)
+                    if self.stmt_terminates(sid) {
+                        body_terminates = true
+                    }
+                }
+                i = i + 1usize
+            }
+            if !body_terminates {
+                self.emit_defers_from(prev_defers_while)
+                self.emit_drops_from(prev_drops_while, "")
+                self.ir.push_str("  br label %while.cond.")
+                self.ir.push_str(int_to_str(lbl_cond).as_ptr() as str)
+                self.ir.push_str("\n")
+            }
+            self.pop_drops_to(prev_drops_while)
+            while self.active_defers.len > prev_defers_while {
+                let _pop_d = self.active_defers.pop()
+            }
+
+            self.ir.push_str("while.end.")
+            self.ir.push_str(int_to_str(lbl_end).as_ptr() as str)
+            self.ir.push_str(":\n")
+
+            let _pop_cond = self.loop_cond_labels.pop()
+            let _pop_end = self.loop_end_labels.pop()
+            let _pop_drops = self.loop_drop_stack.pop()
+            let _pop_defers = self.loop_defer_stack.pop()
+        } else if k == STMT_FOR_RANGE {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            let range_expr = sp[stmt_id].expr_id
+            let start_reg = self.emit_expr(self.parser.exprs.ptr[range_expr].left)
+            let end_reg = self.emit_expr(self.parser.exprs.ptr[range_expr].right)
+
+            self.ir.push_str("  store i64 %")
+            self.ir.push_str(int_to_str(start_reg).as_ptr() as str)
+            self.ir.push_str(", ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+
+            let lbl_check = self.alloc_label()
+            let lbl_body = self.alloc_label()
+            let lbl_inc = self.alloc_label()
+            let lbl_end = self.alloc_label()
+
+            self.loop_cond_labels.push(lbl_inc)
+            self.loop_end_labels.push(lbl_end)
+
+            self.ir.push_str("  br label %for.check.")
+            self.ir.push_str(int_to_str(lbl_check).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("for.check.")
+            self.ir.push_str(int_to_str(lbl_check).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let cur_val = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(cur_val).as_ptr() as str)
+            self.ir.push_str(" = load i64, ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+
+            let cmp_reg = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(cmp_reg).as_ptr() as str)
+            self.ir.push_str(" = icmp slt i64 %")
+            self.ir.push_str(int_to_str(cur_val).as_ptr() as str)
+            self.ir.push_str(", %")
+            self.ir.push_str(int_to_str(end_reg).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("  br i1 %")
+            self.ir.push_str(int_to_str(cmp_reg).as_ptr() as str)
+            self.ir.push_str(", label %for.body.")
+            self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
+            self.ir.push_str(", label %while.end.")
+            self.ir.push_str(int_to_str(lbl_end).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("for.body.")
+            self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let prev_defers_for = self.active_defers.len
+            let prev_drops_for = self.active_drops_var.len
+            self.loop_drop_stack.push(prev_drops_for)
+            self.loop_defer_stack.push(prev_defers_for)
+            var bi = 0usize
+            var body_terminates = false
+            while bi < sp[stmt_id].body_stmts.len {
+                let sid = sp[stmt_id].body_stmts.ptr[bi]
+                if !body_terminates {
+                    self.emit_stmt(sid)
+                    if self.stmt_terminates(sid) {
+                        body_terminates = true
+                    }
+                }
+                bi = bi + 1usize
+            }
+            if !body_terminates {
+                self.emit_defers_from(prev_defers_for)
+                self.emit_drops_from(prev_drops_for, "")
+                self.ir.push_str("  br label %while.cond.")
+                self.ir.push_str(int_to_str(lbl_inc).as_ptr() as str)
+                self.ir.push_str("\n")
+            }
+            self.pop_drops_to(prev_drops_for)
+            while self.active_defers.len > prev_defers_for {
+                let _pop_d = self.active_defers.pop()
+            }
+
+            self.ir.push_str("while.cond.")
+            self.ir.push_str(int_to_str(lbl_inc).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let prev_val = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(prev_val).as_ptr() as str)
+            self.ir.push_str(" = load i64, ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+            let next_val = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(next_val).as_ptr() as str)
+            self.ir.push_str(" = add i64 %")
+            self.ir.push_str(int_to_str(prev_val).as_ptr() as str)
+            self.ir.push_str(", 1\n")
+            self.ir.push_str("  store i64 %")
+            self.ir.push_str(int_to_str(next_val).as_ptr() as str)
+            self.ir.push_str(", ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+            self.ir.push_str("  br label %for.check.")
+            self.ir.push_str(int_to_str(lbl_check).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("while.end.")
+            self.ir.push_str(int_to_str(lbl_end).as_ptr() as str)
+            self.ir.push_str(":\n")
+
+            let _pop_c = self.loop_cond_labels.pop()
+            let _pop_e = self.loop_end_labels.pop()
+            let _pop_d = self.loop_drop_stack.pop()
+            let _pop_def_r = self.loop_defer_stack.pop()
+        } else if k == STMT_FOR_IN {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            let coll_expr = sp[stmt_id].expr_id
+            var coll_reg = self.emit_expr(coll_expr)
+            if !self.is_expr_ptr(coll_expr) {
+                let cvt = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                self.ir.push_str(" = inttoptr i64 %")
+                self.ir.push_str(int_to_str(coll_reg).as_ptr() as str)
+                self.ir.push_str(" to ptr\n")
+                coll_reg = cvt
+            }
+
+            let lbl_check = self.alloc_label()
+            let lbl_body = self.alloc_label()
+            let lbl_inc = self.alloc_label()
+            let lbl_end = self.alloc_label()
+
+            var idx_name = String.new()
+            idx_name.push_str("_for_idx_")
+            idx_name.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+
+            self.ir.push_str("  store i64 0, ptr %")
+            self.ir.push_str(idx_name.as_ptr() as str)
+            self.ir.push_str(".addr, align 8\n")
+
+            self.loop_cond_labels.push(lbl_inc)
+            self.loop_end_labels.push(lbl_end)
+
+            self.ir.push_str("  br label %for.check.")
+            self.ir.push_str(int_to_str(lbl_check).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("for.check.")
+            self.ir.push_str(int_to_str(lbl_check).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let cur_idx = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(cur_idx).as_ptr() as str)
+            self.ir.push_str(" = load i64, ptr %")
+            self.ir.push_str(idx_name.as_ptr() as str)
+            self.ir.push_str(".addr, align 8\n")
+
+            let len_gep = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(len_gep).as_ptr() as str)
+            self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+            self.ir.push_str(int_to_str(coll_reg).as_ptr() as str)
+            self.ir.push_str(", i64 2\n")
+            let len_val = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(len_val).as_ptr() as str)
+            self.ir.push_str(" = load i64, ptr %")
+            self.ir.push_str(int_to_str(len_gep).as_ptr() as str)
+            self.ir.push_str(", align 8\n")
+
+            let cmp_reg = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(cmp_reg).as_ptr() as str)
+            self.ir.push_str(" = icmp slt i64 %")
+            self.ir.push_str(int_to_str(cur_idx).as_ptr() as str)
+            self.ir.push_str(", %")
+            self.ir.push_str(int_to_str(len_val).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("  br i1 %")
+            self.ir.push_str(int_to_str(cmp_reg).as_ptr() as str)
+            self.ir.push_str(", label %for.body.")
+            self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
+            self.ir.push_str(", label %while.end.")
+            self.ir.push_str(int_to_str(lbl_end).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("for.body.")
+            self.ir.push_str(int_to_str(lbl_body).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let elem_ty = self.get_var_type(vname)
+            let is_ptr = str_eq(elem_ty, "ptr")
+            let is_fl = str_eq(elem_ty, "double")
+            let buf_ptr = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(buf_ptr).as_ptr() as str)
+            self.ir.push_str(" = load ptr, ptr %")
+            self.ir.push_str(int_to_str(coll_reg).as_ptr() as str)
+            self.ir.push_str(", align 8\n")
+            let elem_gep = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(elem_gep).as_ptr() as str)
+            if is_ptr {
+                self.ir.push_str(" = getelementptr inbounds ptr, ptr %")
+            } else if is_fl {
+                self.ir.push_str(" = getelementptr inbounds double, ptr %")
+            } else {
+                self.ir.push_str(" = getelementptr inbounds i64, ptr %")
+            }
+            self.ir.push_str(int_to_str(buf_ptr).as_ptr() as str)
+            self.ir.push_str(", i64 %")
+            self.ir.push_str(int_to_str(cur_idx).as_ptr() as str)
+            self.ir.push_str("\n")
+            let elem_val = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(elem_val).as_ptr() as str)
+            if is_ptr {
+                self.ir.push_str(" = load ptr, ptr %")
+            } else if is_fl {
+                self.ir.push_str(" = load double, ptr %")
+            } else {
+                self.ir.push_str(" = load i64, ptr %")
+            }
+            self.ir.push_str(int_to_str(elem_gep).as_ptr() as str)
+            self.ir.push_str(", align 8\n")
+            if is_ptr {
+                self.ir.push_str("  store ptr %")
+            } else if is_fl {
+                self.ir.push_str("  store double %")
+            } else {
+                self.ir.push_str("  store i64 %")
+            }
+            self.ir.push_str(int_to_str(elem_val).as_ptr() as str)
+            self.ir.push_str(", ptr %")
+            self.ir.push_str(vname)
+            self.ir.push_str(".addr, align 8\n")
+
+            let prev_defers_for_in = self.active_defers.len
+            let prev_drops_for_in = self.active_drops_var.len
+            self.loop_drop_stack.push(prev_drops_for_in)
+            self.loop_defer_stack.push(prev_defers_for_in)
+            var bi = 0usize
+            var body_terminates = false
+            while bi < sp[stmt_id].body_stmts.len {
+                let sid = sp[stmt_id].body_stmts.ptr[bi]
+                if !body_terminates {
+                    self.emit_stmt(sid)
+                    if self.stmt_terminates(sid) {
+                        body_terminates = true
+                    }
+                }
+                bi = bi + 1usize
+            }
+            if !body_terminates {
+                self.emit_defers_from(prev_defers_for_in)
+                self.emit_drops_from(prev_drops_for_in, "")
+                self.ir.push_str("  br label %while.cond.")
+                self.ir.push_str(int_to_str(lbl_inc).as_ptr() as str)
+                self.ir.push_str("\n")
+            }
+            self.pop_drops_to(prev_drops_for_in)
+            while self.active_defers.len > prev_defers_for_in {
+                let _pop_d = self.active_defers.pop()
+            }
+
+            self.ir.push_str("while.cond.")
+            self.ir.push_str(int_to_str(lbl_inc).as_ptr() as str)
+            self.ir.push_str(":\n")
+            let prev_idx = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(prev_idx).as_ptr() as str)
+            self.ir.push_str(" = load i64, ptr %")
+            self.ir.push_str(idx_name.as_ptr() as str)
+            self.ir.push_str(".addr, align 8\n")
+            let next_idx = self.alloc_ssa()
+            self.ir.push_str("  %")
+            self.ir.push_str(int_to_str(next_idx).as_ptr() as str)
+            self.ir.push_str(" = add i64 %")
+            self.ir.push_str(int_to_str(prev_idx).as_ptr() as str)
+            self.ir.push_str(", 1\n")
+            self.ir.push_str("  store i64 %")
+            self.ir.push_str(int_to_str(next_idx).as_ptr() as str)
+            self.ir.push_str(", ptr %")
+            self.ir.push_str(idx_name.as_ptr() as str)
+            self.ir.push_str(".addr, align 8\n")
+            self.ir.push_str("  br label %for.check.")
+            self.ir.push_str(int_to_str(lbl_check).as_ptr() as str)
+            self.ir.push_str("\n")
+
+            self.ir.push_str("while.end.")
+            self.ir.push_str(int_to_str(lbl_end).as_ptr() as str)
+            self.ir.push_str(":\n")
+
+            let _pop_c = self.loop_cond_labels.pop()
+            let _pop_e = self.loop_end_labels.pop()
+            let _pop_d = self.loop_drop_stack.pop()
+            let _pop_def_r = self.loop_defer_stack.pop()
+        } else if k == STMT_BREAK {
+            if self.loop_end_labels.len > 0usize {
+                if self.loop_defer_stack.len > 0usize {
+                    let loop_def_base = self.loop_defer_stack.ptr[self.loop_defer_stack.len - 1usize]
+                    self.emit_defers_from(loop_def_base)
+                }
+                if self.loop_drop_stack.len > 0usize {
+                    let loop_base = self.loop_drop_stack.ptr[self.loop_drop_stack.len - 1usize]
+                    self.emit_drops_from(loop_base, "")
+                }
+                let end_lbl = self.loop_end_labels.ptr[self.loop_end_labels.len - 1usize]
+                self.ir.push_str("  br label %while.end.")
+                self.ir.push_str(int_to_str(end_lbl).as_ptr() as str)
+                self.ir.push_str("\n")
+            } else {
+                self.parser.report_error("E0025", "'break' outside of a loop", sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+            }
+        } else if k == STMT_CONTINUE {
+            if self.loop_cond_labels.len > 0usize {
+                if self.loop_defer_stack.len > 0usize {
+                    let loop_def_base = self.loop_defer_stack.ptr[self.loop_defer_stack.len - 1usize]
+                    self.emit_defers_from(loop_def_base)
+                }
+                if self.loop_drop_stack.len > 0usize {
+                    let loop_base = self.loop_drop_stack.ptr[self.loop_drop_stack.len - 1usize]
+                    self.emit_drops_from(loop_base, "")
+                }
+                let cond_lbl = self.loop_cond_labels.ptr[self.loop_cond_labels.len - 1usize]
+                self.ir.push_str("  br label %while.cond.")
+                self.ir.push_str(int_to_str(cond_lbl).as_ptr() as str)
+                self.ir.push_str("\n")
+            } else {
+                self.parser.report_error("E0025", "'continue' outside of a loop", sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+            }
+        } else if k == STMT_RETURN {
+            if sp[stmt_id].expr_id != 0usize {
+                let ret_eid = sp[stmt_id].expr_id
+                let re = self.parser.exprs.ptr[ret_eid]
+                if re.kind == EXPR_UNARY && re.op == TOK_AMP {
+                    let operand = re.left
+                    if self.parser.exprs.ptr[operand].kind == EXPR_IDENT {
+                        let vname = self.parser.exprs.ptr[operand].str_val.as_ptr() as str
+                        let func = self.parser.functions.ptr[self.current_func_idx]
+                        var is_param = false
+                        var pi = 0usize
+                        while pi < func.param_names.len {
+                            if str_eq(func.param_names.ptr[pi].as_ptr() as str, vname) {
+                                is_param = true
+                                break
+                            }
+                            pi = pi + 1usize
+                        }
+                        if !is_param {
+                            var err = String.new()
+                            err.push_str("cannot return reference to local stack variable '")
+                            err.push_str(vname)
+                            err.push_str("'")
+                            self.parser.report_error("E0028", err.as_ptr() as str, sp[stmt_id].stmt_line, sp[stmt_id].stmt_col)
+                        }
+                    }
+                }
+                var skip_vname = ""
+                if self.parser.exprs.ptr[ret_eid].kind == EXPR_IDENT {
+                    skip_vname = self.parser.exprs.ptr[ret_eid].str_val.as_ptr() as str
+                }
+                let r = self.emit_expr(ret_eid)
+                self.emit_defers_from(0usize)
+                self.emit_drops_from(0usize, skip_vname)
+                let ret_ty = self.current_ret_type.as_ptr() as str
+                if str_eq(ret_ty, "void") {
+                    self.ir.push_str("  ret void\n")
+                } else if str_eq(ret_ty, "i32") {
+                    var cur_r = r + 0
+                    if self.is_expr_ptr(sp[stmt_id].expr_id) {
+                        let opt_ty = self.get_expr_struct_name(sp[stmt_id].expr_id)
+                        if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                            let unwrapped = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            cur_r = unwrapped
+                        } else {
+                            let cvt = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                            self.ir.push_str(" = ptrtoint ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(" to i64\n")
+                            cur_r = cvt
+                        }
+                    }
+                    let tr = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(tr).as_ptr() as str)
+                    self.ir.push_str(" = trunc i64 %")
+                    self.ir.push_str(int_to_str(cur_r).as_ptr() as str)
+                    self.ir.push_str(" to i32\n")
+                    self.ir.push_str("  ret i32 %")
+                    self.ir.push_str(int_to_str(tr).as_ptr() as str)
+                    self.ir.push_str("\n")
+                } else if str_eq(ret_ty, "ptr") {
+                    var final_reg = r + 0
+                    if !self.is_expr_ptr(sp[stmt_id].expr_id) {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = inttoptr i64 %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to ptr\n")
+                        final_reg = cvt
+                    }
+                    self.ir.push_str("  ret ptr %")
+                    self.ir.push_str(int_to_str(final_reg).as_ptr() as str)
+                    self.ir.push_str("\n")
+                } else if str_eq(ret_ty, "float") {
+                    var final_reg = r + 0
+                    if !self.is_expr_float(sp[stmt_id].expr_id) {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = sitofp i64 %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to float\n")
+                        final_reg = cvt
+                    } else if !self.is_expr_f32(sp[stmt_id].expr_id) {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = fptrunc double %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to float\n")
+                        final_reg = cvt
+                    }
+                    self.ir.push_str("  ret float %")
+                    self.ir.push_str(int_to_str(final_reg).as_ptr() as str)
+                    self.ir.push_str("\n")
+                } else if str_eq(ret_ty, "double") {
+                    var final_reg = r + 0
+                    if !self.is_expr_float(sp[stmt_id].expr_id) {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = sitofp i64 %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to double\n")
+                        final_reg = cvt
+                    } else if self.is_expr_f32(sp[stmt_id].expr_id) {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        self.ir.push_str(" = fpext float %")
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to double\n")
+                        final_reg = cvt
+                    }
+                    self.ir.push_str("  ret double %")
+                    self.ir.push_str(int_to_str(final_reg).as_ptr() as str)
+                    self.ir.push_str("\n")
+                } else {
+                    var final_reg = r + 0
+                    if self.is_expr_ptr(sp[stmt_id].expr_id) {
+                        let opt_ty = self.get_expr_struct_name(sp[stmt_id].expr_id)
+                        if str_eq(opt_ty, "Option") || str_starts_with(opt_ty, "Option<") || str_eq(opt_ty, "Result") || str_starts_with(opt_ty, "Result<") {
+                            let unwrapped = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(unwrapped).as_ptr() as str)
+                            self.ir.push_str(" = call i64 @__rad_get_val(ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(")\n")
+                            final_reg = unwrapped
+                        } else {
+                            let cvt = self.alloc_ssa()
+                            self.ir.push_str("  %")
+                            self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                            self.ir.push_str(" = ptrtoint ptr %")
+                            self.ir.push_str(int_to_str(r).as_ptr() as str)
+                            self.ir.push_str(" to i64\n")
+                            final_reg = cvt
+                        }
+                    } else if self.is_expr_float(sp[stmt_id].expr_id) {
+                        let cvt = self.alloc_ssa()
+                        self.ir.push_str("  %")
+                        self.ir.push_str(int_to_str(cvt).as_ptr() as str)
+                        if self.is_expr_f32(sp[stmt_id].expr_id) {
+                            self.ir.push_str(" = fptosi float %")
+                        } else {
+                            self.ir.push_str(" = fptosi double %")
+                        }
+                        self.ir.push_str(int_to_str(r).as_ptr() as str)
+                        self.ir.push_str(" to i64\n")
+                        final_reg = cvt
+                    }
+                    self.ir.push_str("  ret i64 %")
+                    self.ir.push_str(int_to_str(final_reg).as_ptr() as str)
+                    self.ir.push_str("\n")
+                }
+            } else {
+                self.emit_defers_from(0usize)
+                self.emit_drops_from(0usize, "")
+                self.ir.push_str("  ret void\n")
+            }
+        } else if k == STMT_DEFER {
+            self.active_defers.push(stmt_id)
+            var cap_vars = Vec.new()
+            var mi_d = 0usize
+            while mi_d < self.fn_defer_metas.len {
+                if self.fn_defer_metas.ptr[mi_d].stmt_id == stmt_id {
+                    cap_vars = self.fn_defer_metas.ptr[mi_d].cap_vars
+                    break
+                }
+                mi_d = mi_d + 1usize
+            }
+            if cap_vars.len > 0usize {
+                var ci = 0usize
+                while ci < cap_vars.len {
+                    let cname = cap_vars.ptr[ci].as_ptr() as str
+                    let gep_ssa = self.alloc_ssa()
+                    self.ir.push_str("  %")
+                    self.ir.push_str(int_to_str(gep_ssa).as_ptr() as str)
+                    self.ir.push_str(" = getelementptr inbounds [")
+                    self.ir.push_str(int_to_str(cap_vars.len as i32).as_ptr() as str)
+                    self.ir.push_str(" x ptr], ptr %__def_env_")
+                    self.ir.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+                    self.ir.push_str(", i32 0, i64 ")
+                    self.ir.push_str(int_to_str(ci as i32).as_ptr() as str)
+                    self.ir.push_str("\n  store ptr %")
+                    self.ir.push_str(cname)
+                    self.ir.push_str(".addr, ptr %")
+                    self.ir.push_str(int_to_str(gep_ssa).as_ptr() as str)
+                    self.ir.push_str(", align 8\n")
+                    ci = ci + 1usize
+                }
+                self.ir.push_str("  call void @__rad_defer_push(ptr %__def_node_")
+                self.ir.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+                self.ir.push_str(", ptr @__rad_defer_thunk_")
+                self.ir.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+                self.ir.push_str(", ptr %__def_env_")
+                self.ir.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+                self.ir.push_str(")\n")
+            } else {
+                self.ir.push_str("  call void @__rad_defer_push(ptr %__def_node_")
+                self.ir.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+                self.ir.push_str(", ptr @__rad_defer_thunk_")
+                self.ir.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+                self.ir.push_str(", ptr null)\n")
+            }
+        } else if k == STMT_EXPR {
+            self.emit_expr(sp[stmt_id].expr_id)
+        }
+    }
+
+    fn allocate_local_var(var self, name: str) {
+        var found = false
+        var i = 0usize
+        while i < self.allocated_vars.len {
+            if str_eq(self.allocated_vars.ptr[i].as_ptr() as str, name) {
+                found = true
+                break
+            }
+            i = i + 1usize
+        }
+        if !found {
+            self.allocated_vars.push(String.from_str(name))
+            let llvm_ty = self.get_var_type(name)
+            self.fn_allocas.push_str("  %")
+            self.fn_allocas.push_str(name)
+            self.fn_allocas.push_str(".addr = alloca ")
+            self.fn_allocas.push_str(llvm_ty)
+            self.fn_allocas.push_str(", align 8\n")
+        }
+    }
+
+    fn collect_allocas_stmt(var self, stmt_id: usize) {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_LET || k == STMT_VAR {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            self.allocate_local_var(vname)
+        } else if k == STMT_IF {
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                self.collect_allocas_stmt(sp[stmt_id].then_stmts.ptr[i])
+                i = i + 1usize
+            }
+            i = 0usize
+            while i < sp[stmt_id].else_stmts.len {
+                self.collect_allocas_stmt(sp[stmt_id].else_stmts.ptr[i])
+                i = i + 1usize
+            }
+        } else if k == STMT_WHILE {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_allocas_stmt(sp[stmt_id].body_stmts.ptr[i])
+                i = i + 1usize
+            }
+        } else if k == STMT_FOR_RANGE {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            self.allocate_local_var(vname)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_allocas_stmt(sp[stmt_id].body_stmts.ptr[i])
+                i = i + 1usize
+            }
+        } else if k == STMT_FOR_IN {
+            let vname = sp[stmt_id].name.as_ptr() as str
+            self.allocate_local_var(vname)
+            var idx_name = String.new()
+            idx_name.push_str("_for_idx_")
+            idx_name.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+            self.allocate_local_var(idx_name.as_ptr() as str)
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                self.collect_allocas_stmt(sp[stmt_id].body_stmts.ptr[i])
+                i = i + 1usize
+            }
+        } else if k == STMT_DEFER {
+            if !self.has_defer_meta(stmt_id) {
+                self.fn_allocas.push_str("  %__def_node_")
+                self.fn_allocas.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+                self.fn_allocas.push_str(" = alloca [24 x i8], align 8\n")
+
+                var outer_vars = Vec.new()
+                var avi = 0usize
+                while avi < self.allocated_vars.len {
+                    let av = self.allocated_vars.ptr[avi].as_ptr() as str
+                    if !self.vec_contains_str(outer_vars, av) {
+                        outer_vars.push(String.from_str(av))
+                    }
+                    avi = avi + 1usize
+                }
+                if self.current_func_idx < self.parser.functions.len {
+                    let cur_fn = self.parser.functions.ptr[self.current_func_idx]
+                    var bi_d = 0usize
+                    while bi_d < cur_fn.body.len {
+                        self.collect_decl_vars_stmt(cur_fn.body.ptr[bi_d], outer_vars, true)
+                        bi_d = bi_d + 1usize
+                    }
+                }
+                let inner_decls = Vec.new()
+                var idi = 0usize
+                while idi < sp[stmt_id].body_stmts.len {
+                    self.collect_decl_vars_stmt(sp[stmt_id].body_stmts.ptr[idi], inner_decls, true)
+                    idi = idi + 1usize
+                }
+                let caps = Vec.new()
+                var sci = 0usize
+                while sci < sp[stmt_id].body_stmts.len {
+                    self.scan_defer_caps_stmt(sp[stmt_id].body_stmts.ptr[sci], outer_vars, inner_decls, caps)
+                    sci = sci + 1usize
+                }
+                if caps.len > 0usize {
+                    self.fn_allocas.push_str("  %__def_env_")
+                    self.fn_allocas.push_str(int_to_str(stmt_id as i32).as_ptr() as str)
+                    self.fn_allocas.push_str(" = alloca [")
+                    self.fn_allocas.push_str(int_to_str(caps.len as i32).as_ptr() as str)
+                    self.fn_allocas.push_str(" x ptr], align 8\n")
+                }
+                self.fn_defer_metas.push(DeferThunkMeta { stmt_id: stmt_id, cap_vars: caps })
+                self.pending_defer_thunks.push(stmt_id)
+            }
+        }
+    }
+
+}

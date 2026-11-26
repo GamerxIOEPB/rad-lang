@@ -1,0 +1,10 @@
+[package]
+name = "rad-zk"
+version = "0.1.0"
+description = "Zero-knowledge succinct proofs and polynomial commitment engine in pure Rad"
+authors = ["Rad Authors"]
+license = "MIT"
+repository = "https://github.com/GamerxIOEPB/rad-lib"
+
+[lib]
+path = "src/lib.rad"

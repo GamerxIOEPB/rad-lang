@@ -53,7 +53,15 @@ RADC_SRCS := \
     $(RADC_DIR)/token.rad \
     $(RADC_DIR)/ast.rad \
     $(RADC_DIR)/parser.rad \
+    $(RADC_DIR)/parser_types.rad \
+    $(RADC_DIR)/parser_expr.rad \
+    $(RADC_DIR)/parser_stmt.rad \
+    $(RADC_DIR)/parser_decl.rad \
     $(RADC_DIR)/codegen.rad \
+    $(RADC_DIR)/codegen_types.rad \
+    $(RADC_DIR)/codegen_expr.rad \
+    $(RADC_DIR)/codegen_stmt.rad \
+    $(RADC_DIR)/codegen_sema.rad \
     $(RADC_DIR)/linker.rad
 
 RAD_SRCS := \
@@ -70,7 +78,7 @@ BIN_DIR := bin
 BIN_RADC := $(BIN_DIR)/radc
 BIN_RAD  := $(BIN_DIR)/rad
 
-.PHONY: all radc rad dist install clean help check-radc test quality-test
+.PHONY: all radc rad dist install clean help check-radc test quality-test sync-docs sysroot self-host-check
 
 all: check-radc $(BIN_RADC) $(BIN_RAD)
 	@echo ""
@@ -116,6 +124,9 @@ $(BIN_RAD): $(RAD_SRCS) $(BIN_RADC)
 quality-test: $(BIN_RADC)
 	@RADC="$(abspath $(BIN_RADC))" bash tests/quality/run.sh
 
+self-host-check: $(BIN_RADC)
+	@RADC="$(abspath $(BIN_RADC))" bash scripts/verify_self_hosting.sh
+
 test: $(BIN_RADC)
 	@RADC="$(abspath $(BIN_RADC))" bash tests/quality/run_all.sh
 
@@ -137,6 +148,19 @@ arcade: $(BIN_RADC)
 
 dist:
 	@bash scripts/build_distribution.sh
+
+sysroot:
+	@bash scripts/fetch_sysroot.sh
+
+sync-docs:
+	@echo "==> Synchronizing docs/docs/*.md to skills references..."
+	@mkdir -p extensions/skills/rad/references
+	@cp -f docs/docs/*.md extensions/skills/rad/references/
+	@if [ -d "$(HOME)/.gemini/antigravity-cli/skills/rad/references" ]; then \
+		cp -f docs/docs/*.md "$(HOME)/.gemini/antigravity-cli/skills/rad/references/"; \
+	fi
+	@python3 -c "import os, json; d='docs/docs'; fs=sorted([f for f in os.listdir(d) if f.endswith('.md')]); data={f: open(os.path.join(d, f)).read() for f in fs}; open('docs/docs-data.js', 'w').write('window.RAD_DOCS = ' + json.dumps(data, indent=2) + ';\n')"
+	@echo "  [✓] Documentation synchronized across portal and skills."
 
 install: all
 	@echo "==> Installing Rad toolchain to $(PREFIX)..."

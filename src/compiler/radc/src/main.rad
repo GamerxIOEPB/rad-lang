@@ -6,7 +6,15 @@ import util;
 import token;
 import ast;
 import parser;
+import parser_types;
+import parser_expr;
+import parser_stmt;
+import parser_decl;
 import codegen;
+import codegen_types;
+import codegen_expr;
+import codegen_stmt;
+import codegen_sema;
 import linker;
 
 extern "C" {

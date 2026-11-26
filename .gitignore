@@ -26,6 +26,10 @@ tests/demos/wayland_gui/*.ll
 tests/demos/wayland_gui/*.bmp
 tests/demos/wayland_gui/rad_wayland_demo
 
+# Build artifacts & intermediate files
+*.ll
+*.vsix
+
 # Python cache
 __pycache__/
 *.pyc

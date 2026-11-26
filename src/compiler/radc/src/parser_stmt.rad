@@ -1,0 +1,1368 @@
+// radc/src/parser_stmt.rad - Statement Parsing Pass
+import util;
+import token;
+import ast;
+
+impl Parser {
+    fn parse_match_to_stmts(var self, target_var: String, is_return: bool) -> usize {
+        let tok_l = self.cur_tok_line()
+        let tok_c = self.cur_tok_col()
+        self.advance()
+        var target_expr = self.parse_expr(0)
+        var match_target_stmts = Vec.new()
+        if self.exprs.ptr[target_expr].kind != EXPR_IDENT {
+            self.tup_tmp_counter = self.tup_tmp_counter + 1i64
+            var tmp_name = String.new()
+            tmp_name.push_str("__rad_match_target_")
+            tmp_name.push_str(int_to_str(self.tup_tmp_counter as i32).as_ptr() as str)
+            let tmp_st = self.add_stmt(Stmt {
+                kind: STMT_LET,
+                name: tmp_name,
+                type_name: String.new(),
+                expr_id: target_expr,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: Vec.new(),
+                stmt_line: tok_l,
+                stmt_col: tok_c,
+            })
+            match_target_stmts.push(tmp_st)
+            target_expr = self.add_expr(Expr {
+                kind: EXPR_IDENT,
+                op: 0,
+                int_val: 0i64,
+                str_val: tmp_name,
+                target_type: String.new(),
+                left: 0usize,
+                right: 0usize,
+                args: Vec.new(),
+                field_name: String.new(),
+                expr_line: tok_l,
+                expr_col: tok_c,
+            })
+        }
+        self.expect_tok(TOK_LBRACE, "{")
+        var arms = Vec.new()
+        var seen_wildcard = false
+        while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+            let arm_l = self.cur_tok_line()
+            let arm_c = self.cur_tok_col()
+            var is_wild = false
+            var cond_id = 0usize
+            var bound_name = String.new()
+            var is_payload_arm = false
+            var is_tuple_pat = false
+            var tuple_bound_names = Vec.new()
+            var tuple_bound_exprs = Vec.new()
+            if self.peek_kind() == TOK_IDENT && str_eq(self.peek_text(), "_") {
+                is_wild = true
+                self.advance()
+            } else {
+                if seen_wildcard {
+                    self.report_error_span("E0030", "wildcard '_' pattern must be the last arm in a match expression", arm_l, arm_c, 1i64)
+                }
+                let pat_expr = self.parse_expr(0)
+                let pep = self.exprs.ptr
+                if pep[pat_expr].kind == EXPR_TUPLE {
+                    is_tuple_pat = true
+                    var tuple_cond = 0usize
+                    var ti = 0usize
+                    while ti < pep[pat_expr].args.len {
+                        let targ = pep[pat_expr].args.ptr[ti]
+                        var idx_str = String.new()
+                        idx_str.push_str(int_to_str(ti as i32).as_ptr() as str)
+                        let fld_e = self.add_expr(Expr {
+                            kind: EXPR_FIELD_ACCESS,
+                            op: 0,
+                            int_val: 0i64,
+                            str_val: String.new(),
+                            target_type: String.new(),
+                            left: target_expr,
+                            right: 0usize,
+                            args: Vec.new(),
+                            field_name: idx_str,
+                            expr_line: arm_l,
+                            expr_col: arm_c,
+                        })
+                        if pep[targ].kind != EXPR_IDENT {
+                            let elem_cmp = self.add_expr(Expr {
+                                kind: EXPR_BINARY,
+                                op: TOK_EQEQ,
+                                int_val: 0i64,
+                                str_val: String.new(),
+                                target_type: String.from_str("bool"),
+                                left: fld_e,
+                                right: targ,
+                                args: Vec.new(),
+                                field_name: String.new(),
+                                expr_line: arm_l,
+                                expr_col: arm_c,
+                            })
+                            if tuple_cond == 0usize {
+                                tuple_cond = elem_cmp
+                            } else {
+                                tuple_cond = self.add_expr(Expr {
+                                    kind: EXPR_BINARY,
+                                    op: TOK_ANDAND,
+                                    int_val: 0i64,
+                                    str_val: String.new(),
+                                    target_type: String.from_str("bool"),
+                                    left: tuple_cond,
+                                    right: elem_cmp,
+                                    args: Vec.new(),
+                                    field_name: String.new(),
+                                    expr_line: arm_l,
+                                    expr_col: arm_c,
+                                })
+                            }
+                        } else {
+                            let targ_name = pep[targ].str_val.as_ptr() as str
+                            if !str_eq(targ_name, "_") {
+                                tuple_bound_names.push(pep[targ].str_val)
+                                tuple_bound_exprs.push(fld_e)
+                            }
+                        }
+                        ti = ti + 1usize
+                    }
+                    cond_id = tuple_cond
+                } else {
+                    var or_alts = Vec.new()
+                    self.collect_or_patterns(pat_expr, or_alts)
+                    if or_alts.len > 1usize {
+                        var combined_cond = 0usize
+                        var oi = 0usize
+                        while oi < or_alts.len {
+                            let alt_expr = or_alts.ptr[oi]
+                            let alt_cmp = self.build_match_alt_cond(alt_expr, target_expr, arm_l, arm_c)
+                            if combined_cond == 0usize {
+                                combined_cond = alt_cmp
+                            } else {
+                                combined_cond = self.add_expr(Expr {
+                                    kind: EXPR_BINARY,
+                                    op: TOK_OROR,
+                                    int_val: 0i64,
+                                    str_val: String.new(),
+                                    target_type: String.from_str("bool"),
+                                    left: combined_cond,
+                                    right: alt_cmp,
+                                    args: Vec.new(),
+                                    field_name: String.new(),
+                                    expr_line: arm_l,
+                                    expr_col: arm_c,
+                                })
+                            }
+                            oi = oi + 1usize
+                        }
+                        cond_id = combined_cond
+                    } else {
+                        var is_some_call = false
+                        var is_err_call = false
+                        var is_user_payload = false
+                        var call_arg_id = 0usize
+                        if pep[pat_expr].kind == EXPR_METHOD_CALL && pep[pat_expr].args.len == 1usize {
+                            let mname = pep[pat_expr].str_val.as_ptr() as str
+                            call_arg_id = pep[pat_expr].args.ptr[0usize]
+                            if str_eq(mname, "Some") || str_eq(mname, "Ok") {
+                                is_some_call = true
+                            } else if str_eq(mname, "Err") {
+                                is_err_call = true
+                            } else {
+                                is_user_payload = true
+                            }
+                        } else if pep[pat_expr].kind == EXPR_CALL && pep[pat_expr].args.len == 1usize {
+                            let callee = pep[pat_expr].left
+                            var cname = ""
+                            if pep[callee].kind == EXPR_IDENT {
+                                cname = pep[callee].str_val.as_ptr() as str
+                            } else if pep[callee].kind == EXPR_FIELD_ACCESS {
+                                cname = pep[callee].field_name.as_ptr() as str
+                            }
+                            if str_len(cname) > 0usize {
+                                call_arg_id = pep[pat_expr].args.ptr[0usize]
+                                if str_eq(cname, "Some") || str_eq(cname, "Ok") {
+                                    is_some_call = true
+                                } else if str_eq(cname, "Err") {
+                                    is_err_call = true
+                                } else {
+                                    is_user_payload = true
+                                }
+                            }
+                        }
+                        if (is_some_call || is_err_call) && self.exprs.ptr[call_arg_id].kind == EXPR_IDENT {
+                            let a_name = self.exprs.ptr[call_arg_id].str_val.as_ptr() as str
+                            var is_const = false
+                            var ci = 0usize
+                            while ci < self.const_names.len {
+                                if str_eq(self.const_names.ptr[ci].as_ptr() as str, a_name) {
+                                    is_const = true
+                                    break
+                                }
+                                ci = ci + 1usize
+                            }
+                            if !is_const && !str_eq(a_name, "_") {
+                                bound_name = self.exprs.ptr[call_arg_id].str_val
+                                is_payload_arm = true
+                            }
+                        } else if is_user_payload && self.exprs.ptr[call_arg_id].kind == EXPR_IDENT {
+                            let a_name = self.exprs.ptr[call_arg_id].str_val.as_ptr() as str
+                            if !str_eq(a_name, "_") {
+                                bound_name = self.exprs.ptr[call_arg_id].str_val
+                                is_payload_arm = false
+                            }
+                        } else if pep[pat_expr].kind == EXPR_IDENT {
+                            var next_is_if = false
+                            if self.peek_kind() == TOK_IF || (self.peek_kind() == TOK_IDENT && str_eq(self.peek_text(), "if")) {
+                                next_is_if = true
+                            }
+                            if next_is_if {
+                                let a_name = pep[pat_expr].str_val.as_ptr() as str
+                                var is_const = false
+                                if str_eq(a_name, "None") || str_eq(a_name, "Some") || str_eq(a_name, "Ok") || str_eq(a_name, "Err") {
+                                    is_const = true
+                                }
+                                let p_an = a_name as *raw u8
+                                let a_len = str_len(a_name)
+                                var vi = 0usize
+                                while vi < a_len {
+                                    if p_an[vi] == 58u8 {
+                                        is_const = true
+                                        break
+                                    }
+                                    vi = vi + 1usize
+                                }
+                                var ci = 0usize
+                                while ci < self.const_names.len {
+                                    if str_eq(self.const_names.ptr[ci].as_ptr() as str, a_name) {
+                                        is_const = true
+                                        break
+                                    }
+                                    ci = ci + 1usize
+                                }
+                                if !is_const && !str_eq(a_name, "_") {
+                                    bound_name = pep[pat_expr].str_val
+                                    is_payload_arm = false
+                                    cond_id = 0usize
+                                }
+                            }
+                        }
+                        if pep[pat_expr].kind != EXPR_IDENT || cond_id != 0usize || str_len(bound_name.as_ptr() as str) == 0usize {
+                            if cond_id == 0usize {
+                                cond_id = self.build_match_alt_cond(pat_expr, target_expr, arm_l, arm_c)
+                            }
+                        }
+                    }
+                }
+            }
+            var has_guard = false
+            var guard_expr = 0usize
+            if self.peek_kind() == TOK_IF || (self.peek_kind() == TOK_IDENT && str_eq(self.peek_text(), "if")) {
+                has_guard = true
+                self.advance()
+                guard_expr = self.parse_expr(0)
+            }
+            if self.peek_kind() == TOK_FAT_ARROW {
+                self.advance()
+            } else if self.peek_kind() == TOK_EQ {
+                self.advance()
+                if self.peek_kind() == TOK_GT {
+                    self.advance()
+                }
+            }
+
+            if is_wild {
+                if has_guard {
+                    is_wild = false
+                    cond_id = guard_expr
+                } else {
+                    if seen_wildcard {
+                        self.report_error_span("E0030", "wildcard '_' pattern must be the last arm in a match expression", arm_l, arm_c, 1i64)
+                    }
+                    seen_wildcard = true
+                }
+            } else {
+                if seen_wildcard {
+                    self.report_error_span("E0030", "wildcard '_' pattern must be the last arm in a match expression", arm_l, arm_c, 1i64)
+                }
+            }
+
+            var bound_expr = target_expr
+            if is_payload_arm {
+                var args_g = Vec.new()
+                args_g.push(target_expr)
+                bound_expr = self.add_expr(Expr {
+                    kind: EXPR_CALL,
+                    op: 0,
+                    int_val: 0i64,
+                    str_val: String.new(),
+                    target_type: String.from_str("i64"),
+                    left: self.add_expr(Expr {
+                        kind: EXPR_IDENT,
+                        op: 0,
+                        int_val: 0i64,
+                        str_val: String.from_str("__rad_get_val"),
+                        target_type: String.new(),
+                        left: 0usize,
+                        right: 0usize,
+                        args: Vec.new(),
+                        field_name: String.new(),
+                        expr_line: arm_l,
+                        expr_col: arm_c,
+                    }),
+                    right: 0usize,
+                    args: args_g,
+                    field_name: String.new(),
+                    expr_line: arm_l,
+                    expr_col: arm_c,
+                })
+            }
+
+            if has_guard && !is_wild {
+                var cloned_guard = guard_expr
+                if str_len(bound_name.as_ptr() as str) > 0usize {
+                    cloned_guard = self.clone_expr_replace(guard_expr, bound_name.as_ptr() as str, bound_expr)
+                }
+                if is_tuple_pat {
+                    var tbi = 0usize
+                    while tbi < tuple_bound_names.len {
+                        cloned_guard = self.clone_expr_replace(cloned_guard, tuple_bound_names.ptr[tbi].as_ptr() as str, tuple_bound_exprs.ptr[tbi])
+                        tbi = tbi + 1usize
+                    }
+                }
+                if cond_id == 0usize {
+                    cond_id = cloned_guard
+                } else {
+                    cond_id = self.add_expr(Expr {
+                        kind: EXPR_BINARY,
+                        op: TOK_ANDAND,
+                        int_val: 0i64,
+                        str_val: String.new(),
+                        target_type: String.from_str("bool"),
+                        left: cond_id,
+                        right: cloned_guard,
+                        args: Vec.new(),
+                        field_name: String.new(),
+                        expr_line: arm_l,
+                        expr_col: arm_c,
+                    })
+                }
+            }
+
+            if cond_id == 0usize && !is_wild {
+                let one_a = self.add_expr(Expr {
+                    kind: EXPR_INT,
+                    op: 0,
+                    int_val: 1i64,
+                    str_val: String.from_str("1"),
+                    target_type: String.from_str("i64"),
+                    left: 0usize,
+                    right: 0usize,
+                    args: Vec.new(),
+                    field_name: String.new(),
+                    expr_line: arm_l,
+                    expr_col: arm_c,
+                })
+                let one_b = self.add_expr(Expr {
+                    kind: EXPR_INT,
+                    op: 0,
+                    int_val: 1i64,
+                    str_val: String.from_str("1"),
+                    target_type: String.from_str("i64"),
+                    left: 0usize,
+                    right: 0usize,
+                    args: Vec.new(),
+                    field_name: String.new(),
+                    expr_line: arm_l,
+                    expr_col: arm_c,
+                })
+                cond_id = self.add_expr(Expr {
+                    kind: EXPR_BINARY,
+                    op: TOK_EQEQ,
+                    int_val: 0i64,
+                    str_val: String.new(),
+                    target_type: String.from_str("bool"),
+                    left: one_a,
+                    right: one_b,
+                    args: Vec.new(),
+                    field_name: String.new(),
+                    expr_line: arm_l,
+                    expr_col: arm_c,
+                })
+            }
+
+            var arm_stmts = Vec.new()
+            if !is_wild {
+                if self.exprs.ptr[pat_expr].kind == EXPR_TUPLE {
+                    var bi = 0usize
+                    while bi < self.exprs.ptr[pat_expr].args.len {
+                        let b_arg = self.exprs.ptr[pat_expr].args.ptr[bi]
+                        if self.exprs.ptr[b_arg].kind == EXPR_IDENT {
+                            let id_s = self.exprs.ptr[b_arg].str_val.as_ptr() as str
+                            if !str_eq(id_s, "_") {
+                                var idx_str = String.new()
+                                idx_str.push_str(int_to_str(bi as i32).as_ptr() as str)
+                                let elem_access = self.add_expr(Expr {
+                                    kind: EXPR_FIELD_ACCESS,
+                                    op: 0,
+                                    int_val: 0i64,
+                                    str_val: String.new(),
+                                    target_type: String.new(),
+                                    left: target_expr,
+                                    right: 0usize,
+                                    args: Vec.new(),
+                                    field_name: idx_str,
+                                    expr_line: arm_l,
+                                    expr_col: arm_c,
+                                })
+                                let tup_binding = self.add_stmt(Stmt {
+                                    kind: STMT_LET,
+                                    name: self.exprs.ptr[b_arg].str_val,
+                                    type_name: String.new(),
+                                    expr_id: elem_access,
+                                    index_expr: 0usize,
+                                    then_stmts: Vec.new(),
+                                    else_stmts: Vec.new(),
+                                    body_stmts: Vec.new(),
+                                    stmt_line: arm_l,
+                                    stmt_col: arm_c,
+                                })
+                                arm_stmts.push(tup_binding)
+                            }
+                        }
+                        bi = bi + 1usize
+                    }
+                }
+            }
+            if str_len(bound_name.as_ptr() as str) > 0usize {
+                let let_stmt = self.add_stmt(Stmt {
+                    kind: STMT_LET,
+                    name: String.from_str(bound_name.as_ptr() as str),
+                    type_name: String.new(),
+                    expr_id: bound_expr,
+                    index_expr: 1usize,
+                    then_stmts: Vec.new(),
+                    else_stmts: Vec.new(),
+                    body_stmts: Vec.new(),
+                    stmt_line: arm_l,
+                    stmt_col: arm_c,
+                })
+                arm_stmts.push(let_stmt)
+            }
+            if self.match_tok(TOK_LBRACE) {
+                let bstmts = self.parse_block_stmts()
+                var bi = 0usize
+                while bi < bstmts.len {
+                    arm_stmts.push(bstmts.ptr[bi])
+                    bi = bi + 1usize
+                }
+                let _disc = self.expect_tok(TOK_RBRACE, "}")
+                if is_return && arm_stmts.len > 0usize {
+                    let last_idx = arm_stmts.len - 1usize
+                    let last_st = arm_stmts.ptr[last_idx]
+                    if self.stmts.ptr[last_st].kind == STMT_EXPR {
+                        self.stmts.ptr[last_st].kind = STMT_RETURN
+                    }
+                } else if target_var.len() > 0usize && arm_stmts.len > 0usize {
+                    let last_idx = arm_stmts.len - 1usize
+                    let last_st = arm_stmts.ptr[last_idx]
+                    if self.stmts.ptr[last_st].kind == STMT_EXPR {
+                        self.stmts.ptr[last_st].kind = STMT_ASSIGN
+                        self.stmts.ptr[last_st].name = String.from_str(target_var.as_ptr() as str)
+                    }
+                }
+            } else {
+                let st = self.parse_stmt()
+                if is_return {
+                    if self.stmts.ptr[st].kind == STMT_EXPR {
+                        self.stmts.ptr[st].kind = STMT_RETURN
+                    }
+                } else if target_var.len() > 0usize {
+                    if self.stmts.ptr[st].kind == STMT_EXPR {
+                        self.stmts.ptr[st].kind = STMT_ASSIGN
+                        self.stmts.ptr[st].name = String.from_str(target_var.as_ptr() as str)
+                    }
+                }
+                arm_stmts.push(st)
+                self.match_tok(TOK_SEMI)
+            }
+            self.match_tok(TOK_COMMA)
+            arms.push(MatchArm {
+                is_wildcard: is_wild,
+                cond_expr: cond_id,
+                bound_var: bound_name,
+                stmts: arm_stmts,
+            })
+        }
+        self.expect_tok(TOK_RBRACE, "}")
+        var current_else = Vec.new()
+        var ai = arms.len
+        while ai > 0usize {
+            ai = ai - 1usize
+            let arm = arms.ptr[ai]
+            if arm.is_wildcard && ai == arms.len - 1usize {
+                current_else = arm.stmts
+            } else {
+                let if_stmt = self.add_stmt(Stmt {
+                    kind: STMT_IF,
+                    name: String.new(),
+                    type_name: String.new(),
+                    expr_id: arm.cond_expr,
+                    index_expr: 0usize,
+                    then_stmts: arm.stmts,
+                    else_stmts: current_else,
+                    body_stmts: Vec.new(),
+                    stmt_line: self.cur_tok_line(),
+                    stmt_col: self.cur_tok_col(),
+                })
+                var new_else = Vec.new()
+                new_else.push(if_stmt)
+                current_else = new_else
+            }
+        }
+        if arms.len == 1usize && arms.ptr[0usize].is_wildcard {
+            let true_expr = self.add_expr(Expr {
+                kind: EXPR_INT,
+                op: 0,
+                int_val: 1i64,
+                str_val: String.from_str("1"),
+                target_type: String.from_str("bool"),
+                left: 0usize,
+                right: 0usize,
+                args: Vec.new(),
+                field_name: String.new(),
+                expr_line: self.cur_tok_line(),
+                expr_col: self.cur_tok_col(),
+            })
+            let if_stmt = self.add_stmt(Stmt {
+                kind: STMT_IF,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: true_expr,
+                index_expr: 0usize,
+                then_stmts: current_else,
+                else_stmts: Vec.new(),
+                body_stmts: Vec.new(),
+                stmt_line: self.cur_tok_line(),
+                stmt_col: self.cur_tok_col(),
+            })
+            var mti = 0usize
+            while mti < match_target_stmts.len {
+                self.extra_stmts.push(match_target_stmts.ptr[mti])
+                mti = mti + 1usize
+            }
+            return if_stmt
+        }
+        var res_id = 0usize
+        if current_else.len > 0usize {
+            res_id = current_else.ptr[0usize]
+        }
+        var mti = 0usize
+        while mti < match_target_stmts.len {
+            self.extra_stmts.push(match_target_stmts.ptr[mti])
+            mti = mti + 1usize
+        }
+        return res_id
+    }
+
+    fn parse_stmt(var self) -> usize {
+        let start_pos = self.pos
+        var res_id = 0usize
+        if self.check_lex_error() {
+            return 0usize
+        }
+        let stmt_l = self.cur_tok_line()
+        let stmt_c = self.cur_tok_col()
+        let k = self.peek_kind()
+        if k == TOK_LBRACE {
+            self.advance() // skip '{'
+            let bstmts = self.parse_block_stmts()
+            self.expect_tok(TOK_RBRACE, "}")
+            let true_expr = self.add_expr(Expr {
+                kind: EXPR_INT,
+                op: 0,
+                int_val: 1i64,
+                str_val: String.from_str("1"),
+                target_type: String.from_str("bool"),
+                left: 0usize,
+                right: 0usize,
+                args: Vec.new(),
+                field_name: String.new(),
+                expr_line: stmt_l,
+                expr_col: stmt_c,
+            })
+            return self.add_stmt(Stmt {
+                kind: STMT_IF,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: true_expr,
+                index_expr: 0usize,
+                then_stmts: bstmts,
+                else_stmts: Vec.new(),
+                body_stmts: Vec.new(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
+            })
+        }
+        if str_eq(self.peek_text(), "const") {
+            self.advance() // skip 'const'
+            let c_name = String.from_str(self.peek_text())
+            self.match_tok(TOK_IDENT)
+            var c_ty = String.new()
+            if self.match_tok(TOK_COLON) {
+                c_ty = self.parse_type_str()
+            }
+            self.match_tok(TOK_EQ)
+            let init_id = self.parse_expr(0)
+            self.match_tok(TOK_SEMI)
+            return self.add_stmt(Stmt {
+                kind: STMT_LET,
+                name: c_name,
+                type_name: c_ty,
+                expr_id: init_id,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: Vec.new(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
+            })
+        }
+        if k == TOK_LET || k == TOK_VAR {
+            var s_kind = STMT_LET + 0
+            if k == TOK_VAR {
+                s_kind = STMT_VAR
+            }
+            if self.peek_next_kind() == TOK_LPAREN {
+                self.advance() // skip let / var
+                self.advance() // skip (
+                var names = Vec.new()
+                var elem_types = Vec.new()
+                while self.peek_kind() != TOK_RPAREN && self.peek_kind() != TOK_EOF {
+                    let id_name = String.from_str(self.peek_text())
+                    self.match_ident_or_kw()
+                    names.push(id_name)
+                    var elem_ty = String.new()
+                    if self.match_tok(TOK_COLON) {
+                        elem_ty = self.parse_type_str()
+                    }
+                    elem_types.push(elem_ty)
+                    if !self.match_tok(TOK_COMMA) {
+                        break
+                    }
+                }
+                self.expect_tok(TOK_RPAREN, ")")
+                var tuple_annotated_type = String.new()
+                if self.match_tok(TOK_COLON) {
+                    tuple_annotated_type = self.parse_type_str()
+                }
+                self.expect_tok(TOK_EQ, "=")
+                let init_expr = self.parse_expr(0)
+
+                self.tup_tmp_counter = self.tup_tmp_counter + 1i64
+                var tmp_name = String.new()
+                tmp_name.push_str("__tup_tmp_")
+                tmp_name.push_str(int_to_str(self.tup_tmp_counter as i32).as_ptr() as str)
+
+                let tmp_let = self.add_stmt(Stmt {
+                    kind: STMT_LET,
+                    name: tmp_name,
+                    type_name: tuple_annotated_type,
+                    expr_id: init_expr,
+                    index_expr: 0usize,
+                    then_stmts: Vec.new(),
+                    else_stmts: Vec.new(),
+                    body_stmts: Vec.new(),
+                    stmt_line: stmt_l,
+                    stmt_col: stmt_c,
+                })
+                self.extra_stmts.push(tmp_let)
+
+                var ni = 0usize
+                var last_st = 0usize
+                while ni < names.len {
+                    let ident_e = self.add_expr(Expr {
+                        kind: EXPR_IDENT,
+                        op: 0,
+                        int_val: 0i64,
+                        str_val: String.from_str(tmp_name.as_ptr() as str),
+                        target_type: String.new(),
+                        left: 0usize,
+                        right: 0usize,
+                        args: Vec.new(),
+                        field_name: String.new(),
+                        expr_line: stmt_l,
+                        expr_col: stmt_c,
+                    })
+                    var idx_str = String.new()
+                    idx_str.push_str(int_to_str(ni as i32).as_ptr() as str)
+                    let access_e = self.add_expr(Expr {
+                        kind: EXPR_FIELD_ACCESS,
+                        op: 0,
+                        int_val: 0i64,
+                        str_val: String.new(),
+                        target_type: String.new(),
+                        left: ident_e,
+                        right: 0usize,
+                        args: Vec.new(),
+                        field_name: idx_str,
+                        expr_line: stmt_l,
+                        expr_col: stmt_c,
+                    })
+                    var elem_ty = String.new()
+                    if ni < elem_types.len {
+                        elem_ty = elem_types.ptr[ni]
+                    }
+                    let elem_stmt = self.add_stmt(Stmt {
+                        kind: s_kind,
+                        name: names.ptr[ni],
+                        type_name: elem_ty,
+                        expr_id: access_e,
+                        index_expr: 0usize,
+                        then_stmts: Vec.new(),
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: stmt_l,
+                        stmt_col: stmt_c,
+                    })
+                    if ni + 1usize < names.len {
+                        self.extra_stmts.push(elem_stmt)
+                    } else {
+                        last_st = elem_stmt
+                    }
+                    ni = ni + 1usize
+                }
+                if last_st != 0usize {
+                    return last_st
+                }
+                return tmp_let
+            }
+            self.advance()
+            let v_name = String.from_str(self.peek_text())
+            self.expect_tok(TOK_IDENT, "identifier")
+            var v_type = String.new()
+            if self.match_tok(TOK_COLON) {
+                v_type = self.parse_type_str()
+            }
+            var init_id = 0usize
+            if self.match_tok(TOK_EQ) {
+                if self.peek_kind() == TOK_MATCH || (self.peek_kind() == TOK_IDENT && str_eq(self.peek_text(), "match")) {
+                    let match_st = self.parse_match_to_stmts(v_name, false)
+                    if v_type.len() == 0usize {
+                        v_type = self.infer_match_stmt_type(match_st)
+                    }
+                    var match_idx = 0usize
+                    if s_kind == STMT_LET {
+                        match_idx = 2usize
+                    }
+                    let decl_st = self.add_stmt(Stmt {
+                        kind: STMT_VAR,
+                        name: v_name,
+                        type_name: v_type,
+                        expr_id: 0usize,
+                        index_expr: match_idx,
+                        then_stmts: Vec.new(),
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: stmt_l,
+                        stmt_col: stmt_c,
+                    })
+                    self.extra_stmts.push(decl_st)
+                    return match_st
+                }
+                init_id = self.parse_expr(0)
+            }
+            if v_type.len() == 0usize && init_id != 0usize {
+                let ik = self.exprs.ptr[init_id].kind
+                if ik == EXPR_CAST {
+                    v_type = self.exprs.ptr[init_id].target_type
+                } else if ik == EXPR_STR {
+                    v_type = String.from_str("str")
+                } else if ik == EXPR_BOOL {
+                    v_type = String.from_str("bool")
+                } else if ik == EXPR_METHOD_CALL {
+                    let mname = self.exprs.ptr[init_id].str_val.as_ptr() as str
+                    if str_eq(mname, "as_ptr") {
+                        v_type = String.from_str("*raw u8")
+                    } else if str_eq(mname, "new") || str_eq(mname, "from_str") {
+                        let recv = self.exprs.ptr[init_id].left
+                        if self.exprs.ptr[recv].kind == EXPR_IDENT {
+                            let rname = self.exprs.ptr[recv].str_val.as_ptr() as str
+                            if str_eq(rname, "String") {
+                                v_type = String.from_str("String")
+                            } else if str_eq(rname, "Vec") {
+                                v_type = String.from_str("Vec")
+                            }
+                        }
+                    }
+                } else if ik == EXPR_CALL {
+                    let callee = self.exprs.ptr[init_id].left
+                    if self.exprs.ptr[callee].kind == EXPR_IDENT {
+                        let cname = self.exprs.ptr[callee].str_val.as_ptr() as str
+                        if str_eq(cname, "input") {
+                            v_type = String.from_str("String")
+                        }
+                    }
+                }
+            }
+            if init_id != 0usize && self.exprs.ptr[init_id].kind == EXPR_IDENT {
+                let moved_name = self.exprs.ptr[init_id].str_val.as_ptr() as str
+                var is_move = false
+                var si = self.stmts.len
+                while si > 0usize {
+                    si = si - 1usize
+                    let sk = self.stmts.ptr[si].kind
+                    if sk == STMT_LET || sk == STMT_VAR {
+                        if str_eq(self.stmts.ptr[si].name.as_ptr() as str, moved_name) {
+                            let sty = self.stmts.ptr[si].type_name.as_ptr() as str
+                            if str_eq(sty, "String") || str_eq(sty, "Vec") {
+                                is_move = true
+                            } else if str_len(sty) == 0usize {
+                                let se_id = self.stmts.ptr[si].expr_id
+                                if se_id != 0usize && self.exprs.ptr[se_id].kind == EXPR_METHOD_CALL {
+                                    let recv = self.exprs.ptr[se_id].left
+                                    if self.exprs.ptr[recv].kind == EXPR_IDENT {
+                                        let rname = self.exprs.ptr[recv].str_val.as_ptr() as str
+                                        if str_eq(rname, "String") || str_eq(rname, "Vec") {
+                                            is_move = true
+                                        }
+                                    }
+                                }
+                            }
+                            break
+                        }
+                    }
+                }
+                if is_move {
+                    let v_type_str = v_type.as_ptr() as str
+                    if str_eq(v_type_str, "int") || str_eq(v_type_str, "i64") || str_eq(v_type_str, "i32") || str_eq(v_type_str, "u64") || str_eq(v_type_str, "u32") || str_eq(v_type_str, "usize") {
+                        is_move = false
+                    }
+                }
+                if is_move {
+                    self.moved_vars.push(self.exprs.ptr[init_id].str_val)
+                }
+            }
+            res_id = self.add_stmt(Stmt {
+                kind: s_kind,
+                name: v_name,
+                type_name: v_type,
+                expr_id: init_id,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: Vec.new(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
+            })
+        } else if k == TOK_IF {
+            self.advance()
+            let cond_id = self.parse_expr(0)
+            self.expect_tok(TOK_LBRACE, "{")
+            let then_stmts = self.parse_block_stmts()
+            self.expect_tok(TOK_RBRACE, "}")
+            var else_stmts = Vec.new()
+            if self.match_tok(TOK_ELSE) {
+                if self.peek_kind() == TOK_IF {
+                    let elif_st = self.parse_stmt()
+                    else_stmts.push(elif_st)
+                } else {
+                    let _lb = self.expect_tok(TOK_LBRACE, "{")
+                    else_stmts = self.parse_block_stmts()
+                    let _rb = self.expect_tok(TOK_RBRACE, "}")
+                }
+            }
+            res_id = self.add_stmt(Stmt {
+                kind: STMT_IF,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: cond_id,
+                index_expr: 0usize,
+                then_stmts: then_stmts,
+                else_stmts: else_stmts,
+                body_stmts: Vec.new(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
+            })
+        } else if k == TOK_WHILE {
+            self.advance()
+            let cond_id = self.parse_expr(0)
+            self.expect_tok(TOK_LBRACE, "{")
+            let body_stmts = self.parse_block_stmts()
+            self.expect_tok(TOK_RBRACE, "}")
+            res_id = self.add_stmt(Stmt {
+                kind: STMT_WHILE,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: cond_id,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: body_stmts,
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
+            })
+        } else if k == TOK_LOOP {
+            self.advance()
+            self.expect_tok(TOK_LBRACE, "{")
+            let body_stmts = self.parse_block_stmts()
+            self.expect_tok(TOK_RBRACE, "}")
+            let true_expr = self.add_expr(Expr {
+                kind: EXPR_BOOL,
+                op: 0,
+                int_val: 1i64,
+                str_val: String.new(),
+                target_type: String.from_str("bool"),
+                left: 0usize,
+                right: 0usize,
+                args: Vec.new(),
+                field_name: String.new(),
+                expr_line: stmt_l,
+                expr_col: stmt_c,
+            })
+            res_id = self.add_stmt(Stmt {
+                kind: STMT_WHILE,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: true_expr,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: body_stmts,
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
+            })
+        } else if k == TOK_FOR {
+            let tok_l = self.cur_tok_line()
+            let tok_c = self.cur_tok_col()
+            self.advance()
+            let var_name = String.from_str(self.peek_text())
+            self.expect_tok(TOK_IDENT, "loop variable")
+            var type_name = String.new()
+            if self.peek_kind() == TOK_COLON {
+                self.advance()
+                type_name = self.parse_type_str()
+            }
+            self.expect_tok(TOK_IN, "in")
+            let iter_expr = self.parse_expr(0)
+            self.expect_tok(TOK_LBRACE, "{")
+            let body_stmts = self.parse_block_stmts()
+            self.expect_tok(TOK_RBRACE, "}")
+            var s_kind = STMT_FOR_IN
+            if self.exprs.ptr[iter_expr].kind == EXPR_RANGE {
+                s_kind = STMT_FOR_RANGE
+            }
+            res_id = self.add_stmt(Stmt {
+                kind: s_kind,
+                name: var_name,
+                type_name: type_name,
+                expr_id: iter_expr,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: body_stmts,
+                stmt_line: tok_l,
+                stmt_col: tok_c,
+            })
+        } else if k == TOK_DEFER {
+            let tok_l = self.cur_tok_line()
+            let tok_c = self.cur_tok_col()
+            self.advance()
+            var def_stmts = Vec.new()
+            if self.peek_kind() == TOK_LBRACE {
+                self.advance()
+                def_stmts = self.parse_block_stmts()
+                self.expect_tok(TOK_RBRACE, "}")
+            } else {
+                let s_id = self.parse_stmt()
+                def_stmts.push(s_id)
+            }
+            res_id = self.add_stmt(Stmt {
+                kind: STMT_DEFER,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: 0usize,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: def_stmts,
+                stmt_line: tok_l,
+                stmt_col: tok_c,
+            })
+        } else if (k == TOK_HANDLE || (k == TOK_IDENT && str_eq(self.peek_text(), "handle"))) && self.peek_next_kind() != TOK_DOT && self.peek_next_kind() != TOK_EQ && self.peek_next_kind() != TOK_LPAREN {
+            self.advance()
+            let comp_expr = self.parse_expr(0)
+            if self.peek_kind() == TOK_WITH || (self.peek_kind() == TOK_IDENT && str_eq(self.peek_text(), "with")) {
+                self.advance()
+            }
+            self.expect_tok(TOK_LBRACE, "{")
+            var handle_stmts = Vec.new()
+            while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+                let _pat_expr = self.parse_expr(0)
+                if self.peek_kind() == TOK_FAT_ARROW || self.peek_kind() == TOK_ARROW {
+                    self.advance()
+                }
+                if self.match_tok(TOK_LBRACE) {
+                    let b = self.parse_block_stmts()
+                    var bi = 0usize
+                    while bi < b.len {
+                        handle_stmts.push(b.ptr[bi])
+                        bi = bi + 1usize
+                    }
+                    self.expect_tok(TOK_RBRACE, "}")
+                } else {
+                    let st = self.parse_stmt()
+                    handle_stmts.push(st)
+                    self.match_tok(TOK_SEMI)
+                }
+                self.match_tok(TOK_COMMA)
+            }
+            self.expect_tok(TOK_RBRACE, "}")
+            res_id = self.add_stmt(Stmt {
+                kind: STMT_EXPR,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: comp_expr,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: handle_stmts,
+                stmt_line: tok_l,
+                stmt_col: tok_c,
+            })
+        } else if k == TOK_MATCH || (k == TOK_IDENT && str_eq(self.peek_text(), "match")) {
+            res_id = self.parse_match_to_stmts(String.new(), false)
+        } else if k == TOK_RETURN {
+            let ret_pos = self.pos
+            let ret_line = self.tokens.ptr[ret_pos].line
+            self.advance()
+            if self.peek_kind() == TOK_MATCH || (self.peek_kind() == TOK_IDENT && str_eq(self.peek_text(), "match")) {
+                res_id = self.parse_match_to_stmts(String.new(), true)
+            } else {
+                var ret_val = 0usize
+                if self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+                    if self.pos < self.tokens.len && self.tokens.ptr[self.pos].line == ret_line {
+                        ret_val = self.parse_expr(0)
+                    }
+                }
+                res_id = self.add_stmt(Stmt {
+                    kind: STMT_RETURN,
+                    name: String.new(),
+                    type_name: String.new(),
+                    expr_id: ret_val,
+                    index_expr: 0usize,
+                    then_stmts: Vec.new(),
+                    else_stmts: Vec.new(),
+                    body_stmts: Vec.new(),
+                    stmt_line: stmt_l,
+                    stmt_col: stmt_c,
+                })
+            }
+        } else if k == TOK_BREAK {
+            self.advance()
+            res_id = self.add_stmt(Stmt {
+                kind: STMT_BREAK,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: 0usize,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: Vec.new(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
+            })
+        } else if k == TOK_CONTINUE {
+            self.advance()
+            res_id = self.add_stmt(Stmt {
+                kind: STMT_CONTINUE,
+                name: String.new(),
+                type_name: String.new(),
+                expr_id: 0usize,
+                index_expr: 0usize,
+                then_stmts: Vec.new(),
+                else_stmts: Vec.new(),
+                body_stmts: Vec.new(),
+                stmt_line: stmt_l,
+                stmt_col: stmt_c,
+            })
+        } else {
+            // Expression or Assignment
+            let lhs = self.parse_expr(0)
+            let lhs_l = self.exprs.ptr[lhs].expr_line
+            let lhs_c = self.exprs.ptr[lhs].expr_col
+            if self.match_tok(TOK_EQ) {
+                if self.peek_kind() == TOK_MATCH || (self.peek_kind() == TOK_IDENT && str_eq(self.peek_text(), "match")) {
+                    let ep = self.exprs.ptr
+                    if ep[lhs].kind == EXPR_IDENT {
+                        return self.parse_match_to_stmts(ep[lhs].str_val, false)
+                    }
+                }
+                let rhs = self.parse_expr(0)
+                let ep = self.exprs.ptr
+                if ep[lhs].kind == EXPR_IDENT {
+                    let vname = ep[lhs].str_val.as_ptr() as str
+                    // Check if variable is immutable (declared with let)
+                    var si = self.stmts.len
+                    while si > 0usize {
+                        si = si - 1usize
+                        if str_eq(self.stmts.ptr[si].name.as_ptr() as str, vname) {
+                            if self.stmts.ptr[si].kind == STMT_LET {
+                                var err = String.new()
+                                err.push_str("cannot assign to immutable variable '")
+                                err.push_str(vname)
+                                err.push_str("'")
+                                self.report_error_span("E0021", err.as_ptr() as str, lhs_l, lhs_c, str_len(vname) as i64)
+                            }
+                            break
+                        }
+                    }
+                    res_id = self.add_stmt(Stmt {
+                        kind: STMT_ASSIGN,
+                        name: ep[lhs].str_val,
+                        type_name: String.new(),
+                        expr_id: rhs,
+                        index_expr: 0usize,
+                        then_stmts: Vec.new(),
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: lhs_l,
+                        stmt_col: lhs_c,
+                    })
+                } else if ep[lhs].kind == EXPR_INDEX {
+                    var arr_sub = Vec.new()
+                    arr_sub.push(ep[lhs].left)
+                    var arr_name = String.new()
+                    if ep[ep[lhs].left].kind == EXPR_IDENT {
+                        arr_name = ep[ep[lhs].left].str_val
+                    }
+                    res_id = self.add_stmt(Stmt {
+                        kind: STMT_ASSIGN_INDEX,
+                        name: arr_name,
+                        type_name: String.new(),
+                        expr_id: rhs,
+                        index_expr: ep[lhs].right,
+                        then_stmts: arr_sub,
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: lhs_l,
+                        stmt_col: lhs_c,
+                    })
+                } else if ep[lhs].kind == EXPR_FIELD_ACCESS {
+                    res_id = self.add_stmt(Stmt {
+                        kind: STMT_ASSIGN_FIELD,
+                        name: ep[lhs].field_name,
+                        type_name: String.new(),
+                        expr_id: rhs,
+                        index_expr: ep[lhs].left,
+                        then_stmts: Vec.new(),
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: lhs_l,
+                        stmt_col: lhs_c,
+                    })
+                } else {
+                    res_id = self.add_stmt(Stmt {
+                        kind: STMT_EXPR,
+                        name: String.new(),
+                        type_name: String.new(),
+                        expr_id: rhs,
+                        index_expr: 0usize,
+                        then_stmts: Vec.new(),
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: lhs_l,
+                        stmt_col: lhs_c,
+                    })
+                }
+            } else {
+                res_id = self.add_stmt(Stmt {
+                    kind: STMT_EXPR,
+                    name: String.new(),
+                    type_name: String.new(),
+                    expr_id: lhs,
+                    index_expr: 0usize,
+                    then_stmts: Vec.new(),
+                    else_stmts: Vec.new(),
+                    body_stmts: Vec.new(),
+                    stmt_line: lhs_l,
+                    stmt_col: lhs_c,
+                })
+            }
+        }
+        if self.pos == start_pos {
+            self.advance()
+        }
+        return res_id
+    }
+
+    fn parse_block_stmts(var self) -> Vec<usize> {
+        var stmts = Vec.new()
+        while self.peek_kind() != TOK_RBRACE && self.peek_kind() != TOK_EOF {
+            if self.error_count >= 25i64 {
+                break
+            }
+            // 1. Consume leading or standalone semicolons (empty statements)
+            while self.match_tok(TOK_SEMI) {
+            }
+            if self.peek_kind() == TOK_RBRACE || self.peek_kind() == TOK_EOF {
+                break
+            }
+
+            // Check for tuple destructuring: let (a, b) = expr; or var (a, b) = expr;
+            if (self.peek_kind() == TOK_LET || self.peek_kind() == TOK_VAR) && self.peek_next_kind() == TOK_LPAREN {
+                let is_var = self.peek_kind() == TOK_VAR
+                let s_line = self.cur_tok_line()
+                let s_col = self.cur_tok_col()
+                self.advance() // skip let / var
+                self.advance() // skip (
+                var names = Vec.new()
+                var elem_types = Vec.new()
+                while self.peek_kind() != TOK_RPAREN && self.peek_kind() != TOK_EOF {
+                    let id_name = String.from_str(self.peek_text())
+                    self.match_ident_or_kw()
+                    names.push(id_name)
+                    var elem_ty = String.new()
+                    if self.match_tok(TOK_COLON) {
+                        elem_ty = self.parse_type_str()
+                    }
+                    elem_types.push(elem_ty)
+                    if !self.match_tok(TOK_COMMA) {
+                        break
+                    }
+                }
+                self.expect_tok(TOK_RPAREN, ")")
+                var tuple_annotated_type = String.new()
+                if self.match_tok(TOK_COLON) {
+                    tuple_annotated_type = self.parse_type_str()
+                }
+                self.expect_tok(TOK_EQ, "=")
+                let init_expr = self.parse_expr(0)
+
+                self.tup_tmp_counter = self.tup_tmp_counter + 1i64
+                var tmp_name = String.new()
+                tmp_name.push_str("__tup_tmp_")
+                tmp_name.push_str(int_to_str(self.tup_tmp_counter as i32).as_ptr() as str)
+
+                let tmp_let = self.add_stmt(Stmt {
+                    kind: STMT_LET,
+                    name: tmp_name,
+                    type_name: tuple_annotated_type,
+                    expr_id: init_expr,
+                    index_expr: 0usize,
+                    then_stmts: Vec.new(),
+                    else_stmts: Vec.new(),
+                    body_stmts: Vec.new(),
+                    stmt_line: s_line,
+                    stmt_col: s_col,
+                })
+                stmts.push(tmp_let)
+
+                var ni = 0usize
+                while ni < names.len {
+                    let ident_e = self.add_expr(Expr {
+                        kind: EXPR_IDENT,
+                        op: 0,
+                        int_val: 0i64,
+                        str_val: String.from_str(tmp_name.as_ptr() as str),
+                        target_type: String.new(),
+                        left: 0usize,
+                        right: 0usize,
+                        args: Vec.new(),
+                        field_name: String.new(),
+                        expr_line: s_line,
+                        expr_col: s_col,
+                    })
+                    var idx_str = String.new()
+                    idx_str.push_str(int_to_str(ni as i32).as_ptr() as str)
+                    let access_e = self.add_expr(Expr {
+                        kind: EXPR_FIELD_ACCESS,
+                        op: 0,
+                        int_val: 0i64,
+                        str_val: String.new(),
+                        target_type: String.new(),
+                        left: ident_e,
+                        right: 0usize,
+                        args: Vec.new(),
+                        field_name: idx_str,
+                        expr_line: s_line,
+                        expr_col: s_col,
+                    })
+                    var elem_kind = STMT_LET
+                    if is_var {
+                        elem_kind = STMT_VAR
+                    }
+                    var elem_ty = String.new()
+                    if ni < elem_types.len {
+                        elem_ty = elem_types.ptr[ni]
+                    }
+                    let elem_stmt = self.add_stmt(Stmt {
+                        kind: elem_kind,
+                        name: names.ptr[ni],
+                        type_name: elem_ty,
+                        expr_id: access_e,
+                        index_expr: 0usize,
+                        then_stmts: Vec.new(),
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: s_line,
+                        stmt_col: s_col,
+                    })
+                    stmts.push(elem_stmt)
+                    ni = ni + 1usize
+                }
+                while self.match_tok(TOK_SEMI) {}
+                continue
+            }
+
+            let start_p = self.pos
+            let errs_before = self.error_count
+            let st = self.parse_stmt()
+            var ei = 0usize
+            while ei < self.extra_stmts.len {
+                stmts.push(self.extra_stmts.ptr[ei])
+                ei = ei + 1usize
+            }
+            self.extra_stmts = Vec.new()
+            if st > 0usize {
+                stmts.push(st)
+            } else if self.error_count > errs_before {
+                self.synchronize_stmt()
+                continue
+            }
+
+            // 2. Determine end line of the parsed statement
+            var end_line = 0i64
+            if self.pos > 0usize && self.pos - 1usize < self.tokens.len {
+                end_line = self.tokens.ptr[self.pos - 1usize].line
+            }
+
+            // 3. Consume any semicolons following the statement
+            var had_semi = false
+            while self.match_tok(TOK_SEMI) {
+                had_semi = true
+            }
+
+            // 4. If block terminates or EOF reached, no separator required before '}'
+            let next_k = self.peek_kind()
+            if next_k == TOK_RBRACE || next_k == TOK_EOF {
+                break
+            }
+
+            // 5. Another token / statement follows on the same line without semicolon
+            if self.pos < self.tokens.len {
+                let next_line = self.tokens.ptr[self.pos].line
+                if !had_semi && next_line == end_line {
+                    let next_col = self.tokens.ptr[self.pos].col
+                    self.report_error("E0011", "expected ';' or newline between statements on the same line", next_line, next_col)
+                }
+            }
+
+            // 6. Guarantee parser makes forward progress
+            if self.pos == start_p {
+                self.advance()
+            }
+        }
+        return stmts
+    }
+
+}

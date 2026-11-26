@@ -1,0 +1,10 @@
+[package]
+name = "rad-gui"
+version = "0.1.0"
+description = "Pure native Wayland & X11 desktop GUI engine with zero dynamic C dependencies"
+authors = ["Rad Authors"]
+license = "MIT"
+repository = "https://github.com/GamerxIOEPB/rad-lib"
+
+[lib]
+path = "src/lib.rad"

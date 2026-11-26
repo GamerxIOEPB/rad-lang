@@ -1,0 +1,10 @@
+[package]
+name = "rad-gpu"
+version = "0.1.0"
+description = "Hardware Vulkan GPU compute pipelines with pure-Rad SPIR-V emission"
+authors = ["Rad Authors"]
+license = "MIT"
+repository = "https://github.com/GamerxIOEPB/rad-lib"
+
+[lib]
+path = "src/lib.rad"
