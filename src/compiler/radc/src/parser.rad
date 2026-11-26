@@ -1040,12 +1040,21 @@ impl Parser {
                     var has_colon = false
                     var paren_depth = 0i64
                     var bracket_depth = 0i64
+                    var sub_brace_depth = 0i64
                     var k_scan = i + 1usize
                     var in_sub_str = false
                     while k_scan < j {
                         let sc = p_raw[k_scan]
                         if sc == 34u8 {
-                            in_sub_str = !in_sub_str
+                            var is_quote = false
+                            if k_scan == 0usize {
+                                is_quote = true
+                            } else if p_raw[k_scan - 1usize] != 92u8 {
+                                is_quote = true
+                            }
+                            if is_quote {
+                                in_sub_str = !in_sub_str
+                            }
                         } else if !in_sub_str {
                             if sc == 40u8 {
                                 paren_depth = paren_depth + 1i64
@@ -1055,7 +1064,11 @@ impl Parser {
                                 bracket_depth = bracket_depth + 1i64
                             } else if sc == 93u8 {
                                 bracket_depth = bracket_depth - 1i64
-                            } else if sc == 58u8 && paren_depth == 0i64 && bracket_depth == 0i64 {
+                            } else if sc == 123u8 {
+                                sub_brace_depth = sub_brace_depth + 1i64
+                            } else if sc == 125u8 {
+                                sub_brace_depth = sub_brace_depth - 1i64
+                            } else if sc == 58u8 && paren_depth == 0i64 && bracket_depth == 0i64 && sub_brace_depth == 0i64 {
                                 var is_double_colon = false
                                 if k_scan + 1usize < j && p_raw[k_scan + 1usize] == 58u8 {
                                     is_double_colon = true
@@ -3711,6 +3724,58 @@ impl Parser {
         return stmts
     }
 
+    fn extract_module_stem(self, fpath: str) -> String {
+        let flen = str_len(fpath)
+        if flen == 0usize {
+            return String.new()
+        }
+        let p = fpath as *raw u8
+        var last_slash = 0usize
+        var has_slash = false
+        var i = 0usize
+        while i < flen {
+            if p[i] == 47u8 || p[i] == 92u8 {
+                last_slash = i + 1usize
+                has_slash = true
+            }
+            i = i + 1usize
+        }
+        var start = 0usize
+        if has_slash {
+            start = last_slash
+        }
+        var end = flen
+        var j = flen
+        while j > start {
+            if p[j - 1usize] == 46u8 {
+                end = j - 1usize
+                break
+            }
+            j = j - 1usize
+        }
+        var stem = String.new()
+        var k = start
+        while k < end {
+            let c = p[k]
+            if (c >= 97u8 && c <= 122u8) || (c >= 65u8 && c <= 90u8) || (c >= 48u8 && c <= 57u8) || c == 95u8 {
+                stem.push_byte(c)
+            } else if c == 45u8 {
+                stem.push_byte(95u8)
+            }
+            k = k + 1usize
+        }
+        stem.push_byte(0u8)
+        return stem
+    }
+
+    fn get_current_module_stem(self) -> String {
+        if self.current_source_id >= self.source_files.len {
+            return String.new()
+        }
+        let fpath = self.source_files.ptr[self.current_source_id].file_path.as_ptr() as str
+        return self.extract_module_stem(fpath)
+    }
+
     fn parse_function(var self, prefix: str) {
         self.moved_vars = Vec.new()
         self.advance() // skip 'fn'
@@ -3757,6 +3822,24 @@ impl Parser {
         if str_len(prefix) > 0usize {
             fn_name.push_str(prefix)
             fn_name.push_str("__")
+        } else if self.current_source_id > 0usize {
+            let raw_s = raw_fn_name.as_ptr() as str
+            if !str_eq(raw_s, "main") && !str_starts_with(raw_s, "__rad_") &&
+               !str_eq(raw_s, "println") && !str_eq(raw_s, "print") &&
+               !str_eq(raw_s, "eprintln") && !str_eq(raw_s, "panic") &&
+               !str_eq(raw_s, "size_of") && !str_eq(raw_s, "size_of_val") &&
+               !str_eq(raw_s, "null") && !str_eq(raw_s, "null_var") &&
+               !str_eq(raw_s, "is_null") && !str_eq(raw_s, "ptr_read") &&
+               !str_eq(raw_s, "ptr_write") && !str_eq(raw_s, "read_volatile") &&
+               !str_eq(raw_s, "write_volatile") && !str_eq(raw_s, "offset") &&
+               !str_eq(raw_s, "offset_var") && !str_eq(raw_s, "now") {
+                let stem = self.get_current_module_stem()
+                let stem_s = stem.as_ptr() as str
+                if str_len(stem_s) > 0usize && !str_starts_with(raw_s, stem_s) {
+                    fn_name.push_str(stem_s)
+                    fn_name.push_str("__")
+                }
+            }
         }
         fn_name.push_str(raw_fn_name.as_ptr() as str)
         fn_name.push_byte(0u8)
@@ -3785,6 +3868,9 @@ impl Parser {
         var fn_has_body = false
         if self.match_tok(TOK_SEMI) {
             // Prototype / Trait method signature without body
+            if str_len(prefix) == 0usize {
+                fn_name = raw_fn_name
+            }
         } else {
             fn_has_body = true
             self.expect_tok(TOK_LBRACE, "{")
@@ -4350,21 +4436,43 @@ impl Parser {
                     spec.push_str(self.peek_text())
                     self.advance()
                 } else {
-                    while self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_EOF && self.peek_kind() != TOK_FN && self.peek_kind() != TOK_STRUCT && self.peek_kind() != TOK_ENUM && !str_eq(self.peek_text(), "impl") && !str_eq(self.peek_text(), "const") && !str_eq(self.peek_text(), "import") && !str_eq(self.peek_text(), "pub") {
+                    var expecting_ident = true
+                    while self.peek_kind() != TOK_SEMI && self.peek_kind() != TOK_EOF {
                         let k = self.peek_kind()
-                        if k == TOK_DOT {
-                            spec.push_byte(46u8) // '.'
-                        } else if k == TOK_SLASH {
-                            spec.push_byte(47u8) // '/'
-                        } else if k == TOK_COLONCOLON {
-                            spec.push_byte(47u8) // '::' -> '/'
+                        let txt = self.peek_text()
+                        if expecting_ident {
+                            if k == TOK_DOT {
+                                spec.push_byte(46u8) // '.'
+                                self.advance()
+                            } else if k == TOK_SLASH || k == TOK_COLONCOLON {
+                                spec.push_byte(47u8) // '/'
+                                self.advance()
+                            } else if k == TOK_IDENT || k == TOK_PUB || k == TOK_FN || k == TOK_STRUCT || k == TOK_ACTOR || k == TOK_EFFECT || k == TOK_TYPE || k == TOK_TRAIT || k == TOK_ASYNC || k == TOK_ENUM {
+                                if str_len(txt) > 0usize {
+                                    spec.push_str(txt)
+                                }
+                                self.advance()
+                                expecting_ident = false
+                            } else {
+                                break
+                            }
                         } else {
-                            let t = self.peek_text()
-                            if str_len(t) > 0usize {
-                                spec.push_str(t)
+                            if k == TOK_DOT {
+                                spec.push_byte(46u8) // '.'
+                                self.advance()
+                                expecting_ident = true
+                            } else if k == TOK_SLASH || k == TOK_COLONCOLON {
+                                spec.push_byte(47u8) // '/'
+                                self.advance()
+                                expecting_ident = true
+                            } else if k == TOK_STAR {
+                                spec.push_byte(42u8) // '*'
+                                self.advance()
+                                break
+                            } else {
+                                break
                             }
                         }
-                        self.advance()
                     }
                 }
                 if self.peek_kind() == TOK_SEMI {

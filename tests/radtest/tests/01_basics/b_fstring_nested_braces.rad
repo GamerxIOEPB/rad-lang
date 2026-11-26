@@ -1,0 +1,9 @@
+fn apply(x: i64, f: fn(i64) -> i64) -> i64 {
+    return f(x)
+}
+
+fn main() {
+    let val = 42
+    let s = f"result={apply(val, |v| { return v * 2 })}"
+    println(s)
+}

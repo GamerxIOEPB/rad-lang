@@ -1,0 +1,9 @@
+import std/math
+
+extern "C" {
+    fn puts(s: str) -> i32;
+}
+
+fn main() {
+    puts("extern C without semicolon import OK")
+}

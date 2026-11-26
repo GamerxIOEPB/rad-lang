@@ -1,0 +1,16 @@
+fn touch(p: *raw i64) -> bool {
+    ptr_write(p, ptr_read(p) + 1i64)
+    return true
+}
+
+fn main() {
+    var count = 0i64
+    let p = &count
+    let a = false && touch(p)
+    let b = true || touch(p)
+    count = count + 0i64
+    println(count)
+    if count == 0i64 {
+        println("SHORT CIRCUIT OK")
+    }
+}

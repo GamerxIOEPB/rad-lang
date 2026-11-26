@@ -1,6 +1,6 @@
 fn main() {
     let f = |a: i64| -> i64 {
-        let inner = |b| a + b
+        let inner: fn(i64) -> i64 = |b| a + b
         return inner(1)
     }
     println(f(2))

@@ -1,0 +1,11 @@
+import "./fn_module_namespacing_helper.rad"
+
+fn helper_calc(x: i64) -> i64 {
+    return x + 100
+}
+
+fn main() {
+    println(exported_calc(5))
+    println(fn_module_namespacing_helper::exported_calc(5))
+    println(helper_calc(5))
+}

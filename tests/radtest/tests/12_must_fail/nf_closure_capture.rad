@@ -1,5 +1,5 @@
 fn main() {
     let base = 10
-    let bad = |x| x + base
+    let bad: fn(i64) -> i64 = |x| x + base
     println(bad(5))
 }

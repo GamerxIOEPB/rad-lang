@@ -951,6 +951,7 @@ fn main(argc: i32, argv: *raw *raw u8) -> i32 {
         source_file: main_src,
         fn_defer_metas: Vec.new(),
         pending_defer_thunks: Vec.new(),
+        closure_metas: Vec.new(),
     }
     codegen.parser.filename = main_src
     let ir = codegen.generate()
