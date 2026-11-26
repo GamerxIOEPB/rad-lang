@@ -17,6 +17,11 @@ echo "==> Checking target sysroot libraries in ${SYSROOT_DIR}..."
 
 # Check if essential static libraries already exist
 if [[ -f "${LIB_DIR}/libc.a" && -f "${CRT_DIR}/rcrt1.o" && -f "${LIB_DIR}/libsqlite3.a" ]]; then
+    # Ensure rad-sqlite vendor copy is also populated
+    if [[ ! -f "lib/rad/rad-sqlite/vendor/libsqlite3.a" ]]; then
+        mkdir -p "lib/rad/rad-sqlite/vendor"
+        cp -f "${LIB_DIR}/libsqlite3.a" "lib/rad/rad-sqlite/vendor/libsqlite3.a"
+    fi
     echo "  [✓] Target sysroot (${TARGET_TRIPLE}) already present and complete."
     exit 0
 fi

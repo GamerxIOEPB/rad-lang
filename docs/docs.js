@@ -34,15 +34,14 @@ const DOCS_NAV = [
         items: [
             { id: "11_c_interop.md", title: "C & C++ Interoperability", num: "11" },
             { id: "12_compiler_cli.md", title: "Compiler (radc) & Linking", num: "12" },
-            { id: "13_package_manager.md", title: "Package Manager (rad)", num: "13" }
+            { id: "13_package_manager.md", title: "Package Management & rad", num: "13" }
         ]
     },
     {
         group: "Ecosystem & Tooling",
         items: [
             { id: "14_standard_library.md", title: "Standard Library (core/alloc/std)", num: "14" },
-            { id: "15_editor_support.md", title: "VS Code & Tree-Sitter", num: "15" },
-            { id: "16_package_management.md", title: "Package Registry & rad-lib", num: "16" }
+            { id: "15_editor_support.md", title: "VS Code & Tree-Sitter", num: "15" }
         ]
     }
 ];

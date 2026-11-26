@@ -62,6 +62,25 @@ pub fn str_starts_with(s: str, prefix: str) -> bool {
     return true
 }
 
+pub fn str_ends_with(s: str, suffix: str) -> bool {
+    let s_len = str_len(s)
+    let suf_len = str_len(suffix)
+    if s_len < suf_len || s_len == 0usize { return false }
+    let ps = s as *raw u8
+    let p_suf = suffix as *raw u8
+    let start = s_len - suf_len
+    var i = 0usize
+    while i < suf_len {
+        if ps[start + i] != p_suf[i] { return false }
+        i = i + 1usize
+    }
+    return true
+}
+
+pub fn parse_toml(content: str) -> TomlValue {
+    return TomlValue.parse(content)
+}
+
 pub fn str_contains(haystack: str, needle: str) -> bool {
     let hlen = str_len(haystack)
     let nlen = str_len(needle)

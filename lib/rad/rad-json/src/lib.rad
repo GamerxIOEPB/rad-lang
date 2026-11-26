@@ -137,6 +137,38 @@ impl JsonValue {
         }
     }
 
+    pub fn parse(input: str) -> Result<JsonValue, String> {
+        let opt = json_parse(input)
+        match opt {
+            Option.Some(val) => return Result.Ok(val),
+            _ => return Result.Err(String.from_str("failed to parse JSON")),
+        }
+    }
+
+    pub fn get_str(self, key: str) -> str {
+        let opt = self.get(key)
+        match opt {
+            Option.Some(v) => return v.as_str(),
+            _ => return "",
+        }
+    }
+
+    pub fn get_i64(self, key: str) -> i64 {
+        let opt = self.get(key)
+        match opt {
+            Option.Some(v) => return v.as_i64(),
+            _ => return 0i64,
+        }
+    }
+
+    pub fn get_bool(self, key: str) -> bool {
+        let opt = self.get(key)
+        match opt {
+            Option.Some(v) => return v.as_bool(),
+            _ => return false,
+        }
+    }
+
     pub fn get(self, key: str) -> Option<JsonValue> {
         if self.kind != JSON_OBJECT {
             return Option.None
@@ -158,6 +190,10 @@ impl JsonValue {
         return Option.Some(self.arr_val.ptr[idx])
     }
 
+    pub fn len(self) -> usize {
+        return self.item_count()
+    }
+
     pub fn item_count(self) -> usize {
         if self.kind == JSON_ARRAY {
             return self.arr_val.len
@@ -171,13 +207,13 @@ impl JsonValue {
     }
 
     pub fn stringify(self) -> String {
-        var out = String.new()
+        let out = String.new()
         json_serialize_val(self, out, false, 0usize)
         return out
     }
 
     pub fn stringify_pretty(self, indent: usize) -> String {
-        var out = String.new()
+        let out = String.new()
         json_serialize_val(self, out, true, indent)
         return out
     }

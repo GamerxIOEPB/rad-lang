@@ -65,9 +65,14 @@ RADC_SRCS := \
     $(RADC_DIR)/linker.rad
 
 RAD_SRCS := \
+    $(RADPM_DIR)/util.rad \
     $(RADPM_DIR)/fmt.rad \
     $(RADPM_DIR)/lsp.rad \
     $(RADPM_DIR)/toml.rad \
+    $(RADPM_DIR)/cmd_project.rad \
+    $(RADPM_DIR)/cmd_pkg.rad \
+    $(RADPM_DIR)/cmd_build.rad \
+    $(RADPM_DIR)/cmd_doctor.rad \
     $(RADPM_DIR)/test.rad \
     $(RADPM_DIR)/bench.rad \
     $(RADPM_DIR)/doc.rad \
@@ -98,7 +103,7 @@ check-radc:
 
 radc: $(BIN_RADC)
 
-$(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/util.ll $(RADC_DIR)/backend_bridge.cpp $(RADC_DIR)/crash_report.cpp
+$(BIN_RADC): $(RADC_SRCS) $(RADC_DIR)/backend_bridge.cpp $(RADC_DIR)/crash_report.cpp
 	@mkdir -p $(BIN_DIR)
 	@echo "==> Compiling backend bridge..."
 	clang++ -c -O2 -fPIC $(LLVM_CXXFLAGS) -fexceptions $(RADC_DIR)/backend_bridge.cpp -o $(BIN_DIR)/backend_bridge.o

@@ -29,6 +29,9 @@ tests/demos/wayland_gui/rad_wayland_demo
 # Build artifacts & intermediate files
 *.ll
 *.vsix
+*.a
+*.wasm
+extensions/vscode-rad/dist/
 
 # Python cache
 __pycache__/

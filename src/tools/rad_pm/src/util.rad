@@ -1,0 +1,274 @@
+// ==============================================================================
+// rad_pm/src/util.rad — Shared Utility Functions for Package Manager
+// ==============================================================================
+
+fn str_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize
+    }
+    let p: *raw u8 = s as *raw u8
+    var i = 0usize
+    while p[i] != 0u8 {
+        i = i + 1usize
+    }
+    return i
+}
+
+fn str_eq(a: str, b: str) -> bool {
+    if (a as usize) == 0usize && (b as usize) == 0usize {
+        return true
+    }
+    if (a as usize) == 0usize || (b as usize) == 0usize {
+        return false
+    }
+    let pa: *raw u8 = a as *raw u8
+    let pb: *raw u8 = b as *raw u8
+    var i = 0usize
+    while pa[i] != 0u8 && pb[i] != 0u8 {
+        if pa[i] != pb[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return pa[i] == pb[i]
+}
+
+fn str_starts_with(s: str, prefix: str) -> bool {
+    if (s as usize) == 0usize || (prefix as usize) == 0usize {
+        return false
+    }
+    let ps: *raw u8 = s as *raw u8
+    let pp: *raw u8 = prefix as *raw u8
+    var i = 0usize
+    while pp[i] != 0u8 {
+        if ps[i] == 0u8 || ps[i] != pp[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+fn str_ends_with(s: str, suffix: str) -> bool {
+    let s_len = str_len(s)
+    let suf_len = str_len(suffix)
+    if s_len < suf_len || s_len == 0usize {
+        return false
+    }
+    let ps: *raw u8 = s as *raw u8
+    let p_suf: *raw u8 = suffix as *raw u8
+    let start = s_len - suf_len
+    var i = 0usize
+    while i < suf_len {
+        if ps[start + i] != p_suf[i] {
+            return false
+        }
+        i = i + 1usize
+    }
+    return true
+}
+
+extern "C" {
+    fn access(path: str, mode: i32) -> i32;
+    fn getpid() -> i32;
+}
+
+fn file_exists(path: str) -> bool {
+    return access(path, 0) == 0
+}
+
+fn path_basename(path: str) -> String {
+    let len = str_len(path)
+    if len == 0usize {
+        return String.from_str("app")
+    }
+    let p: *raw u8 = path as *raw u8
+    var last_slash = 0usize
+    var has_slash = false
+    var i = 0usize
+    while i < len {
+        if p[i] == 47u8 { // '/'
+            last_slash = i + 1usize
+            has_slash = true
+        }
+        i = i + 1usize
+    }
+    if !has_slash || last_slash >= len {
+        return String.from_str(path)
+    }
+    var res = String.new()
+    i = last_slash
+    while i < len {
+        res.push_byte(p[i])
+        i = i + 1usize
+    }
+    return res
+}
+
+fn write_file_str(path: str, content: str) -> bool {
+    let fp = fopen(path, "wb")
+    if (fp as usize) == 0usize {
+        return false
+    }
+    let p: *raw var u8 = content as *raw var u8
+    let len = str_len(content)
+    let _w = fwrite(p, 1usize, len, fp)
+    let _c = fclose(fp)
+    return true
+}
+
+fn read_file_str(path: str) -> String {
+    var res = String.new()
+    let fp = fopen(path, "rb")
+    if (fp as usize) == 0usize {
+        return res
+    }
+    fseek(fp, 0i64, 2)
+    let size = ftell(fp) as usize
+    fseek(fp, 0i64, 0)
+    if size == 0usize {
+        let _c = fclose(fp)
+        return res
+    }
+    var buf = malloc(size + 1usize) as *raw var u8
+    let read_bytes = fread(buf, 1usize, size, fp) as usize
+    buf[read_bytes] = 0u8
+    let _c2 = fclose(fp)
+
+    var i = 0usize
+    while i < read_bytes {
+        res.push_byte(buf[i])
+        i = i + 1usize
+    }
+    free(buf)
+    return res
+}
+
+fn is_executable_radc(candidate: str) -> bool {
+    if str_len(candidate) == 0usize {
+        return false
+    }
+    var cmd = String.new()
+    cmd.push_str(candidate)
+    cmd.push_str(" --version >/dev/null 2>&1")
+    let ret = system(cmd.as_ptr() as str)
+    return ret == 0
+}
+
+fn find_radc_compiler(argv0: str) -> String {
+    // 1. Check if radc lives right next to the running rad binary (sibling path)
+    let len = str_len(argv0)
+    if len > 0usize {
+        let p: *raw u8 = argv0 as *raw u8
+        var last_slash = 0usize
+        var has_slash = false
+        var i = 0usize
+        while i < len {
+            if p[i] == 47u8 { // '/'
+                last_slash = i
+                has_slash = true
+            }
+            i = i + 1usize
+        }
+        if has_slash {
+            var sibling = String.new()
+            i = 0usize
+            while i <= last_slash {
+                sibling.push_byte(p[i])
+                i = i + 1usize
+            }
+            sibling.push_str("radc")
+            if is_executable_radc(sibling.as_ptr() as str) {
+                return sibling
+            }
+        }
+    }
+
+    // 2. Check $RAD_HOME/bin/radc
+    let env_rad_home = getenv("RAD_HOME")
+    if (env_rad_home as usize) != 0usize {
+        var p_rad = String.new()
+        p_rad.push_str(env_rad_home as str)
+        p_rad.push_str("/bin/radc")
+        if is_executable_radc(p_rad.as_ptr() as str) {
+            return p_rad
+        }
+    }
+
+    // 3. Check $HOME/.rad/bin/radc
+    let env_home = getenv("HOME")
+    if (env_home as usize) != 0usize {
+        var p_home = String.new()
+        p_home.push_str(env_home as str)
+        p_home.push_str("/.rad/bin/radc")
+        if is_executable_radc(p_home.as_ptr() as str) {
+            return p_home
+        }
+    }
+
+    // 4. Check if radc is in PATH
+    if is_executable_radc("radc") {
+        return String.from_str("radc")
+    }
+
+    // 5. Check repository development paths (verified executable)
+    if is_executable_radc("bin/radc") {
+        return String.from_str("bin/radc")
+    }
+    if is_executable_radc("./target/release/radc") {
+        return String.from_str("./target/release/radc")
+    }
+    if is_executable_radc("./target/radc") {
+        return String.from_str("./target/radc")
+    }
+
+    return String.from_str("radc")
+}
+
+
+fn str_contains(haystack: str, needle: str) -> bool {
+    if (haystack as usize) == 0usize || (needle as usize) == 0usize {
+        return false
+    }
+    let h_len = str_len(haystack)
+    let n_len = str_len(needle)
+    if n_len == 0usize {
+        return true
+    }
+    if h_len < n_len {
+        return false
+    }
+    let ph = haystack as *raw u8
+    let pn = needle as *raw u8
+    var i = 0usize
+    let max_i = h_len - n_len
+    while i <= max_i {
+        var match_found = true
+        var j = 0usize
+        while j < n_len {
+            if ph[i + j] != pn[j] {
+                match_found = false
+                j = n_len
+            } else {
+                j = j + 1usize
+            }
+        }
+        if match_found {
+            return true
+        }
+        i = i + 1usize
+    }
+    return false
+}
+
+fn has_flag(argc: i32, argv: *raw *raw u8, flag: str) -> bool {
+    var i = 2
+    while i < argc {
+        if str_eq(argv[i] as str, flag) {
+            return true
+        }
+        i = i + 1
+    }
+    return false
+}
+
