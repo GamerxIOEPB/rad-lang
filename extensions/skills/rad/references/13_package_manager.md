@@ -15,6 +15,9 @@ Commands:
   test         Run tests for the package
   check        Analyze package for errors without compiling
   clean        Remove target build directory
+  fmt          Format Rad source files adhering to standard style
+  lsp          Run embedded Language Server Protocol engine (JSON-RPC 2.0)
+  toolchain    Manage and update the Rad toolchain installation
   doctor       Inspect and verify compiler, embedded backend, and sysroot
 ```
 
@@ -106,9 +109,75 @@ Rad Toolchain Doctor
 Status: Toolchain is healthy and ready for self-contained native compilation.
 ```
 
+### 9. `rad fmt [path] [--check] [--stdout]`
+Runs the native source formatter. Enforces 4-space indentation, Egyptian braces, operator spacing, and blank line rules:
+
+```bash
+# Format in place
+rad fmt src/main.rad
+
+# Check if formatted without modifying files (exits 1 if unformatted)
+rad fmt --check src/
+
+# Preview formatted output directly to stdout
+rad fmt --stdout src/main.rad
+```
+
+### 10. `rad lsp`
+Starts the stdio Language Server Protocol (JSON-RPC 2.0) server for IDE integration:
+
+```bash
+rad lsp
+```
+
+Provides live diagnostics, completions, hover docs, go-to-definition, document outline symbols, and document formatting.
+
+### 11. `rad doc [path] [--output <dir>] [--open]`
+Generates beautiful, self-contained HTML API documentation from `///` and `//!` doc-comments across functions, methods, structs, enums, traits, constants, and type aliases:
+
+```bash
+# Generate documentation for current package (default: target/doc/index.html)
+rad doc
+
+# Specify custom output path and open directly in default browser:
+rad doc --output public/docs --open
+
+# Generate documentation for a single source file:
+rad doc lib/rad/alloc/src/vec.rad
+```
+
+Features include responsive dark theme, real-time symbol search filter, category summary counters, and code signature formatting.
+
+### 12. `rad toolchain <subcommand>`
+Manages and verifies toolchain installations:
+
+```bash
+# Inspect current toolchain details
+rad toolchain info
+
+# Check available toolchain channels
+rad toolchain list
+
+# Check for updates or update to the latest release
+rad toolchain update --check
+rad toolchain update
+```
+
 ---
 
-## 13.3 Manifest Specification (`rad.toml`)
+## 13.3 Zero-Dependency Static SQLite (`rad-sqlite`)
+
+Rad bundles a hermetic static archive `libsqlite3.a` inside its Musl target sysroots (`lib/targets/x86_64-unknown-linux-musl/lib/libsqlite3.a`). When using `rad-sqlite`:
+
+```bash
+rad add rad-sqlite
+```
+
+Programs linking against `rad-sqlite` produce standalone static PIE executables with zero host C runtime library dependencies.
+
+---
+
+## 13.4 Manifest Specification (`rad.toml`)
 
 Every Rad package root contains a `rad.toml` manifest file:
 

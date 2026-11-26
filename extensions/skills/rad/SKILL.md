@@ -106,8 +106,82 @@ active_connections = active_connections + 1i64
 | **Floating-Point** | `f32`, `f64` | IEEE-754 single and double precision | `3.14159f32`, `2.71828` |
 | **Boolean** | `bool` | 8-bit byte representation | `true`, `false` |
 | **Characters & Text**| `char`, `str` | `char` is 32-bit Unicode; `str` is `*raw u8` null-terminated C string | `'A'`, `"Hello, Rad!"` |
+| **Tuples** | `(T1, T2, ...)` | Fixed-size product types with 0-based field access (`pair.0`, `pair.1`) | `(10, "rad")` |
+| **Function Pointers** | `fn(...) -> Ret` | C-compatible first-class function pointer | `fn(i64) -> bool` |
 | **Raw Pointers** | `*raw T`, `*raw var T` | Untracked raw machine pointers with array indexing `ptr[i]` | `p as *raw u8` |
 | **Dynamic Slices** | `[]T` | 24-byte fat slice `{ ptr, cap, len }` with runtime bounds checking | `[10, 20, 30]` |
+
+---
+
+### 2.4 Lightweight Tuples & Destructuring
+
+Rad provides first-class fixed-size heterogeneous product types without requiring explicit struct declarations:
+
+```rad
+// Multi-return function
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+    return (a / b, a % b);
+}
+
+// Tuple bindings and destructuring
+let pair = (10, "rad");
+println("First: {}, Second: {}", pair.0, pair.1);
+
+// Destructuring in let/var statements
+let (q, r) = divmod(10, 3);
+let (x: f64, y: f64) = (1.5, 2.5);
+var (cur, nxt) = (0, 1);
+cur = cur + nxt;
+```
+
+---
+
+### 2.5 Type Aliases (`type`)
+
+Declare concise aliases for primitive, composite, or function types:
+
+```rad
+type Byte = u8;
+pub type Callback = fn(i64) -> bool;
+type ResultPair = (i64, str);
+```
+
+---
+
+### 2.6 True Short-Circuiting Operators (`&&`, `||`)
+
+Rad lowers `&&` and `||` to conditional branching basic blocks (`br i1`). The right-hand expression is never evaluated if the left-hand operand determines the result, enabling safe pointer and bounds guards:
+
+```rad
+// Safe array index guard (arr[j - 1] is never evaluated when j == 0)
+while j > 0usize && arr[j - 1usize] > key {
+    arr[j] = arr[j - 1usize];
+    j = j - 1usize;
+}
+
+// Safe null pointer check
+if (ptr as usize) != 0usize && ptr[0usize] == 42u8 {
+    println("Valid buffer");
+}
+```
+
+---
+
+### 2.7 Lambdas & Capturing Closures
+
+- **Non-capturing lambdas**: Compile directly to C-compatible function pointers (`fn(...) -> Ret`).
+- **Capturing closures**: Lower to `{ fn_ptr, env_ptr }` fat function pairs.
+
+```rad
+// Non-capturing lambda
+let double = |x: i64| x * 2;
+println("Double: {}", double(21));
+
+// Capturing closure
+var offset = 100;
+let add_offset = |x: i64| offset + x;
+println("Result: {}", add_offset(25)); // 125
+```
 
 ---
 
@@ -418,6 +492,10 @@ fn main() -> i32 {
 - `rad update`: Updates dependencies to their latest compatible SemVer versions.
 - `rad tree`: Renders a hierarchical tree of resolved dependencies.
 - `rad outdated`: Checks for newer versions of installed packages in the registry.
+- `rad doc [--output <dir>] [--open]`: Generates static HTML documentation with live symbol search and category counters.
+
+### Zero-Dependency Static SQLite (`rad-sqlite`)
+Rad provides a vendored static library `libsqlite3.a` inside its target sysroots (`lib/targets/x86_64-unknown-linux-musl/lib/libsqlite3.a`). When compiling packages using `rad-sqlite`, binaries are produced as standalone static-PIE executables with zero host dynamic dependencies.
 
 ---
 

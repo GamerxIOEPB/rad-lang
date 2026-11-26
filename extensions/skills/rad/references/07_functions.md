@@ -148,3 +148,88 @@ Here:
 - `argc`: Number of arguments (including program name at index 0).
 - `argv`: Raw pointer to an array of null-terminated C string pointers (`*raw *raw u8`).
 - Returning an integer value sets the Linux process exit status (inspectable via `$?` in bash).
+
+---
+
+## 7.7 Built-In I/O Functions
+
+Rad provides essential I/O functions built directly into the language runtime without requiring imports:
+
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `println` | `fn println(fmt: str, ...)` | Prints formatted output to `stdout` with a trailing newline (`\n`). |
+| `print` | `fn print(fmt: str, ...)` | Prints formatted output to `stdout` **without** a trailing newline and flushes `stdout`. |
+| `input` | `fn input(prompt: str = "") -> String` | Reads a line from `stdin` (blocking) and returns a dynamic heap `String` without trailing newline. |
+| `eprintln` | `fn eprintln(msg: str)` | Prints error message directly to `stderr` (file descriptor 2) with a trailing newline. |
+
+### Example: Interactive Console Dialog
+```rad
+fn main() {
+    print("Username: ")
+    let user = input()
+    let pass = input("Password: ")
+
+    if str_eq(user.as_ptr(), "admin") {
+        println(f"Access granted. Welcome, {user}!")
+    } else {
+        eprintln("Access denied: invalid credentials")
+    }
+}
+```
+
+---
+
+## 7.8 Multi-Return Functions & Tuples
+
+Functions can return multiple values bundled in a lightweight tuple type `(T1, T2, ...)`:
+
+```rad
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+    return (a / b, a % b);
+}
+
+fn stats(x: f64) -> (f64, str) {
+    return (x * 2.5, "metric");
+}
+
+fn main() -> i32 {
+    let (q, r) = divmod(10, 3);
+    println(f"Quotient: {q}, Remainder: {r}");
+
+    let (score, label): (f64, str) = stats(4.0);
+    println(f"Score: {score}, Label: {label}");
+    return 0;
+}
+```
+
+---
+
+## 7.9 Lambdas & Closures
+
+Rad supports concise anonymous functions (lambdas) and capturing closures:
+
+### Syntax
+- `|arg1, arg2| expr`
+- `|arg1: Type, arg2: Type| -> RetType { stmts }`
+- `|| expr` (zero-argument lambda)
+
+### Non-Capturing Lambdas
+Lambdas that do not capture enclosing scope variables compile directly to standard C-compatible function pointers (`fn(...) -> Ret`):
+
+```rad
+let double = |x: i64| x * 2;
+let add = |a: i64, b: i64| a + b;
+
+println(double(21)); // 42
+println(add(10, 32)); // 42
+```
+
+### Capturing Closures (Fat Function Values)
+Closures that capture variables from outer lexical scopes are represented as `{ fn_ptr, env_ptr }` fat pairs, allowing passing stateful callbacks cleanly to higher-order functions:
+
+```rad
+var base = 100;
+let add_base = |x: i64| base + x;
+
+println(add_base(25)); // 125
+```

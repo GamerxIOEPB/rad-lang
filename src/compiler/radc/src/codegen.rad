@@ -158,7 +158,7 @@ impl Codegen {
         if str_len(raw_t) == 0usize && ep[recv_id].kind == EXPR_CALL {
             let callee = ep[recv_id].left
             if ep[callee].kind == EXPR_IDENT {
-                raw_t = self.get_func_ret_type(ep[callee].str_val.as_ptr() as str)
+                raw_t = self.get_raw_func_ret_type(ep[callee].str_val.as_ptr() as str)
             }
         }
         if str_starts_with(raw_t, "(") {
@@ -631,6 +631,16 @@ impl Codegen {
                         }
                         tup_ty.push_str(")")
                         return tup_ty.as_ptr() as str
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_CALL {
+                        let callee = self.parser.exprs.ptr[init_e].left
+                        if self.parser.exprs.ptr[callee].kind == EXPR_IDENT {
+                            let callee_name = self.parser.exprs.ptr[callee].str_val.as_ptr() as str
+                            let ret_t = self.get_raw_func_ret_type(callee_name)
+                            if str_len(ret_t) > 0usize && !str_eq(ret_t, "void") {
+                                return ret_t
+                            }
+                        }
                     }
                     if self.parser.exprs.ptr[init_e].kind == EXPR_TRY {
                         let inner_id = self.parser.exprs.ptr[init_e].left
@@ -1929,6 +1939,30 @@ impl Codegen {
             return "i64"
         }
         return "i64"
+    }
+
+    fn get_raw_func_ret_type(self, fname: str) -> str {
+        if str_starts_with(fname, "syscall") {
+            return "i64"
+        }
+        let clean_fn = self.clean_type_name(fname)
+        let resolved = self.resolve_function_name(clean_fn, 0usize)
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let fn_s = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if str_eq(fn_s, fname) || str_eq(fn_s, clean_fn) || str_eq(fn_s, resolved) {
+                let rty = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                if str_contains(fname, "<") {
+                    let turboty = self.extract_type_arg(fname)
+                    if str_len(turboty) > 0usize && (str_eq(rty, "T") || str_eq(rty, "U") || str_eq(rty, "V")) {
+                        return turboty
+                    }
+                }
+                return rty
+            }
+            fi = fi + 1usize
+        }
+        return ""
     }
 
     fn get_func_ret_type(self, fname: str) -> str {

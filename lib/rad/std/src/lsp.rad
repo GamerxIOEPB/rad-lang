@@ -99,7 +99,7 @@ impl LspEngine {
         return LspEngine {
             documents: Vec.new(),
             server_name: String.from_str("rad-lsp"),
-            server_version: String.from_str("0.2.4"),
+            server_version: String.from_str("0.2.5"),
             is_initialized: false,
         };
     }
@@ -114,7 +114,7 @@ impl LspEngine {
         caps.push_str("\"renameProvider\":true,");
         caps.push_str("\"documentSymbolProvider\":true,");
         caps.push_str("\"documentFormattingProvider\":true");
-        caps.push_str("},\"serverInfo\":{\"name\":\"rad-lsp\",\"version\":\"0.2.4\"}}");
+        caps.push_str("},\"serverInfo\":{\"name\":\"rad-lsp\",\"version\":\"0.2.5\"}}");
         return caps;
     }
 
@@ -157,6 +157,16 @@ impl LspEngine {
         var doc = String.new();
         if lsp_str_eq(symbol, "fn") {
             doc = String.from_str("### Keyword `fn`\nDeclares a function or method signature in Rad.");
+        } else if lsp_str_eq(symbol, "type") {
+            doc = String.from_str("### Keyword `type`\nDeclares a type alias for a type signature.\n```rad\npub type Callback = fn(i64) -> bool;\n```");
+        } else if lsp_str_eq(symbol, "tuple") {
+            doc = String.from_str("### Tuple Types & Destructuring\nFixed-length heterogeneous product types `(T1, T2)`.\nSupports multi-return functions and destructuring bindings.");
+        } else if lsp_str_eq(symbol, "&&") {
+            doc = String.from_str("### Operator `&&` (Short-Circuit AND)\nEvaluates left side first; short-circuits if false.");
+        } else if lsp_str_eq(symbol, "||") {
+            doc = String.from_str("### Operator `||` (Short-Circuit OR)\nEvaluates left side first; short-circuits if true.");
+        } else if lsp_str_eq(symbol, "|") {
+            doc = String.from_str("### Closure Parameter Delimiter `|`\nDelimits parameters for lambdas and closures.");
         } else if lsp_str_eq(symbol, "struct") {
             doc = String.from_str("### Keyword `struct`\nDefines a concrete data aggregate with named typed fields.");
         } else if lsp_str_eq(symbol, "actor") {

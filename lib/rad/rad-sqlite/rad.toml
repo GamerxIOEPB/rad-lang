@@ -1,0 +1,8 @@
+[package]
+name = "rad-sqlite"
+version = "0.1.0"
+authors = ["Rad Developers"]
+description = "Idiomatic C FFI bindings and query wrapper for SQLite3 in Rad"
+license = "MIT"
+
+[dependencies]

@@ -3109,6 +3109,110 @@ impl Parser {
             if k == TOK_VAR {
                 s_kind = STMT_VAR
             }
+            if self.peek_next_kind() == TOK_LPAREN {
+                self.advance() // skip let / var
+                self.advance() // skip (
+                var names = Vec.new()
+                var elem_types = Vec.new()
+                while self.peek_kind() != TOK_RPAREN && self.peek_kind() != TOK_EOF {
+                    let id_name = String.from_str(self.peek_text())
+                    self.match_ident_or_kw()
+                    names.push(id_name)
+                    var elem_ty = String.new()
+                    if self.match_tok(TOK_COLON) {
+                        elem_ty = self.parse_type_str()
+                    }
+                    elem_types.push(elem_ty)
+                    if !self.match_tok(TOK_COMMA) {
+                        break
+                    }
+                }
+                self.expect_tok(TOK_RPAREN, ")")
+                var tuple_annotated_type = String.new()
+                if self.match_tok(TOK_COLON) {
+                    tuple_annotated_type = self.parse_type_str()
+                }
+                self.expect_tok(TOK_EQ, "=")
+                let init_expr = self.parse_expr(0)
+
+                self.tup_tmp_counter = self.tup_tmp_counter + 1i64
+                var tmp_name = String.new()
+                tmp_name.push_str("__tup_tmp_")
+                tmp_name.push_str(int_to_str(self.tup_tmp_counter as i32).as_ptr() as str)
+
+                let tmp_let = self.add_stmt(Stmt {
+                    kind: STMT_LET,
+                    name: tmp_name,
+                    type_name: tuple_annotated_type,
+                    expr_id: init_expr,
+                    index_expr: 0usize,
+                    then_stmts: Vec.new(),
+                    else_stmts: Vec.new(),
+                    body_stmts: Vec.new(),
+                    stmt_line: stmt_l,
+                    stmt_col: stmt_c,
+                })
+                self.extra_stmts.push(tmp_let)
+
+                var ni = 0usize
+                var last_st = 0usize
+                while ni < names.len {
+                    let ident_e = self.add_expr(Expr {
+                        kind: EXPR_IDENT,
+                        op: 0,
+                        int_val: 0i64,
+                        str_val: String.from_str(tmp_name.as_ptr() as str),
+                        target_type: String.new(),
+                        left: 0usize,
+                        right: 0usize,
+                        args: Vec.new(),
+                        field_name: String.new(),
+                        expr_line: stmt_l,
+                        expr_col: stmt_c,
+                    })
+                    var idx_str = String.new()
+                    idx_str.push_str(int_to_str(ni as i32).as_ptr() as str)
+                    let access_e = self.add_expr(Expr {
+                        kind: EXPR_FIELD_ACCESS,
+                        op: 0,
+                        int_val: 0i64,
+                        str_val: String.new(),
+                        target_type: String.new(),
+                        left: ident_e,
+                        right: 0usize,
+                        args: Vec.new(),
+                        field_name: idx_str,
+                        expr_line: stmt_l,
+                        expr_col: stmt_c,
+                    })
+                    var elem_ty = String.new()
+                    if ni < elem_types.len {
+                        elem_ty = elem_types.ptr[ni]
+                    }
+                    let elem_stmt = self.add_stmt(Stmt {
+                        kind: s_kind,
+                        name: names.ptr[ni],
+                        type_name: elem_ty,
+                        expr_id: access_e,
+                        index_expr: 0usize,
+                        then_stmts: Vec.new(),
+                        else_stmts: Vec.new(),
+                        body_stmts: Vec.new(),
+                        stmt_line: stmt_l,
+                        stmt_col: stmt_c,
+                    })
+                    if ni + 1usize < names.len {
+                        self.extra_stmts.push(elem_stmt)
+                    } else {
+                        last_st = elem_stmt
+                    }
+                    ni = ni + 1usize
+                }
+                if last_st != 0usize {
+                    return last_st
+                }
+                return tmp_let
+            }
             self.advance()
             let v_name = String.from_str(self.peek_text())
             self.expect_tok(TOK_IDENT, "identifier")
@@ -3589,15 +3693,25 @@ impl Parser {
                 self.advance() // skip let / var
                 self.advance() // skip (
                 var names = Vec.new()
+                var elem_types = Vec.new()
                 while self.peek_kind() != TOK_RPAREN && self.peek_kind() != TOK_EOF {
                     let id_name = String.from_str(self.peek_text())
                     self.match_ident_or_kw()
                     names.push(id_name)
+                    var elem_ty = String.new()
+                    if self.match_tok(TOK_COLON) {
+                        elem_ty = self.parse_type_str()
+                    }
+                    elem_types.push(elem_ty)
                     if !self.match_tok(TOK_COMMA) {
                         break
                     }
                 }
                 self.expect_tok(TOK_RPAREN, ")")
+                var tuple_annotated_type = String.new()
+                if self.match_tok(TOK_COLON) {
+                    tuple_annotated_type = self.parse_type_str()
+                }
                 self.expect_tok(TOK_EQ, "=")
                 let init_expr = self.parse_expr(0)
 
@@ -3609,7 +3723,7 @@ impl Parser {
                 let tmp_let = self.add_stmt(Stmt {
                     kind: STMT_LET,
                     name: tmp_name,
-                    type_name: String.new(),
+                    type_name: tuple_annotated_type,
                     expr_id: init_expr,
                     index_expr: 0usize,
                     then_stmts: Vec.new(),
@@ -3654,10 +3768,14 @@ impl Parser {
                     if is_var {
                         elem_kind = STMT_VAR
                     }
+                    var elem_ty = String.new()
+                    if ni < elem_types.len {
+                        elem_ty = elem_types.ptr[ni]
+                    }
                     let elem_stmt = self.add_stmt(Stmt {
                         kind: elem_kind,
                         name: names.ptr[ni],
-                        type_name: String.new(),
+                        type_name: elem_ty,
                         expr_id: access_e,
                         index_expr: 0usize,
                         then_stmts: Vec.new(),

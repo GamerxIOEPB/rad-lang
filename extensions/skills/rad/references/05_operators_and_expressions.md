@@ -100,15 +100,33 @@ fn main() -> i32 {
 
 ---
 
-## 5.4 Logical Operators
+## 5.4 Logical Operators & Short-Circuit Evaluation
 
-Rad provides standard short-circuiting Boolean logic operators:
+Rad provides strict short-circuiting Boolean logic operators with guaranteed left-to-right evaluation:
 
 | Operator | Name | Description |
 | :--- | :--- | :--- |
-| `&&` | Logical AND | Returns `true` only if both operands are `true` (short-circuits) |
-| `\|\|` | Logical OR | Returns `true` if either operand is `true` (short-circuits) |
+| `&&` | Logical AND | Evaluates left side; if `false`, skips right side and yields `false` |
+| `\|\|` | Logical OR | Evaluates left side; if `true`, skips right side and yields `true` |
 | `!` | Logical NOT | Inverts the boolean operand |
+
+### True Short-Circuit Semantics (`br i1` Lowering)
+In Rad 0.2.5+, the compiler lowers `&&` and `||` into conditional basic blocks (`br i1`) rather than evaluating both sides eagerly. This ensures that expressions on the right-hand side are never evaluated if the left-hand operand satisfies the condition.
+
+This makes pointer null-checks and array bounds-guards safe and idiomatic:
+
+```rad
+// Safe array boundary guard: arr[j - 1] is only computed when j > 0
+while j > 0usize && arr[j - 1usize] > key {
+    arr[j] = arr[j - 1usize];
+    j = j - 1usize;
+}
+
+// Safe pointer guard: ptr[0] is only dereferenced when ptr != 0
+if (ptr as usize) != 0usize && ptr[0usize] == 42u8 {
+    println("Found target byte");
+}
+```
 
 ### Example:
 ```rad

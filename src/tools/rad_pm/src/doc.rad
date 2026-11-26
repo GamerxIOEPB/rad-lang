@@ -114,6 +114,80 @@ fn extract_decl_name(line: str, prefix: str) -> String {
     return name;
 }
 
+fn count_char(s: str, ch: u8) -> i64 {
+    let p = s as *raw u8;
+    let len = str_len(s);
+    var c = 0i64;
+    var i = 0usize;
+    while i < len {
+        if p[i] == ch { c = c + 1i64; }
+        i = i + 1usize;
+    }
+    return c;
+}
+
+fn extract_file_stem(path: str) -> String {
+    let p = path as *raw u8;
+    let len = str_len(path);
+    var start = 0usize;
+    var i = 0usize;
+    while i < len {
+        if p[i] == 47u8 { // '/'
+            start = i + 1usize;
+        }
+        i = i + 1usize;
+    }
+    var end = len;
+    var j = start;
+    while j < len {
+        if p[j] == 46u8 { // '.'
+            end = j;
+            break;
+        }
+        j = j + 1usize;
+    }
+    var res = String.new();
+    var k = start;
+    while k < end {
+        res.push_byte(p[k]);
+        k = k + 1usize;
+    }
+    res.push_byte(0u8);
+    return res;
+}
+
+fn extract_impl_target(line: str) -> String {
+    let p = line as *raw u8;
+    let len = str_len(line);
+    var i = 4usize; // after "impl"
+    while i < len && (p[i] == 32u8 || p[i] == 9u8) {
+        i = i + 1usize;
+    }
+    if i < len && p[i] == 60u8 { // '<'
+        while i < len && p[i] != 62u8 { // '>'
+            i = i + 1usize;
+        }
+        if i < len && p[i] == 62u8 {
+            i = i + 1usize;
+        }
+    }
+    while i < len && (p[i] == 32u8 || p[i] == 9u8) {
+        i = i + 1usize;
+    }
+    var res = String.new();
+    while i < len {
+        let b = p[i];
+        if (b >= 97u8 && b <= 122u8) || (b >= 65u8 && b <= 90u8) || (b >= 48u8 && b <= 57u8) || b == 95u8 {
+            res.push_byte(b);
+            i = i + 1usize;
+        } else {
+            break;
+        }
+    }
+    res.push_byte(0u8);
+    return res;
+}
+
 fn parse_doc_items_in_file(path: str, var items: Vec<usize >) {
     let content = read_file_str(path);
     if content.len() == 0usize {
@@ -121,7 +195,10 @@ fn parse_doc_items_in_file(path: str, var items: Vec<usize >) {
     }
     let lines = split_source_lines(content);
 
+    var current_module_doc = String.new();
     var current_doc = String.new();
+    var current_impl = String.new();
+    var impl_depth = 0i64;
     var in_block_comment = false;
 
     var line_idx = 0usize;
@@ -154,6 +231,21 @@ fn parse_doc_items_in_file(path: str, var items: Vec<usize >) {
             continue;
         }
 
+        if str_starts_with(trimmed, "//!") {
+            var doc_line = trimmed;
+            if str_starts_with(doc_line, "//! ") {
+                doc_line = (doc_line as usize + 4usize) as str;
+            } else {
+                doc_line = (doc_line as usize + 3usize) as str;
+            }
+            if current_module_doc.len() > 0usize {
+                current_module_doc.push_byte(10u8);
+            }
+            current_module_doc.push_str(doc_line);
+            line_idx = line_idx + 1usize;
+            continue;
+        }
+
         if str_starts_with(trimmed, "///") {
             var doc_line = trimmed;
             if str_starts_with(doc_line, "/// ") {
@@ -169,17 +261,60 @@ fn parse_doc_items_in_file(path: str, var items: Vec<usize >) {
             continue;
         }
 
+        // Emit module doc if pending
+        if current_module_doc.len() > 0usize && !str_starts_with(trimmed, "//") {
+            let m_name = extract_file_stem(path);
+            let it = malloc(200usize) as *raw var DocItem;
+            it.name = m_name;
+            it.kind = String.from_str("Module");
+            var msig = String.from_str("module ");
+            msig.push_str(m_name.as_ptr() as str);
+            it.signature = msig;
+            it.doc_comment = current_module_doc;
+            it.file_name = String.from_str(path);
+            it.line_num = 1usize;
+            items.push(it as usize);
+            current_module_doc = String.new();
+        }
+
+        // Track impl blocks
+        if str_starts_with(trimmed, "impl ") || str_starts_with(trimmed, "impl<") {
+            let imp_target = extract_impl_target(trimmed);
+            current_impl = imp_target;
+            impl_depth = 1i64;
+            line_idx = line_idx + 1usize;
+            continue;
+        }
+        if impl_depth > 0i64 {
+            let opens = count_char(trimmed, 123u8); // '{'
+            let closes = count_char(trimmed, 125u8); // '}'
+            impl_depth = impl_depth + opens - closes;
+            if impl_depth <= 0i64 {
+                current_impl = String.new();
+                impl_depth = 0i64;
+            }
+        }
+
         // Check for declarations
         if str_starts_with(trimmed, "pub fn ") || str_starts_with(trimmed, "fn ") {
-            let fn_name = extract_decl_name(trimmed, "fn ");
-            if fn_name.len() > 0usize {
+            let raw_fn_name = extract_decl_name(trimmed, "fn ");
+            if raw_fn_name.len() > 0usize {
                 var sig = String.from_str(trimmed);
                 if str_ends_with(trimmed, "{") {
                     sig = string_slice(trimmed, str_len(trimmed) - 1usize);
                 }
+                var full_name = raw_fn_name;
+                var item_kind = "Function";
+                if current_impl.len() > 0usize {
+                    var mname = String.from_str(current_impl.as_ptr() as str);
+                    mname.push_str("::");
+                    mname.push_str(raw_fn_name.as_ptr() as str);
+                    full_name = mname;
+                    item_kind = "Method";
+                }
                 let it = malloc(200usize) as *raw var DocItem;
-                it.name = fn_name;
-                it.kind = String.from_str("Function");
+                it.name = full_name;
+                it.kind = String.from_str(item_kind);
                 it.signature = sig;
                 it.doc_comment = current_doc;
                 it.file_name = String.from_str(path);
@@ -231,6 +366,23 @@ fn parse_doc_items_in_file(path: str, var items: Vec<usize >) {
                 let it = malloc(200usize) as *raw var DocItem;
                 it.name = t_name;
                 it.kind = String.from_str("Trait");
+                it.signature = sig;
+                it.doc_comment = current_doc;
+                it.file_name = String.from_str(path);
+                it.line_num = line_idx + 1usize;
+                items.push(it as usize);
+                current_doc = String.new();
+            }
+        } else if str_starts_with(trimmed, "pub type ") || str_starts_with(trimmed, "type ") {
+            let ty_name = extract_decl_name(trimmed, "type ");
+            if ty_name.len() > 0usize {
+                var sig = String.from_str(trimmed);
+                if str_ends_with(trimmed, ";") {
+                    sig = string_slice(trimmed, str_len(trimmed) - 1usize);
+                }
+                let it = malloc(200usize) as *raw var DocItem;
+                it.name = ty_name;
+                it.kind = String.from_str("Type Alias");
                 it.signature = sig;
                 it.doc_comment = current_doc;
                 it.file_name = String.from_str(path);
@@ -357,17 +509,25 @@ pub fn cmd_doc(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     let _ = system(mkdir_cmd.as_ptr() as str);
 
     // Count categories
+    var mod_count = 0usize;
     var fn_count = 0usize;
+    var method_count = 0usize;
     var struct_count = 0usize;
     var enum_count = 0usize;
+    var trait_count = 0usize;
+    var type_count = 0usize;
     var const_count = 0usize;
     var di = 0usize;
     while di < doc_items.len {
         let it = doc_items.ptr[di] as *raw var DocItem;
         let kname = it.kind.as_ptr() as str;
-        if str_eq(kname, "Function") { fn_count = fn_count + 1usize; }
+        if str_eq(kname, "Module") { mod_count = mod_count + 1usize; }
+        else if str_eq(kname, "Function") { fn_count = fn_count + 1usize; }
+        else if str_eq(kname, "Method") { method_count = method_count + 1usize; }
         else if str_eq(kname, "Struct") { struct_count = struct_count + 1usize; }
         else if str_eq(kname, "Enum") { enum_count = enum_count + 1usize; }
+        else if str_eq(kname, "Trait") { trait_count = trait_count + 1usize; }
+        else if str_eq(kname, "Type Alias") { type_count = type_count + 1usize; }
         else if str_eq(kname, "Constant") { const_count = const_count + 1usize; }
         di = di + 1usize;
     }
@@ -380,7 +540,7 @@ pub fn cmd_doc(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     html.push_str(html_escape(pkg_name).as_ptr() as str);
     html.push_str(" — Rad Documentation</title>\n");
     html.push_str("<style>\n");
-    html.push_str(":root { --bg: #0d1117; --card-bg: #161b22; --border: #30363d; --text: #c9d1d9; --heading: #f0f6fc; --accent: #58a6ff; --code-bg: #1f242c; --fn-badge: #388bfd; --struct-badge: #7ee787; --enum-badge: #ffa657; --const-badge: #d2a8ff; }\n");
+    html.push_str(":root { --bg: #0d1117; --card-bg: #161b22; --border: #30363d; --text: #c9d1d9; --heading: #f0f6fc; --accent: #58a6ff; --code-bg: #1f242c; --mod-badge: #ff7b72; --fn-badge: #388bfd; --method-badge: #56d4dd; --struct-badge: #7ee787; --enum-badge: #ffa657; --trait-badge: #bc8cff; --type-badge: #e3b341; --const-badge: #d2a8ff; }\n");
     html.push_str("body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }\n");
     html.push_str(".sidebar { width: 300px; background: #010409; border-right: 1px solid var(--border); padding: 24px; box-sizing: border-box; flex-shrink: 0; position: sticky; top: 0; height: 100vh; overflow-y: auto; }\n");
     html.push_str(".sidebar h1 { font-size: 20px; color: var(--heading); margin: 0 0 16px 0; }\n");
@@ -396,9 +556,13 @@ pub fn cmd_doc(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     html.push_str(".doc-item:hover { border-color: #58a6ff66; }\n");
     html.push_str(".item-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }\n");
     html.push_str(".badge { font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; }\n");
+    html.push_str(".badge-Module { background: #ff7b7226; color: var(--mod-badge); border: 1px solid #ff7b7240; }\n");
     html.push_str(".badge-Function { background: #388bfd26; color: var(--fn-badge); border: 1px solid #388bfd40; }\n");
+    html.push_str(".badge-Method { background: #56d4dd26; color: var(--method-badge); border: 1px solid #56d4dd40; }\n");
     html.push_str(".badge-Struct { background: #7ee78726; color: var(--struct-badge); border: 1px solid #7ee78740; }\n");
     html.push_str(".badge-Enum { background: #ffa65726; color: var(--enum-badge); border: 1px solid #ffa65740; }\n");
+    html.push_str(".badge-Trait { background: #bc8cff26; color: var(--trait-badge); border: 1px solid #bc8cff40; }\n");
+    html.push_str(".badge-TypeAlias, .badge-Type-Alias { background: #e3b34126; color: var(--type-badge); border: 1px solid #e3b34140; }\n");
     html.push_str(".badge-Constant { background: #d2a8ff26; color: var(--const-badge); border: 1px solid #d2a8ff40; }\n");
     html.push_str(".item-title { font-size: 18px; color: var(--heading); margin: 0; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }\n");
     html.push_str(".item-file { margin-left: auto; font-size: 12px; color: #8b949e; font-family: monospace; }\n");
@@ -418,18 +582,46 @@ pub fn cmd_doc(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
     html.push_str("<input type=\"text\" id=\"docSearch\" class=\"search-box\" placeholder=\"Filter symbols...\" oninput=\"filterSymbols()\">\n");
 
     html.push_str("<div class=\"nav-section\">\n<h3>Summary</h3>\n");
-    html.push_str("<div class=\"nav-link\"><span>Functions</span><span>");
-    html.push_str(int_to_str(fn_count as i64).as_ptr() as str);
-    html.push_str("</span></div>\n");
-    html.push_str("<div class=\"nav-link\"><span>Structs</span><span>");
-    html.push_str(int_to_str(struct_count as i64).as_ptr() as str);
-    html.push_str("</span></div>\n");
-    html.push_str("<div class=\"nav-link\"><span>Enums</span><span>");
-    html.push_str(int_to_str(enum_count as i64).as_ptr() as str);
-    html.push_str("</span></div>\n");
-    html.push_str("<div class=\"nav-link\"><span>Constants</span><span>");
-    html.push_str(int_to_str(const_count as i64).as_ptr() as str);
-    html.push_str("</span></div>\n");
+    if mod_count > 0usize {
+        html.push_str("<div class=\"nav-link\"><span>Modules</span><span>");
+        html.push_str(int_to_str(mod_count as i64).as_ptr() as str);
+        html.push_str("</span></div>\n");
+    }
+    if fn_count > 0usize {
+        html.push_str("<div class=\"nav-link\"><span>Functions</span><span>");
+        html.push_str(int_to_str(fn_count as i64).as_ptr() as str);
+        html.push_str("</span></div>\n");
+    }
+    if method_count > 0usize {
+        html.push_str("<div class=\"nav-link\"><span>Methods</span><span>");
+        html.push_str(int_to_str(method_count as i64).as_ptr() as str);
+        html.push_str("</span></div>\n");
+    }
+    if struct_count > 0usize {
+        html.push_str("<div class=\"nav-link\"><span>Structs</span><span>");
+        html.push_str(int_to_str(struct_count as i64).as_ptr() as str);
+        html.push_str("</span></div>\n");
+    }
+    if enum_count > 0usize {
+        html.push_str("<div class=\"nav-link\"><span>Enums</span><span>");
+        html.push_str(int_to_str(enum_count as i64).as_ptr() as str);
+        html.push_str("</span></div>\n");
+    }
+    if trait_count > 0usize {
+        html.push_str("<div class=\"nav-link\"><span>Traits</span><span>");
+        html.push_str(int_to_str(trait_count as i64).as_ptr() as str);
+        html.push_str("</span></div>\n");
+    }
+    if type_count > 0usize {
+        html.push_str("<div class=\"nav-link\"><span>Type Aliases</span><span>");
+        html.push_str(int_to_str(type_count as i64).as_ptr() as str);
+        html.push_str("</span></div>\n");
+    }
+    if const_count > 0usize {
+        html.push_str("<div class=\"nav-link\"><span>Constants</span><span>");
+        html.push_str(int_to_str(const_count as i64).as_ptr() as str);
+        html.push_str("</span></div>\n");
+    }
     html.push_str("</div>\n</div>\n");
 
     // Main Content
@@ -450,8 +642,12 @@ pub fn cmd_doc(argc: i32, argv: *raw *raw u8, argv0: str) -> i32 {
         html.push_str("\">\n");
 
         html.push_str("<div class=\"item-header\">\n");
+        var badge_cls = kname;
+        if str_eq(kname, "Type Alias") {
+            badge_cls = "TypeAlias";
+        }
         html.push_str("<span class=\"badge badge-");
-        html.push_str(kname);
+        html.push_str(badge_cls);
         html.push_str("\">");
         html.push_str(kname);
         html.push_str("</span>\n");

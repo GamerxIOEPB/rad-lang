@@ -247,6 +247,25 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
                 ld_cmd.push_str(env_h1 as str)
                 ld_cmd.push_str("/.rad/lib/rad/rad-sqlite/vendor ")
             }
+            var has_sqlite = false
+            var sql_chk1 = String.new()
+            sql_chk1.push_str(sysroot.as_ptr() as str)
+            sql_chk1.push_str("/lib/libsqlite3.a")
+            let f_sql1 = fopen(sql_chk1.as_ptr() as str, "rb")
+            if (f_sql1 as usize) != 0usize {
+                fclose(f_sql1)
+                has_sqlite = true
+            }
+            if !has_sqlite && (env_h1 as usize) != 0usize {
+                var sql_chk2 = String.new()
+                sql_chk2.push_str(env_h1 as str)
+                sql_chk2.push_str("/.rad/lib/targets/x86_64-unknown-linux-musl/lib/libsqlite3.a")
+                let f_sql2 = fopen(sql_chk2.as_ptr() as str, "rb")
+                if (f_sql2 as usize) != 0usize {
+                    fclose(f_sql2)
+                    has_sqlite = true
+                }
+            }
             if needs_cxx && cxx_lib_dir.len() > 0usize {
                 ld_cmd.push_str("-L")
                 ld_cmd.push_str(cxx_lib_dir.as_ptr() as str)
@@ -257,6 +276,9 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
             ld_cmd.push_str("/lib/libc.a ")
             ld_cmd.push_str(sysroot.as_ptr() as str)
             ld_cmd.push_str("/lib/libclang_rt.builtins-x86_64.a ")
+            if has_sqlite {
+                ld_cmd.push_str("-lsqlite3 ")
+            }
             if needs_cxx {
                 ld_cmd.push_str("-lstdc++ -lunwind ")
             }
@@ -310,6 +332,9 @@ fn invoke_linker(ir_path: String, out_path: String, opt_level: String, linker_cm
                     ld_cmd_fb.push_str("/lib/libc.a ")
                     ld_cmd_fb.push_str(sysroot.as_ptr() as str)
                     ld_cmd_fb.push_str("/lib/libclang_rt.builtins-x86_64.a ")
+                    if has_sqlite {
+                        ld_cmd_fb.push_str("-lsqlite3 ")
+                    }
                     if needs_cxx {
                         ld_cmd_fb.push_str("-lstdc++ -lunwind ")
                     }

@@ -26,10 +26,15 @@ fn main() -> i32 {
     count = count + 1
     count = count * 2
     print("count is: ")
-    println(count)
+    print(count)
     return 0
 }
 ```
+
+> [!NOTE]
+> **Compiler Diagnostics on Mutability:**
+> - **Undeclared Assignment (`E0020`)**: Assigning to a variable that has not been declared with `let` or `var` (e.g., `a = 10`) triggers compiler error `E0020: cannot assign to undeclared variable 'a' (declare with 'let' or 'var' first)`.
+> - **Unused Mutability Warning (`W0001`)**: If a variable is declared with `var` but is never reassigned or mutated in its scope, the compiler emits warning `W0001: variable does not need to be mutable: 'var a' (consider using 'let a')`. In IDEs such as VS Code with *Rad Utils*, this displays as a yellow squiggly underline.
 
 ### Type Inference
 Rad infers the type of a variable from its initializer expression when the type annotation is omitted:
@@ -180,5 +185,67 @@ Rad supports both single-line and multi-line block comments:
 fn main() -> i32 {
     let a = 10 // Inline comment
     return 0
+}
+```
+
+---
+
+## 4.7 Lightweight Tuple Types & Destructuring
+
+Rad provides first-class support for fixed-size heterogeneous product types (tuples). Tuples allow grouping multiple values of distinct types without declaring an explicit `struct`:
+
+```rad
+// Tuple variable bindings with type inference
+let pair = (10, "rad");
+let point: (f64, f64) = (1.5, 3.0);
+let triplet = (1, "status", true);
+
+// Accessing tuple elements by index (.0, .1, .2)
+print("Point X: ");
+println(point.0);
+print("Point Y: ");
+println(point.1);
+```
+
+### Tuple Destructuring in Variable Bindings
+Tuples can be destructured into individual variables in both `let` and `var` statements:
+
+```rad
+// Destructuring immutable bindings
+let (x, y) = point;
+
+// Destructuring with explicit type annotations
+let (q, r): (i64, i64) = divmod(10, 3);
+let (width: f64, height: f64) = dimensions();
+
+// Destructuring mutable bindings
+var (current, next) = (0, 1);
+current = current + next;
+```
+
+---
+
+## 4.8 Type Aliases (`type`)
+
+Type aliases allow assigning a concise, readable name to an existing primitive, composite, or function type. They are declared with the `type` (or `pub type`) keyword:
+
+```rad
+// Primitive and collection aliases
+type Byte = u8;
+type PointPair = (f64, f64);
+pub type FileDescriptor = i32;
+
+// Function pointer and callback aliases
+pub type Predicate = fn(i64) -> bool;
+pub type EventHandler = fn(*raw u8, usize) -> i32;
+
+fn filter_numbers(arr: *raw i64, len: usize, pred: Predicate) {
+    var i = 0usize;
+    while i < len {
+        if pred(arr[i]) {
+            println(arr[i]);
+        }
+        i = i + 1usize;
+    }
 }
 ```

@@ -176,3 +176,60 @@ fn main() {
     }
 }
 ```
+
+---
+
+## 7.8 Multi-Return Functions & Tuples
+
+Functions can return multiple values bundled in a lightweight tuple type `(T1, T2, ...)`:
+
+```rad
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+    return (a / b, a % b);
+}
+
+fn stats(x: f64) -> (f64, str) {
+    return (x * 2.5, "metric");
+}
+
+fn main() -> i32 {
+    let (q, r) = divmod(10, 3);
+    println(f"Quotient: {q}, Remainder: {r}");
+
+    let (score, label): (f64, str) = stats(4.0);
+    println(f"Score: {score}, Label: {label}");
+    return 0;
+}
+```
+
+---
+
+## 7.9 Lambdas & Closures
+
+Rad supports concise anonymous functions (lambdas) and capturing closures:
+
+### Syntax
+- `|arg1, arg2| expr`
+- `|arg1: Type, arg2: Type| -> RetType { stmts }`
+- `|| expr` (zero-argument lambda)
+
+### Non-Capturing Lambdas
+Lambdas that do not capture enclosing scope variables compile directly to standard C-compatible function pointers (`fn(...) -> Ret`):
+
+```rad
+let double = |x: i64| x * 2;
+let add = |a: i64, b: i64| a + b;
+
+println(double(21)); // 42
+println(add(10, 32)); // 42
+```
+
+### Capturing Closures (Fat Function Values)
+Closures that capture variables from outer lexical scopes are represented as `{ fn_ptr, env_ptr }` fat pairs, allowing passing stateful callbacks cleanly to higher-order functions:
+
+```rad
+var base = 100;
+let add_base = |x: i64| base + x;
+
+println(add_base(25)); // 125
+```
