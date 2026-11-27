@@ -1,0 +1,1629 @@
+// radc/src/codegen_call.rad - Function, Method & Intrinsic Call Emission Pass
+import util;
+import token;
+import ast;
+import parser;
+
+impl Codegen {
+    fn emit_call_expr(var self, expr_id: usize) -> i32 {
+        let ep = self.parser.exprs.ptr
+        let ep_sub = self.parser.exprs.ptr
+        let callee_id = ep_sub[expr_id].left
+        var callee_name = "unknown"
+        if ep_sub[callee_id].kind == EXPR_IDENT {
+            let s = ep_sub[callee_id].str_val.as_ptr() as str
+            if (s as usize) != 0usize && str_len(s) > 0usize {
+                callee_name = s
+            }
+        } else if ep_sub[callee_id].kind == EXPR_FIELD_ACCESS {
+            let recv_id = ep_sub[callee_id].left
+            let type_s = ep_sub[recv_id].str_val.as_ptr() as str
+            let member_s = ep_sub[callee_id].field_name.as_ptr() as str
+            var full_name = String.new()
+            if (type_s as usize) != 0usize && str_len(type_s) > 0usize {
+                full_name.push_str(type_s)
+            }
+            full_name.push_str("__")
+            if (member_s as usize) != 0usize && str_len(member_s) > 0usize {
+                full_name.push_str(member_s)
+            }
+            full_name.push_byte(0u8)
+            callee_name = full_name.as_ptr() as str
+        }
+
+        let call_src_id = self.parser.expr_source_ids.ptr[expr_id]
+        callee_name = self.resolve_function_name(callee_name, call_src_id)
+
+        var is_known = false
+        var f_k = 0usize
+        while f_k < self.parser.functions.len {
+            if str_eq(self.parser.functions.ptr[f_k].fn_name.as_ptr() as str, callee_name) {
+                is_known = true
+                break
+            }
+            f_k = f_k + 1usize
+        }
+        if !is_known && str_contains(callee_name, "<") {
+            let base_name = self.clean_type_name(callee_name)
+            var fi = 0usize
+            while fi < self.parser.functions.len {
+                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, base_name) {
+                    callee_name = base_name
+                    is_known = true
+                    break
+                }
+                fi = fi + 1usize
+            }
+        }
+        var is_indirect = false
+        if !is_known {
+            let chk_callee = self.clean_type_name(callee_name)
+            if str_eq(chk_callee, "puts") || str_eq(chk_callee, "printf") || str_eq(chk_callee, "println") || str_eq(chk_callee, "print") ||
+               str_eq(chk_callee, "malloc") || str_eq(chk_callee, "free") || str_eq(chk_callee, "realloc") ||
+               str_eq(chk_callee, "exit") || str_eq(chk_callee, "fopen") || str_eq(chk_callee, "fclose") ||
+               str_eq(chk_callee, "fread") || str_eq(chk_callee, "fwrite") || str_eq(chk_callee, "fseek") ||
+               str_eq(chk_callee, "ftell") || str_eq(chk_callee, "getenv") || str_eq(chk_callee, "strcmp") ||
+               str_eq(chk_callee, "isatty") || str_eq(chk_callee, "input") ||
+               str_eq(chk_callee, "parse_int") || str_eq(chk_callee, "String__to_int") || str_eq(chk_callee, "String__parse_int") ||
+               str_eq(chk_callee, "dprintf") || str_eq(chk_callee, "eprintln") || str_eq(chk_callee, "panic") || str_eq(chk_callee, "system") ||
+               str_eq(chk_callee, "sqrt") || str_eq(chk_callee, "remove") || str_starts_with(chk_callee, "syscall") || self.is_struct_name(chk_callee) || str_eq(chk_callee, "swap") ||
+               str_eq(chk_callee, "atexit") || str_starts_with(chk_callee, "__rad_") || str_starts_with(chk_callee, "atomic_") ||
+               str_eq(chk_callee, "size_of") || str_eq(chk_callee, "size_of_val") ||
+               str_eq(chk_callee, "Some") || str_eq(chk_callee, "None") || str_eq(chk_callee, "Ok") || str_eq(chk_callee, "Err") ||
+               str_eq(chk_callee, "null") || str_eq(chk_callee, "null_var") || str_eq(chk_callee, "is_null") ||
+               str_eq(chk_callee, "ptr_read") || str_eq(chk_callee, "ptr_write") ||
+               str_eq(chk_callee, "read_volatile") || str_eq(chk_callee, "write_volatile") ||
+               str_eq(chk_callee, "offset") || str_eq(chk_callee, "offset_var") {
+                callee_name = chk_callee
+                is_known = true
+            } else {
+                var is_alloc = false
+                var ai = 0usize
+                while ai < self.allocated_vars.len {
+                    if str_eq(self.allocated_vars.ptr[ai].as_ptr() as str, callee_name) {
+                        is_alloc = true
+                        break
+                    }
+                    ai = ai + 1usize
+                }
+                if is_alloc || (ep_sub[callee_id].kind != EXPR_IDENT && ep_sub[callee_id].kind != EXPR_FIELD_ACCESS) {
+                    is_indirect = true
+                    is_known = true
+                }
+            }
+        }
+        if !is_known {
+            var err = String.new()
+            err.push_str("unresolved identifier '")
+            err.push_str(callee_name)
+            err.push_str("'")
+            let sug = self.find_similar_ident(callee_name)
+            if str_len(sug) > 0usize {
+                err.push_str(" (did you mean '")
+                err.push_str(sug)
+                err.push_str("'?)")
+            }
+            let diag_source_id_2 = self.parser.expr_source_ids.ptr[callee_id]
+            self.parser.report_error_span_for_source(diag_source_id_2, "E0020", err.as_ptr() as str, ep[callee_id].expr_line, ep[callee_id].expr_col, str_len(callee_name) as i64)
+        }
+
+        if str_eq(callee_name, "swap") {
+            if ep_sub[expr_id].args.len == 2usize {
+                let a0 = ep_sub[expr_id].args.ptr[0usize]
+                let a1 = ep_sub[expr_id].args.ptr[1usize]
+                let p0 = self.get_lvalue_ptr(a0)
+                let p1 = self.get_lvalue_ptr(a1)
+                let v0 = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(v0).as_ptr() as str)
+                self.ir.push_str(" = load i64, ptr %")
+                self.ir.push_str(int_to_str(p0).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+
+                let v1 = self.alloc_ssa()
+                self.ir.push_str("  %")
+                self.ir.push_str(int_to_str(v1).as_ptr() as str)
+                self.ir.push_str(" = load i64, ptr %")
+                self.ir.push_str(int_to_str(p1).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+
+                self.ir.push_str("  store i64 %")
+                self.ir.push_str(int_to_str(v1).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(p0).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+
+                self.ir.push_str("  store i64 %")
+                self.ir.push_str(int_to_str(v0).as_ptr() as str)
+                self.ir.push_str(", ptr %")
+                self.ir.push_str(int_to_str(p1).as_ptr() as str)
+                self.ir.push_str(", align 8\n")
+                return 0
+            }
+        }
+
+        if str_eq(callee_name, "input") {
+            var p_reg: i32 = 0
+            if ep_sub[expr_id].args.len > 0usize {
+                let p_expr = ep_sub[expr_id].args.ptr[0usize]
+                let raw_p = self.emit_expr(p_expr)
+                if self.is_expr_string_obj(p_expr) {
+                    let buf_r = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(buf_r).as_ptr() as str)
+                    self.emit_str(" = call ptr @as_ptr(ptr %")
+                    self.emit_str(int_to_str(raw_p).as_ptr() as str)
+                    self.emit_str(")\n")
+                    p_reg = buf_r
+                } else if !self.is_expr_ptr(p_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = inttoptr i64 %")
+                    self.emit_str(int_to_str(raw_p).as_ptr() as str)
+                    self.emit_str(" to ptr\n")
+                    p_reg = cvt
+                } else {
+                    p_reg = raw_p
+                }
+            }
+            let in_res = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(in_res).as_ptr() as str)
+            if p_reg != 0 {
+                self.emit_str(" = call ptr @input(ptr %")
+                self.emit_str(int_to_str(p_reg).as_ptr() as str)
+                self.emit_str(")\n")
+            } else {
+                self.emit_str(" = call ptr @input(ptr null)\n")
+            }
+            return in_res
+        }
+
+        if self.is_struct_name(callee_name) {
+            var s_def_idx = 0usize
+            var found_sdef = false
+            while s_def_idx < self.parser.structs.len {
+                if self.match_struct_name(self.parser.structs.ptr[s_def_idx].struct_name.as_ptr() as str, callee_name) {
+                    found_sdef = true
+                    break
+                }
+                s_def_idx = s_def_idx + 1usize
+            }
+
+            var arg_regs = Vec.new()
+            let args_len = ep_sub[expr_id].args.len
+            var i = 0usize
+            while i < args_len {
+                let a_expr = ep_sub[expr_id].args.ptr[i]
+                let r = self.emit_expr(a_expr)
+                arg_regs.push(r)
+                i = i + 1usize
+            }
+
+            let num_fields = arg_regs.len
+            let size_bytes = num_fields * 8usize
+            let obj_reg = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(obj_reg).as_ptr() as str)
+            self.emit_str(" = call ptr @malloc(i64 ")
+            self.emit_str(int_to_str(size_bytes as i32).as_ptr() as str)
+            self.emit_str(")\n")
+
+            var fi = 0usize
+            while fi < arg_regs.len {
+                let gep = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(gep).as_ptr() as str)
+                self.emit_str(" = getelementptr inbounds i64, ptr %")
+                self.emit_str(int_to_str(obj_reg).as_ptr() as str)
+                self.emit_str(", i64 ")
+                self.emit_str(int_to_str(fi as i32).as_ptr() as str)
+                self.emit_str("\n")
+
+                var field_is_flt = self.is_expr_float(ep_sub[expr_id].args.ptr[fi])
+                if found_sdef && fi < self.parser.structs.ptr[s_def_idx].field_types.len {
+                    let fty = self.parser.structs.ptr[s_def_idx].field_types.ptr[fi].as_ptr() as str
+                    if str_eq(fty, "f64") || str_eq(fty, "f32") {
+                        field_is_flt = true
+                    }
+                }
+
+                var val_reg = arg_regs.ptr[fi]
+                if field_is_flt {
+                    if !self.is_expr_float(ep_sub[expr_id].args.ptr[fi]) {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = sitofp i64 %")
+                        self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                        self.emit_str(" to double\n")
+                        val_reg = cvt
+                    } else if self.is_expr_f32(ep_sub[expr_id].args.ptr[fi]) {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = fpext float %")
+                        self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                        self.emit_str(" to double\n")
+                        val_reg = cvt
+                    }
+                    self.emit_str("  store double %")
+                    self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                    self.emit_str(", ptr %")
+                    self.emit_str(int_to_str(gep).as_ptr() as str)
+                    self.emit_str(", align 8\n")
+                } else {
+                    let a_is_ptr = self.is_expr_ptr(ep_sub[expr_id].args.ptr[fi])
+                    if a_is_ptr {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = ptrtoint ptr %")
+                        self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                        self.emit_str(" to i64\n")
+                        val_reg = cvt
+                    }
+                    self.emit_str("  store i64 %")
+                    self.emit_str(int_to_str(val_reg).as_ptr() as str)
+                    self.emit_str(", ptr %")
+                    self.emit_str(int_to_str(gep).as_ptr() as str)
+                    self.emit_str(", align 8\n")
+                }
+                fi = fi + 1usize
+            }
+            return obj_reg
+        }
+
+        if str_starts_with(callee_name, "syscall") {
+            var s_arg_regs = Vec.new()
+            let s_args_len = ep_sub[expr_id].args.len
+            var si = 0usize
+            while si < s_args_len {
+                let a_expr = ep_sub[expr_id].args.ptr[si]
+                var r = self.emit_expr(a_expr)
+                if self.is_expr_ptr(a_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = ptrtoint ptr %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(" to i64\n")
+                    r = cvt
+                }
+                s_arg_regs.push(r)
+                si = si + 1usize
+            }
+
+            let ret_reg = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(ret_reg).as_ptr() as str)
+            self.emit_str(" = call i64 asm sideeffect ")
+
+            let is_arm = str_starts_with(self.target.as_ptr() as str, "aarch64")
+            if is_arm {
+                self.emit_str("\"svc #0\", \"={x0},{x8}")
+                if s_arg_regs.len > 1usize { self.emit_str(",{x0}") }
+                if s_arg_regs.len > 2usize { self.emit_str(",{x1}") }
+                if s_arg_regs.len > 3usize { self.emit_str(",{x2}") }
+                if s_arg_regs.len > 4usize { self.emit_str(",{x3}") }
+                if s_arg_regs.len > 5usize { self.emit_str(",{x4}") }
+                if s_arg_regs.len > 6usize { self.emit_str(",{x5}") }
+                self.emit_str(",~{memory}\"(")
+            } else {
+                self.emit_str("\"syscall\", \"={rax},{rax}")
+                if s_arg_regs.len > 1usize { self.emit_str(",{rdi}") }
+                if s_arg_regs.len > 2usize { self.emit_str(",{rsi}") }
+                if s_arg_regs.len > 3usize { self.emit_str(",{rdx}") }
+                if s_arg_regs.len > 4usize { self.emit_str(",{r10}") }
+                if s_arg_regs.len > 5usize { self.emit_str(",{r8}") }
+                if s_arg_regs.len > 6usize { self.emit_str(",{r9}") }
+                self.emit_str(",~{rcx},~{r11},~{memory}\"(")
+            }
+
+            var sj = 0usize
+            while sj < s_arg_regs.len {
+                if sj > 0usize { self.emit_str(", ") }
+                self.emit_str("i64 %")
+                self.emit_str(int_to_str(s_arg_regs.ptr[sj]).as_ptr() as str)
+                sj = sj + 1usize
+            }
+            self.emit_str(")\n")
+            return ret_reg
+        }
+
+        if str_eq(callee_name, "printf") && ep_sub[expr_id].args.len > 0usize {
+            let fmt_arg = ep_sub[expr_id].args.ptr[0usize]
+            if ep_sub[fmt_arg].kind == EXPR_STR {
+                let raw_s = ep_sub[fmt_arg].str_val.as_ptr() as str
+                let p_raw = raw_s as *raw u8
+                let raw_len = str_len(raw_s)
+                var conv_fmt = String.new()
+                var ci = 0usize
+                while ci < raw_len {
+                    if p_raw[ci] == 37u8 && ci + 1usize < raw_len && (p_raw[ci + 1usize] == 100u8 || p_raw[ci + 1usize] == 105u8) {
+                        conv_fmt.push_byte(37u8) // '%'
+                        conv_fmt.push_byte(108u8) // 'l'
+                        conv_fmt.push_byte(108u8) // 'l'
+                        conv_fmt.push_byte(100u8) // 'd'
+                        ci = ci + 2usize
+                    } else {
+                        conv_fmt.push_byte(p_raw[ci])
+                        ci = ci + 1usize
+                    }
+                }
+                conv_fmt.push_byte(0u8)
+                ep_sub[fmt_arg].str_val = conv_fmt
+            }
+        }
+
+        var fptr_reg = 0
+        if is_indirect {
+            fptr_reg = self.emit_expr(callee_id)
+        }
+
+        var arg_regs = Vec.new()
+        var indirect_arg_types = Vec.new()
+        let args_len = ep_sub[expr_id].args.len
+        var i = 0usize
+        while i < args_len {
+            let a_expr = ep_sub[expr_id].args.ptr[i]
+            var r = self.emit_expr(a_expr)
+            let raw_pty = self.get_raw_func_param_type(callee_name, i)
+            if str_starts_with(raw_pty, "dyn ") {
+                let target_trait = (raw_pty as usize + 4usize) as str
+                var a_struct = self.get_expr_struct_name(a_expr)
+                if str_len(a_struct) == 0usize && ep_sub[a_expr].kind == EXPR_IDENT {
+                    a_struct = self.get_raw_var_type(ep_sub[a_expr].str_val.as_ptr() as str)
+                }
+                if str_len(a_struct) > 0usize && !str_starts_with(a_struct, "dyn ") {
+                    r = self.coerce_to_trait_object(r, a_struct, target_trait)
+                }
+            }
+            var pty: str = "i64"
+            if !is_indirect {
+                pty = self.get_func_param_type(callee_name, i)
+            } else {
+                pty = self.get_indirect_param_llvm_type(callee_id, callee_name, i, a_expr)
+            }
+            indirect_arg_types.push(pty)
+            var a_is_ptr = self.is_expr_ptr(a_expr)
+            if str_eq(callee_name, "println") || str_eq(callee_name, "print") || str_eq(callee_name, "parse_int") {
+                if self.is_expr_string_obj(a_expr) {
+                    let str_buf = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(str_buf).as_ptr() as str)
+                    self.emit_str(" = call ptr @as_ptr(ptr %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(")\n")
+                    r = str_buf
+                    pty = "ptr"
+                    a_is_ptr = true
+                } else if a_is_ptr {
+                    pty = "ptr"
+                } else if self.is_expr_float(a_expr) {
+                    pty = "double"
+                } else {
+                    pty = "i64"
+                }
+            } else if str_eq(callee_name, "printf") && i > 0usize {
+                if self.is_expr_string_obj(a_expr) {
+                    let str_buf = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(str_buf).as_ptr() as str)
+                    self.emit_str(" = call ptr @as_ptr(ptr %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(")\n")
+                    r = str_buf
+                    pty = "ptr"
+                    a_is_ptr = true
+                } else if a_is_ptr {
+                    pty = "ptr"
+                } else if self.is_expr_float(a_expr) {
+                    pty = "double"
+                } else {
+                    pty = "i64"
+                }
+            }
+            if str_eq(pty, "ptr") && !a_is_ptr {
+                let cvt = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(cvt).as_ptr() as str)
+                self.emit_str(" = inttoptr i64 %")
+                self.emit_str(int_to_str(r).as_ptr() as str)
+                self.emit_str(" to ptr\n")
+                r = cvt
+            } else if (str_eq(pty, "i64") || str_eq(pty, "i32")) && a_is_ptr {
+                var is_opt = false
+                if !str_starts_with(callee_name, "__rad_") && !str_starts_with(callee_name, "Option__") && !str_starts_with(callee_name, "Result__") {
+                    var a_opt_ty = self.get_expr_struct_name(a_expr)
+                    if str_len(a_opt_ty) == 0usize && self.parser.exprs.ptr[a_expr].kind == EXPR_IDENT {
+                        a_opt_ty = self.get_raw_var_type(self.parser.exprs.ptr[a_expr].str_val.as_ptr() as str)
+                    }
+                    if str_eq(a_opt_ty, "Option") || str_starts_with(a_opt_ty, "Option<") || str_eq(a_opt_ty, "Result") || str_starts_with(a_opt_ty, "Result<") {
+                        is_opt = true
+                    }
+                }
+                if is_opt {
+                    let unwrapped = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(unwrapped).as_ptr() as str)
+                    self.emit_str(" = call i64 @__rad_get_val(ptr %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(")\n")
+                    r = unwrapped
+                } else {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = ptrtoint ptr %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(" to i64\n")
+                    r = cvt
+                }
+                if str_eq(pty, "i32") {
+                    let tr = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(tr).as_ptr() as str)
+                    self.emit_str(" = trunc i64 %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(" to i32\n")
+                    r = tr
+                }
+            } else if str_eq(pty, "i32") && !a_is_ptr {
+                let cvt = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(cvt).as_ptr() as str)
+                self.emit_str(" = trunc i64 %")
+                self.emit_str(int_to_str(r).as_ptr() as str)
+                self.emit_str(" to i32\n")
+                r = cvt
+            } else if (str_eq(pty, "i8") || str_eq(pty, "i16")) && !a_is_ptr {
+                let cvt = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(cvt).as_ptr() as str)
+                self.emit_str(" = trunc i64 %")
+                self.emit_str(int_to_str(r).as_ptr() as str)
+                self.emit_str(" to ")
+                self.emit_str(pty)
+                self.emit_str("\n")
+                r = cvt
+            } else if str_eq(pty, "float") {
+                if !self.is_expr_float(a_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = sitofp i64 %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(" to float\n")
+                    r = cvt
+                } else if !self.is_expr_f32(a_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = fptrunc double %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(" to float\n")
+                    r = cvt
+                }
+            } else if str_eq(pty, "double") {
+                if !self.is_expr_float(a_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = sitofp i64 %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(" to double\n")
+                    r = cvt
+                } else if self.is_expr_f32(a_expr) {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = fpext float %")
+                    self.emit_str(int_to_str(r).as_ptr() as str)
+                    self.emit_str(" to double\n")
+                    r = cvt
+                }
+            }
+            arg_regs.push(r)
+            i = i + 1usize
+        }
+
+        var fmt_gep_reg = 0
+        if (str_eq(callee_name, "println") || str_eq(callee_name, "print")) && arg_regs.len > 1usize {
+            let fmt_expr = ep_sub[expr_id].args.ptr[0usize]
+            var raw_fmt = ""
+            if self.parser.exprs.ptr[fmt_expr].kind == EXPR_STR {
+                raw_fmt = self.parser.exprs.ptr[fmt_expr].str_val.as_ptr() as str
+            }
+            let p_raw: *raw u8 = raw_fmt as *raw u8
+            let raw_len = str_len(raw_fmt)
+            var final_fmt = String.new()
+            var ri = 0usize
+            var arg_idx = 1usize
+            while ri < raw_len {
+                if p_raw[ri] == 123u8 && ri + 1usize < raw_len && p_raw[ri + 1usize] == 125u8 {
+                    if arg_idx < ep_sub[expr_id].args.len {
+                        let curr_arg = ep_sub[expr_id].args.ptr[arg_idx]
+                        if self.is_expr_ptr(curr_arg) {
+                            final_fmt.push_byte(37u8) // '%'
+                            final_fmt.push_byte(115u8) // 's'
+                        } else if self.is_expr_float(curr_arg) {
+                            final_fmt.push_byte(37u8) // '%'
+                            final_fmt.push_byte(102u8) // 'f'
+                        } else {
+                            final_fmt.push_byte(37u8) // '%'
+                            final_fmt.push_byte(108u8) // 'l'
+                            final_fmt.push_byte(108u8) // 'l'
+                            final_fmt.push_byte(100u8) // 'd'
+                        }
+                        arg_idx = arg_idx + 1usize
+                    }
+                    ri = ri + 2usize
+                } else {
+                    final_fmt.push_byte(p_raw[ri])
+                    ri = ri + 1usize
+                }
+            }
+            if str_eq(callee_name, "println") {
+                final_fmt.push_byte(10u8) // '\n'
+            }
+            final_fmt.push_byte(0u8)  // '\0'
+
+            let fmt_id = self.intern_string(final_fmt)
+            let fmt_entry = self.strings.ptr[fmt_id]
+            fmt_gep_reg = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(fmt_gep_reg).as_ptr() as str)
+            self.emit_str(" = getelementptr inbounds [")
+            self.emit_str(int_to_str(fmt_entry.byte_len as i32).as_ptr() as str)
+            self.emit_str(" x i8], ptr @.str.")
+            self.emit_str(int_to_str(fmt_id as i32).as_ptr() as str)
+            self.emit_str(", i32 0, i32 0\n")
+        }
+
+        var call_ret_ty = self.get_func_ret_type(callee_name)
+        if is_indirect {
+            call_ret_ty = self.get_indirect_ret_llvm_type(callee_id, callee_name)
+        }
+        if str_eq(call_ret_ty, "void") {
+            if (str_eq(callee_name, "println") || str_eq(callee_name, "print")) && fmt_gep_reg != 0 {
+                let p_ssa = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(p_ssa).as_ptr() as str)
+                self.emit_str(" = call i32 (ptr, ...) @printf(ptr %")
+                self.emit_str(int_to_str(fmt_gep_reg).as_ptr() as str)
+                var pj = 1usize
+                while pj < arg_regs.len {
+                    let curr_arg = ep_sub[expr_id].args.ptr[pj]
+                    if self.is_expr_ptr(curr_arg) {
+                        self.emit_str(", ptr %")
+                    } else if self.is_expr_float(curr_arg) {
+                        self.emit_str(", double %")
+                    } else {
+                        self.emit_str(", i64 %")
+                    }
+                    self.emit_str(int_to_str(arg_regs.ptr[pj]).as_ptr() as str)
+                    pj = pj + 1usize
+                }
+                self.emit_str(")\n")
+                if str_eq(callee_name, "print") {
+                    let flush_reg = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(flush_reg).as_ptr() as str)
+                    self.emit_str(" = call i32 @fflush(ptr null)\n")
+                }
+            } else if str_eq(callee_name, "println") {
+                if arg_regs.len > 0usize {
+                    let first_arg = ep_sub[expr_id].args.ptr[0usize]
+                    let p_ssa = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(p_ssa).as_ptr() as str)
+                    if self.is_expr_float(first_arg) {
+                        self.emit_str(" = call i32 (ptr, ...) @printf(ptr @.fprint_fmt, double %")
+                        self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                        self.emit_str(")\n")
+                    } else if self.is_expr_ptr(first_arg) {
+                        self.emit_str(" = call i32 @puts(ptr %")
+                        self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                        self.emit_str(")\n")
+                    } else {
+                        self.emit_str(" = call i32 (ptr, ...) @printf(ptr @.iprint_fmt, i64 %")
+                        self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                        self.emit_str(")\n")
+                    }
+                } else {
+                    let p_ssa = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(p_ssa).as_ptr() as str)
+                    self.emit_str(" = call i32 @puts(ptr @.empty_str)\n")
+                }
+            } else if str_eq(callee_name, "print") {
+                if arg_regs.len > 0usize {
+                    let first_arg = ep_sub[expr_id].args.ptr[0usize]
+                    let p_ssa = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(p_ssa).as_ptr() as str)
+                    if self.is_expr_float(first_arg) {
+                        self.emit_str(" = call i32 (ptr, ...) @printf(ptr @.fprint_nonl_fmt, double %")
+                        self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                        self.emit_str(")\n")
+                    } else if self.is_expr_ptr(first_arg) {
+                        self.emit_str(" = call i32 (ptr, ...) @printf(ptr @.sprint_nonl_fmt, ptr %")
+                        self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                        self.emit_str(")\n")
+                    } else {
+                        self.emit_str(" = call i32 (ptr, ...) @printf(ptr @.iprint_nonl_fmt, i64 %")
+                        self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                        self.emit_str(")\n")
+                    }
+                    let flush_reg = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(flush_reg).as_ptr() as str)
+                    self.emit_str(" = call i32 @fflush(ptr null)\n")
+                } else {
+                    let flush_reg = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(flush_reg).as_ptr() as str)
+                    self.emit_str(" = call i32 @fflush(ptr null)\n")
+                }
+            } else if is_indirect {
+                if self.is_expr_closure(callee_id) {
+                    let fn_gep = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(fn_gep).as_ptr() as str)
+                    self.emit_str(" = getelementptr inbounds ptr, ptr %")
+                    self.emit_str(int_to_str(fptr_reg).as_ptr() as str)
+                    self.emit_str(", i64 0\n")
+                    let actual_fn = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(actual_fn).as_ptr() as str)
+                    self.emit_str(" = load ptr, ptr %")
+                    self.emit_str(int_to_str(fn_gep).as_ptr() as str)
+                    self.emit_str(", align 8\n")
+
+                    let env_gep = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(env_gep).as_ptr() as str)
+                    self.emit_str(" = getelementptr inbounds ptr, ptr %")
+                    self.emit_str(int_to_str(fptr_reg).as_ptr() as str)
+                    self.emit_str(", i64 1\n")
+                    let actual_env = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(actual_env).as_ptr() as str)
+                    self.emit_str(" = load ptr, ptr %")
+                    self.emit_str(int_to_str(env_gep).as_ptr() as str)
+                    self.emit_str(", align 8\n")
+
+                    self.emit_str("  call void %")
+                    self.emit_str(int_to_str(actual_fn).as_ptr() as str)
+                    self.emit_str("(ptr %")
+                    self.emit_str(int_to_str(actual_env).as_ptr() as str)
+                    var j = 0usize
+                    while j < arg_regs.len {
+                        self.emit_str(", ")
+                        self.emit_str(indirect_arg_types.ptr[j])
+                        self.emit_str(" %")
+                        self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
+                        j = j + 1usize
+                    }
+                    self.emit_str(")\n")
+                } else {
+                    self.emit_str("  call void %")
+                    self.emit_str(int_to_str(fptr_reg).as_ptr() as str)
+                    self.emit_str("(")
+                    var j = 0usize
+                    while j < arg_regs.len {
+                        if j > 0usize { self.emit_str(", ") }
+                        self.emit_str(indirect_arg_types.ptr[j])
+                        self.emit_str(" %")
+                        self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
+                        j = j + 1usize
+                    }
+                    self.emit_str(")\n")
+                }
+            } else {
+                self.emit_str("  call void @")
+                self.emit_str(callee_name)
+                self.emit_str("(")
+                var j = 0usize
+                while j < arg_regs.len {
+                    if j > 0usize { self.emit_str(", ") }
+                    let pty = self.get_func_param_type(callee_name, j)
+                    self.emit_str(pty)
+                    self.emit_str(" %")
+                    self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
+                    j = j + 1usize
+                }
+                self.emit_str(")\n")
+            }
+            return 0
+        }
+        var clos_actual_fn: i32 = 0
+        var clos_actual_env: i32 = 0
+        if is_indirect && self.is_expr_closure(callee_id) {
+            let fn_gep = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(fn_gep).as_ptr() as str)
+            self.emit_str(" = getelementptr inbounds ptr, ptr %")
+            self.emit_str(int_to_str(fptr_reg).as_ptr() as str)
+            self.emit_str(", i64 0\n")
+            clos_actual_fn = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(clos_actual_fn).as_ptr() as str)
+            self.emit_str(" = load ptr, ptr %")
+            self.emit_str(int_to_str(fn_gep).as_ptr() as str)
+            self.emit_str(", align 8\n")
+
+            let env_gep = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(env_gep).as_ptr() as str)
+            self.emit_str(" = getelementptr inbounds ptr, ptr %")
+            self.emit_str(int_to_str(fptr_reg).as_ptr() as str)
+            self.emit_str(", i64 1\n")
+            clos_actual_env = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(clos_actual_env).as_ptr() as str)
+            self.emit_str(" = load ptr, ptr %")
+            self.emit_str(int_to_str(env_gep).as_ptr() as str)
+            self.emit_str(", align 8\n")
+        }
+
+        let res = self.alloc_ssa()
+        self.emit_str("  %")
+        self.emit_str(int_to_str(res).as_ptr() as str)
+        self.emit_str(" = call ")
+        self.emit_str(call_ret_ty)
+        if (str_eq(callee_name, "println") || str_eq(callee_name, "print")) && fmt_gep_reg != 0 {
+            self.emit_str(" (ptr, ...) @printf(ptr %")
+            self.emit_str(int_to_str(fmt_gep_reg).as_ptr() as str)
+            var pj = 1usize
+            while pj < arg_regs.len {
+                let curr_arg = ep_sub[expr_id].args.ptr[pj]
+                if self.is_expr_ptr(curr_arg) {
+                    self.emit_str(", ptr %")
+                } else if self.is_expr_float(curr_arg) {
+                    self.emit_str(", double %")
+                } else {
+                    self.emit_str(", i64 %")
+                }
+                self.emit_str(int_to_str(arg_regs.ptr[pj]).as_ptr() as str)
+                pj = pj + 1usize
+            }
+            self.emit_str(")\n")
+            if str_eq(callee_name, "print") {
+                let flush_reg = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(flush_reg).as_ptr() as str)
+                self.emit_str(" = call i32 @fflush(ptr null)\n")
+            }
+        } else if str_eq(callee_name, "printf") {
+            self.emit_str(" (ptr, ...) @printf(ptr %")
+            if arg_regs.len > 0usize {
+                self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+            }
+            var pj = 1usize
+            while pj < arg_regs.len {
+                let curr_arg = ep_sub[expr_id].args.ptr[pj]
+                if self.is_expr_ptr(curr_arg) {
+                    self.emit_str(", ptr %")
+                } else if self.is_expr_float(curr_arg) {
+                    self.emit_str(", double %")
+                } else {
+                    self.emit_str(", i64 %")
+                }
+                self.emit_str(int_to_str(arg_regs.ptr[pj]).as_ptr() as str)
+                pj = pj + 1usize
+            }
+            self.emit_str(")\n")
+        } else if str_eq(callee_name, "println") {
+            if arg_regs.len > 0usize {
+                let first_arg = ep_sub[expr_id].args.ptr[0usize]
+                if self.is_expr_float(first_arg) {
+                    self.emit_str(" (ptr, ...) @printf(ptr @.fprint_fmt, double %")
+                    self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                    self.emit_str(")\n")
+                } else if self.is_expr_ptr(first_arg) {
+                    self.emit_str(" @puts(ptr %")
+                    self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                    self.emit_str(")\n")
+                } else {
+                    self.emit_str(" (ptr, ...) @printf(ptr @.iprint_fmt, i64 %")
+                    self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                    self.emit_str(")\n")
+                }
+            } else {
+                self.emit_str(" @puts(ptr @.empty_str)\n")
+            }
+        } else if str_eq(callee_name, "print") {
+            if arg_regs.len > 0usize {
+                let first_arg = ep_sub[expr_id].args.ptr[0usize]
+                if self.is_expr_float(first_arg) {
+                    self.emit_str(" (ptr, ...) @printf(ptr @.fprint_nonl_fmt, double %")
+                    self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                    self.emit_str(")\n")
+                } else if self.is_expr_ptr(first_arg) {
+                    self.emit_str(" (ptr, ...) @printf(ptr @.sprint_nonl_fmt, ptr %")
+                    self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                    self.emit_str(")\n")
+                } else {
+                    self.emit_str(" (ptr, ...) @printf(ptr @.iprint_nonl_fmt, i64 %")
+                    self.emit_str(int_to_str(arg_regs.ptr[0usize]).as_ptr() as str)
+                    self.emit_str(")\n")
+                }
+                let flush_reg = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(flush_reg).as_ptr() as str)
+                self.emit_str(" = call i32 @fflush(ptr null)\n")
+            } else {
+                let flush_reg = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(flush_reg).as_ptr() as str)
+                self.emit_str(" = call i32 @fflush(ptr null)\n")
+            }
+        } else if is_indirect {
+            if clos_actual_fn != 0 {
+                self.emit_str(" %")
+                self.emit_str(int_to_str(clos_actual_fn).as_ptr() as str)
+                self.emit_str("(ptr %")
+                self.emit_str(int_to_str(clos_actual_env).as_ptr() as str)
+                var j = 0usize
+                while j < arg_regs.len {
+                    self.emit_str(", ")
+                    self.emit_str(indirect_arg_types.ptr[j])
+                    self.emit_str(" %")
+                    self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
+                    j = j + 1usize
+                }
+                self.emit_str(")\n")
+            } else {
+                self.emit_str(" %")
+                self.emit_str(int_to_str(fptr_reg).as_ptr() as str)
+                self.emit_str("(")
+                var j = 0usize
+                while j < arg_regs.len {
+                    if j > 0usize { self.emit_str(", ") }
+                    self.emit_str(indirect_arg_types.ptr[j])
+                    self.emit_str(" %")
+                    self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
+                    j = j + 1usize
+                }
+                self.emit_str(")\n")
+            }
+        } else {
+            self.emit_str(" @")
+            self.emit_str(callee_name)
+            self.emit_str("(")
+            var j = 0usize
+            while j < arg_regs.len {
+                if j > 0usize { self.emit_str(", ") }
+                let pty = self.get_func_param_type(callee_name, j)
+                self.emit_str(pty)
+                self.emit_str(" %")
+                self.emit_str(int_to_str(arg_regs.ptr[j]).as_ptr() as str)
+                j = j + 1usize
+            }
+            self.emit_str(")\n")
+        }
+        if str_eq(call_ret_ty, "i32") {
+            let ext = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(ext).as_ptr() as str)
+            self.emit_str(" = sext i32 %")
+            self.emit_str(int_to_str(res).as_ptr() as str)
+            self.emit_str(" to i64\n")
+            return ext
+        }
+        if str_eq(call_ret_ty, "i8") || str_eq(call_ret_ty, "i16") {
+            let ext = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(ext).as_ptr() as str)
+            self.emit_str(" = sext ")
+            self.emit_str(call_ret_ty)
+            self.emit_str(" %")
+            self.emit_str(int_to_str(res).as_ptr() as str)
+            self.emit_str(" to i64\n")
+            return ext
+        }
+        if str_eq(call_ret_ty, "i64") && self.is_expr_ptr(expr_id) {
+            let cvt = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(cvt).as_ptr() as str)
+            self.emit_str(" = inttoptr i64 %")
+            self.emit_str(int_to_str(res).as_ptr() as str)
+            self.emit_str(" to ptr\n")
+            return cvt
+        }
+        if str_eq(call_ret_ty, "ptr") && !self.is_expr_ptr(expr_id) && !self.is_expr_float(expr_id) {
+            let cvt = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(cvt).as_ptr() as str)
+            self.emit_str(" = ptrtoint ptr %")
+            self.emit_str(int_to_str(res).as_ptr() as str)
+            self.emit_str(" to i64\n")
+            return cvt
+        }
+        return res
+    }
+
+    fn emit_method_call_expr(var self, expr_id: usize) -> i32 {
+        let ep = self.parser.exprs.ptr
+        let recv_id = ep[expr_id].left
+        let member = ep[expr_id].str_val.as_ptr() as str
+        let clean_member = self.clean_type_name(member)
+        var is_static = false
+        if ep[recv_id].kind == EXPR_IDENT {
+            let p_recv: *raw u8 = ep[recv_id].str_val.as_ptr()
+            if (p_recv as usize) != 0usize && (p_recv[0usize] >= 65u8 && p_recv[0usize] <= 90u8) {
+                is_static = true
+            } else {
+                let vname = ep[recv_id].str_val.as_ptr() as str
+                let is_var = str_len(self.get_raw_var_type(vname)) > 0usize
+                if !is_var {
+                    is_static = true
+                }
+            }
+        }
+
+        var callee_name: str = (member as usize) as str
+        if is_static {
+            let type_s = ep[recv_id].str_val.as_ptr() as str
+            if str_eq(type_s, "Vec") && (str_eq(member, "from") || str_eq(clean_member, "from")) {
+                callee_name = "vec_from"
+            }
+
+            // Give String.new and Vec.new distinct symbols.
+            if ((str_eq(member, "new") || str_eq(clean_member, "new")) && (str_eq(type_s, "String") || str_eq(type_s, "Vec"))) || ((str_eq(member, "from_str") || str_eq(clean_member, "from_str")) && str_eq(type_s, "String")) {
+                var ctor_name = String.new()
+                ctor_name.push_str(type_s)
+                ctor_name.push_str("__new")
+                ctor_name.push_byte(0u8)
+                var fi = 0usize
+                while fi < self.parser.functions.len {
+                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, ctor_name.as_ptr() as str) {
+                        callee_name = ctor_name.as_ptr() as str
+                        break
+                    }
+                    fi = fi + 1usize
+                }
+            }
+
+            let clean_type_s = self.clean_type_name(type_s)
+            if true {
+                var mangled = String.new()
+                mangled.push_str(clean_type_s)
+                mangled.push_str("__")
+                mangled.push_str(clean_member)
+                mangled.push_byte(0u8)
+                let m_str = mangled.as_ptr() as str
+                var found_static = false
+                var fi = 0usize
+                while fi < self.parser.functions.len {
+                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, m_str) {
+                        callee_name = m_str
+                        found_static = true
+                        break
+                    }
+                    fi = fi + 1usize
+                }
+                if !found_static {
+                    var cti = 0usize
+                    while cti < self.parser.enum_variant_ctors.len {
+                        if str_eq(self.parser.enum_variant_ctors.ptr[cti].as_ptr() as str, m_str) {
+                            callee_name = m_str
+                            found_static = true
+                            break
+                        }
+                        cti = cti + 1usize
+                    }
+                }
+                if !found_static {
+                    let base_ty = self.clean_type_name(type_s)
+                    if !str_eq(base_ty, type_s) && str_len(base_ty) > 0usize {
+                        var b_mangled = String.new()
+                        b_mangled.push_str(base_ty)
+                        b_mangled.push_str("__")
+                        b_mangled.push_str(clean_member)
+                        b_mangled.push_byte(0u8)
+                        let bm_str = b_mangled.as_ptr() as str
+                        fi = 0usize
+                        while fi < self.parser.functions.len {
+                            if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_str) {
+                                callee_name = bm_str
+                                break
+                            }
+                            fi = fi + 1usize
+                        }
+                    }
+                }
+            }
+        } else {
+            var raw_ty = self.get_expr_struct_name(recv_id)
+            if str_len(raw_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                let vname = ep[recv_id].str_val.as_ptr() as str
+                let vty = self.get_raw_var_type(vname)
+                if str_len(vty) > 0usize {
+                    raw_ty = vty
+                }
+            }
+            var is_option_auto_unwrap = false
+            if str_starts_with(raw_ty, "Option<") {
+                var is_opt_method = false
+                if str_eq(clean_member, "unwrap") || str_eq(clean_member, "unwrap_or") || str_eq(clean_member, "is_some") || str_eq(clean_member, "is_none") || str_eq(clean_member, "ok_or") || str_eq(clean_member, "expect") || str_eq(clean_member, "map") || str_eq(clean_member, "and_then") || str_eq(clean_member, "unwrap_or_else") || str_eq(clean_member, "filter") || str_eq(clean_member, "contains") {
+                    is_opt_method = true
+                } else {
+                    var opt_m_name = String.new()
+                    opt_m_name.push_str("Option__")
+                    opt_m_name.push_str(clean_member)
+                    opt_m_name.push_byte(0u8)
+                    let om_s = opt_m_name.as_ptr() as str
+                    var omi = 0usize
+                    while omi < self.parser.functions.len {
+                        if str_eq(self.parser.functions.ptr[omi].fn_name.as_ptr() as str, om_s) {
+                            is_opt_method = true
+                            break
+                        }
+                        omi = omi + 1usize
+                    }
+                }
+                if !is_opt_method {
+                    let plen = str_len(raw_ty)
+                    if plen > 8usize {
+                        var inner = String.new()
+                        let cp = raw_ty as *raw u8
+                        var ci = 7usize
+                        while ci < plen && cp[ci] != 62u8 {
+                            inner.push_byte(cp[ci])
+                            ci = ci + 1usize
+                        }
+                        inner.push_byte(0u8)
+                        raw_ty = inner.as_ptr() as str
+                        is_option_auto_unwrap = true
+                    }
+                }
+            }
+            if str_starts_with(raw_ty, "dyn ") {
+                let trait_name = (raw_ty as usize + 4usize) as str
+                var tr_idx = 0usize
+                var found_tr = false
+                while tr_idx < self.parser.traits.len {
+                    if str_eq(self.parser.traits.ptr[tr_idx].trait_name.as_ptr() as str, trait_name) {
+                        found_tr = true
+                        break
+                    }
+                    tr_idx = tr_idx + 1usize
+                }
+                if found_tr {
+                    let tr_def = self.parser.traits.ptr[tr_idx]
+                    var m_idx = 0usize
+                    var found_m = false
+                    while m_idx < tr_def.methods.len {
+                        if str_eq(tr_def.methods.ptr[m_idx].method_name.as_ptr() as str, member) || str_eq(tr_def.methods.ptr[m_idx].method_name.as_ptr() as str, clean_member) {
+                            found_m = true
+                            break
+                        }
+                        m_idx = m_idx + 1usize
+                    }
+                    if found_m {
+                        let m_def = tr_def.methods.ptr[m_idx]
+                        let ret_llvm = self.emit_llvm_type(m_def.ret_type.as_ptr() as str)
+                        var fat_reg = self.emit_expr(recv_id)
+                        if !self.is_expr_ptr(recv_id) {
+                            let cvt = self.alloc_ssa()
+                            self.emit_str("  %")
+                            self.emit_str(int_to_str(cvt).as_ptr() as str)
+                            self.emit_str(" = inttoptr i64 %")
+                            self.emit_str(int_to_str(fat_reg).as_ptr() as str)
+                            self.emit_str(" to ptr\n")
+                            fat_reg = cvt
+                        }
+
+                        // Load data_ptr
+                        let gep_d = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(gep_d).as_ptr() as str)
+                        self.emit_str(" = getelementptr inbounds ptr, ptr %")
+                        self.emit_str(int_to_str(fat_reg).as_ptr() as str)
+                        self.emit_str(", i64 0\n")
+                        let data_ptr = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(data_ptr).as_ptr() as str)
+                        self.emit_str(" = load ptr, ptr %")
+                        self.emit_str(int_to_str(gep_d).as_ptr() as str)
+                        self.emit_str(", align 8\n")
+
+                        // Load vtable_ptr
+                        let gep_v = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(gep_v).as_ptr() as str)
+                        self.emit_str(" = getelementptr inbounds ptr, ptr %")
+                        self.emit_str(int_to_str(fat_reg).as_ptr() as str)
+                        self.emit_str(", i64 1\n")
+                        let vt_ptr = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(vt_ptr).as_ptr() as str)
+                        self.emit_str(" = load ptr, ptr %")
+                        self.emit_str(int_to_str(gep_v).as_ptr() as str)
+                        self.emit_str(", align 8\n")
+
+                        // Load fn_ptr
+                        let gep_fn = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(gep_fn).as_ptr() as str)
+                        self.emit_str(" = getelementptr inbounds ptr, ptr %")
+                        self.emit_str(int_to_str(vt_ptr).as_ptr() as str)
+                        self.emit_str(", i64 ")
+                        self.emit_str(int_to_str(m_idx as i32).as_ptr() as str)
+                        self.emit_str("\n")
+                        let fn_ptr = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(fn_ptr).as_ptr() as str)
+                        self.emit_str(" = load ptr, ptr %")
+                        self.emit_str(int_to_str(gep_fn).as_ptr() as str)
+                        self.emit_str(", align 8\n")
+
+                        var call_arg_regs = Vec.new()
+                        var call_arg_types = Vec.new()
+                        call_arg_regs.push(data_ptr)
+                        call_arg_types.push("ptr")
+
+                        var ai = 0usize
+                        while ai < ep[expr_id].args.len {
+                            let a_expr = ep[expr_id].args.ptr[ai]
+                            let ar = self.emit_expr(a_expr)
+                            var aty = "i64"
+                            if self.is_expr_float(a_expr) {
+                                aty = "double"
+                            } else if self.is_expr_ptr(a_expr) {
+                                aty = "ptr"
+                            }
+                            call_arg_regs.push(ar)
+                            call_arg_types.push(aty)
+                            ai = ai + 1usize
+                        }
+
+                        if str_eq(ret_llvm, "void") {
+                            self.emit_str("  call void %")
+                            self.emit_str(int_to_str(fn_ptr).as_ptr() as str)
+                            self.emit_str("(")
+                            var ki = 0usize
+                            while ki < call_arg_regs.len {
+                                if ki > 0usize { self.emit_str(", ") }
+                                self.emit_str(call_arg_types.ptr[ki])
+                                self.emit_str(" %")
+                                self.emit_str(int_to_str(call_arg_regs.ptr[ki]).as_ptr() as str)
+                                ki = ki + 1usize
+                            }
+                            self.emit_str(")\n")
+                            return 0
+                        }
+
+                        let res = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(res).as_ptr() as str)
+                        self.emit_str(" = call ")
+                        self.emit_str(ret_llvm)
+                        self.emit_str(" %")
+                        self.emit_str(int_to_str(fn_ptr).as_ptr() as str)
+                        self.emit_str("(")
+                        var ki = 0usize
+                        while ki < call_arg_regs.len {
+                            if ki > 0usize { self.emit_str(", ") }
+                            self.emit_str(call_arg_types.ptr[ki])
+                            self.emit_str(" %")
+                            self.emit_str(int_to_str(call_arg_regs.ptr[ki]).as_ptr() as str)
+                            ki = ki + 1usize
+                        }
+                        self.emit_str(")\n")
+                        return res
+                    }
+                }
+            }
+            var found_mangled = false
+            let clean_raw = self.clean_type_name(raw_ty)
+            if str_len(raw_ty) > 0usize {
+                var mangled = String.new()
+                mangled.push_str(clean_raw)
+                mangled.push_str("__")
+                mangled.push_str(clean_member)
+                mangled.push_byte(0u8)
+                let m_str = mangled.as_ptr() as str
+                var fi = 0usize
+                while fi < self.parser.functions.len {
+                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, m_str) {
+                        callee_name = m_str
+                        found_mangled = true
+                        break
+                    }
+                    fi = fi + 1usize
+                }
+                if !found_mangled {
+                    let base_ty = self.clean_type_name(raw_ty)
+                    if !str_eq(base_ty, raw_ty) && str_len(base_ty) > 0usize {
+                        var b_mangled = String.new()
+                        b_mangled.push_str(base_ty)
+                        b_mangled.push_str("__")
+                        b_mangled.push_str(clean_member)
+                        b_mangled.push_byte(0u8)
+                        let bm_str = b_mangled.as_ptr() as str
+                        fi = 0usize
+                        while fi < self.parser.functions.len {
+                            if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_str) {
+                                callee_name = bm_str
+                                found_mangled = true
+                                break
+                            }
+                            fi = fi + 1usize
+                        }
+                    }
+                }
+            }
+            if !found_mangled && str_eq(clean_raw, "Option") {
+                if str_eq(clean_member, "unwrap") || str_eq(clean_member, "unwrap_or") || str_eq(clean_member, "is_some") || str_eq(clean_member, "is_none") || str_eq(clean_member, "ok_or") || str_eq(clean_member, "expect") || str_eq(clean_member, "map") || str_eq(clean_member, "and_then") || str_eq(clean_member, "unwrap_or_else") || str_eq(clean_member, "filter") || str_eq(clean_member, "contains") {
+                    var mangled_opt = String.new()
+                    mangled_opt.push_str("Option__")
+                    mangled_opt.push_str(clean_member)
+                    mangled_opt.push_byte(0u8)
+                    callee_name = mangled_opt.as_ptr() as str
+                    found_mangled = true
+                }
+            }
+            if !found_mangled && str_eq(clean_raw, "Result") {
+                if str_eq(clean_member, "unwrap") || str_eq(clean_member, "unwrap_or") || str_eq(clean_member, "is_ok") || str_eq(clean_member, "is_err") || str_eq(clean_member, "expect") || str_eq(clean_member, "unwrap_err") || str_eq(clean_member, "ok") || str_eq(clean_member, "err") || str_eq(clean_member, "map") || str_eq(clean_member, "and_then") || str_eq(clean_member, "unwrap_or_else") || str_eq(clean_member, "contains") || str_eq(clean_member, "or_else") {
+                    var mangled_res = String.new()
+                    mangled_res.push_str("Result__")
+                    mangled_res.push_str(clean_member)
+                    mangled_res.push_byte(0u8)
+                    callee_name = mangled_res.as_ptr() as str
+                    found_mangled = true
+                }
+            }
+            if !found_mangled && str_eq(clean_raw, "String") {
+                if str_eq(clean_member, "to_int") || str_eq(clean_member, "parse_int") {
+                    var mangled_str = String.new()
+                    mangled_str.push_str("String__")
+                    mangled_str.push_str(clean_member)
+                    mangled_str.push_byte(0u8)
+                    callee_name = mangled_str.as_ptr() as str
+                    found_mangled = true
+                }
+            }
+            if !found_mangled {
+                var standalone_found = false
+                var fi = 0usize
+                while fi < self.parser.functions.len {
+                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, member) {
+                        standalone_found = true
+                        break
+                    }
+                    fi = fi + 1usize
+                }
+                if !standalone_found && !str_eq(clean_raw, "Vec") && !str_eq(clean_raw, "String") {
+                    var candidate = ""
+                    var c_count = 0
+                    fi = 0usize
+                    while fi < self.parser.functions.len {
+                        let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+                        if str_ends_with(fn_str, member) {
+                            let flen = str_len(fn_str)
+                            let mlen = str_len(member)
+                            if flen > mlen + 2usize {
+                                let p = fn_str as *raw u8
+                                if p[flen - mlen - 1usize] == 95u8 && p[flen - mlen - 2usize] == 95u8 {
+                                    candidate = fn_str
+                                    c_count = c_count + 1
+                                }
+                            }
+                        }
+                        fi = fi + 1usize
+                    }
+                    if c_count == 1 {
+                        callee_name = candidate
+                    }
+                }
+            }
+        }
+
+        var arg_regs = Vec.new()
+        var arg_is_ptrs = Vec.new()
+        if !is_static {
+            var r_reg = self.emit_expr(recv_id)
+            if is_option_auto_unwrap {
+                let unwrapped = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(unwrapped).as_ptr() as str)
+                self.emit_str(" = call i64 @__rad_get_val(ptr %")
+                self.emit_str(int_to_str(r_reg).as_ptr() as str)
+                self.emit_str(")\n")
+                let cvt = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(cvt).as_ptr() as str)
+                self.emit_str(" = inttoptr i64 %")
+                self.emit_str(int_to_str(unwrapped).as_ptr() as str)
+                self.emit_str(" to ptr\n")
+                r_reg = cvt
+            }
+            let p0_ty = self.get_func_param_type(callee_name, 0usize)
+            if str_eq(p0_ty, "i64") {
+                if self.is_expr_ptr(recv_id) && !is_option_auto_unwrap {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = ptrtoint ptr %")
+                    self.emit_str(int_to_str(r_reg).as_ptr() as str)
+                    self.emit_str(" to i64\n")
+                    r_reg = cvt
+                }
+                arg_regs.push(r_reg)
+                arg_is_ptrs.push(0)
+            } else {
+                if !self.is_expr_ptr(recv_id) && !is_option_auto_unwrap {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = inttoptr i64 %")
+                    self.emit_str(int_to_str(r_reg).as_ptr() as str)
+                    self.emit_str(" to ptr\n")
+                    r_reg = cvt
+                }
+                arg_regs.push(r_reg)
+                arg_is_ptrs.push(1)
+            }
+        }
+        var i = 0usize
+        while i < ep[expr_id].args.len {
+            let a_id = ep[expr_id].args.ptr[i]
+            var a = self.emit_expr(a_id)
+            if !is_static && str_eq(member, "push") && i == 0usize {
+                var recv_ty = self.get_expr_struct_name(recv_id)
+                if str_len(recv_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                    recv_ty = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+                }
+                if str_starts_with(recv_ty, "Vec<dyn ") {
+                    let t_len = str_len(recv_ty)
+                    if t_len > 9usize {
+                        var tr_name = String.new()
+                        let cp = recv_ty as *raw u8
+                        var ci = 8usize
+                        while ci < t_len && cp[ci] != 62u8 {
+                            tr_name.push_byte(cp[ci])
+                            ci = ci + 1usize
+                        }
+                        tr_name.push_byte(0u8)
+                        let tr_str = tr_name.as_ptr() as str
+                        let a_struct = self.get_expr_struct_name(a_id)
+                        if str_len(a_struct) > 0usize && !str_starts_with(a_struct, "dyn ") {
+                            a = self.coerce_to_trait_object(a, a_struct, tr_str)
+                        }
+                    }
+                }
+            }
+            arg_regs.push(a)
+            if self.is_expr_ptr(a_id) {
+                arg_is_ptrs.push(1)
+            } else {
+                arg_is_ptrs.push(0)
+            }
+            i = i + 1usize
+        }
+        var final_types = Vec.new()
+        var j = 0usize
+        while j < arg_regs.len {
+            var pty = self.get_func_param_type(callee_name, j)
+            var cur_r = arg_regs.ptr[j]
+            let is_p = arg_is_ptrs.ptr[j]
+            var is_flt = false
+            var cur_a_id = 0usize
+            if !is_static && j == 0usize {
+                if str_len(pty) == 0usize {
+                    pty = "ptr"
+                }
+            } else {
+                var ai = j
+                if !is_static { ai = j - 1usize }
+                cur_a_id = ep[expr_id].args.ptr[ai]
+                is_flt = self.is_expr_float(cur_a_id)
+            }
+
+            if str_eq(pty, "float") {
+                if !is_flt {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = sitofp i64 %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(" to float\n")
+                    cur_r = cvt
+                } else {
+                    var ai = j
+                    if !is_static { ai = j - 1usize }
+                    let a_id = ep[expr_id].args.ptr[ai]
+                    if !self.is_expr_f32(a_id) {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = fptrunc double %")
+                        self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                        self.emit_str(" to float\n")
+                        cur_r = cvt
+                    }
+                }
+                pty = "float"
+            } else if str_eq(pty, "double") || is_flt {
+                if !is_flt {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = sitofp i64 %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(" to double\n")
+                    cur_r = cvt
+                } else {
+                    var ai = j
+                    if !is_static { ai = j - 1usize }
+                    let a_id = ep[expr_id].args.ptr[ai]
+                    if self.is_expr_f32(a_id) {
+                        let cvt = self.alloc_ssa()
+                        self.emit_str("  %")
+                        self.emit_str(int_to_str(cvt).as_ptr() as str)
+                        self.emit_str(" = fpext float %")
+                        self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                        self.emit_str(" to double\n")
+                        cur_r = cvt
+                    }
+                }
+                pty = "double"
+            } else if str_eq(pty, "ptr") && is_p == 0 {
+                let cvt = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(cvt).as_ptr() as str)
+                self.emit_str(" = inttoptr i64 %")
+                self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                self.emit_str(" to ptr\n")
+                cur_r = cvt
+            } else if (str_eq(pty, "i64") || str_eq(pty, "i32")) && is_p == 1 {
+                var is_opt = false
+                if !str_starts_with(callee_name, "__rad_") && !str_starts_with(callee_name, "Option__") && !str_starts_with(callee_name, "Result__") {
+                    if (!is_static && j > 0usize) || (is_static && j < ep[expr_id].args.len) {
+                        var a_opt_ty = self.get_expr_struct_name(cur_a_id)
+                        if str_len(a_opt_ty) == 0usize && ep[cur_a_id].kind == EXPR_IDENT {
+                            a_opt_ty = self.get_raw_var_type(ep[cur_a_id].str_val.as_ptr() as str)
+                        }
+                        if str_eq(a_opt_ty, "Option") || str_starts_with(a_opt_ty, "Option<") || str_eq(a_opt_ty, "Result") || str_starts_with(a_opt_ty, "Result<") {
+                            is_opt = true
+                        }
+                    }
+                }
+                if is_opt {
+                    let unwrapped = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(unwrapped).as_ptr() as str)
+                    self.emit_str(" = call i64 @__rad_get_val(ptr %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(")\n")
+                    cur_r = unwrapped
+                } else {
+                    let cvt = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(cvt).as_ptr() as str)
+                    self.emit_str(" = ptrtoint ptr %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(" to i64\n")
+                    cur_r = cvt
+                }
+                if str_eq(pty, "i32") {
+                    let tr = self.alloc_ssa()
+                    self.emit_str("  %")
+                    self.emit_str(int_to_str(tr).as_ptr() as str)
+                    self.emit_str(" = trunc i64 %")
+                    self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                    self.emit_str(" to i32\n")
+                    cur_r = tr
+                    pty = "i32"
+                } else {
+                    pty = "i64"
+                }
+            } else if is_p == 1 {
+                pty = "ptr"
+            } else if str_eq(pty, "i32") && is_p == 0 {
+                let cvt = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(cvt).as_ptr() as str)
+                self.emit_str(" = trunc i64 %")
+                self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                self.emit_str(" to i32\n")
+                cur_r = cvt
+            } else if (str_eq(pty, "i8") || str_eq(pty, "i16")) && is_p == 0 {
+                let cvt = self.alloc_ssa()
+                self.emit_str("  %")
+                self.emit_str(int_to_str(cvt).as_ptr() as str)
+                self.emit_str(" = trunc i64 %")
+                self.emit_str(int_to_str(cur_r).as_ptr() as str)
+                self.emit_str(" to ")
+                self.emit_str(pty)
+                self.emit_str("\n")
+                cur_r = cvt
+            }
+            arg_regs.ptr[j] = cur_r
+            final_types.push(pty)
+            j = j + 1usize
+        }
+
+        var ret_ty: str = self.get_func_ret_type(callee_name)
+        if str_eq(member, "as_ptr") || (is_static && (str_eq(member, "new") || str_eq(member, "from_str"))) {
+            ret_ty = "ptr"
+        }
+        if str_eq(ret_ty, "void") {
+            self.emit_str("  call void @")
+            self.emit_str(callee_name)
+            self.emit_str("(")
+            var k = 0usize
+            while k < arg_regs.len {
+                if k > 0usize { self.emit_str(", ") }
+                let pty = final_types.ptr[k]
+                self.emit_str(pty)
+                self.emit_str(" %")
+                self.emit_str(int_to_str(arg_regs.ptr[k]).as_ptr() as str)
+                k = k + 1usize
+            }
+            self.emit_str(")\n")
+            if str_eq(member, "drop") && !is_static && ep[recv_id].kind == EXPR_IDENT {
+                let drop_vname = ep[recv_id].str_val.as_ptr() as str
+                var di = 0usize
+                while di < self.active_drops_var.len {
+                    if str_eq(self.active_drops_var.ptr[di].as_ptr() as str, drop_vname) {
+                        self.active_drops_var.ptr[di] = String.new()
+                    }
+                    di = di + 1usize
+                }
+            }
+            return 0
+        }
+        let res = self.alloc_ssa()
+        self.emit_str("  %")
+        self.emit_str(int_to_str(res).as_ptr() as str)
+        self.emit_str(" = call ")
+        self.emit_str(ret_ty)
+        self.emit_str(" @")
+        self.emit_str(callee_name)
+        self.emit_str("(")
+        var k = 0usize
+        while k < arg_regs.len {
+            if k > 0usize { self.emit_str(", ") }
+            let pty = final_types.ptr[k]
+            self.emit_str(pty)
+            self.emit_str(" %")
+            self.emit_str(int_to_str(arg_regs.ptr[k]).as_ptr() as str)
+            k = k + 1usize
+        }
+        self.emit_str(")\n")
+        if str_eq(ret_ty, "i32") {
+            let ext = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(ext).as_ptr() as str)
+            self.emit_str(" = sext i32 %")
+            self.emit_str(int_to_str(res).as_ptr() as str)
+            self.emit_str(" to i64\n")
+            return ext
+        }
+        if str_eq(ret_ty, "i64") && self.is_expr_ptr(expr_id) {
+            let cvt = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(cvt).as_ptr() as str)
+            self.emit_str(" = inttoptr i64 %")
+            self.emit_str(int_to_str(res).as_ptr() as str)
+            self.emit_str(" to ptr\n")
+            return cvt
+        }
+        if str_eq(ret_ty, "ptr") && !self.is_expr_ptr(expr_id) && !self.is_expr_float(expr_id) {
+            let cvt = self.alloc_ssa()
+            self.emit_str("  %")
+            self.emit_str(int_to_str(cvt).as_ptr() as str)
+            self.emit_str(" = ptrtoint ptr %")
+            self.emit_str(int_to_str(res).as_ptr() as str)
+            self.emit_str(" to i64\n")
+            return cvt
+        }
+        return res
+    }
+}

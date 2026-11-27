@@ -13,6 +13,7 @@ import parser_decl;
 import codegen;
 import codegen_types;
 import codegen_expr;
+import codegen_call;
 import codegen_stmt;
 import codegen_sema;
 import linker;

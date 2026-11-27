@@ -60,6 +60,7 @@ RADC_SRCS := \
     $(RADC_DIR)/codegen.rad \
     $(RADC_DIR)/codegen_types.rad \
     $(RADC_DIR)/codegen_expr.rad \
+    $(RADC_DIR)/codegen_call.rad \
     $(RADC_DIR)/codegen_stmt.rad \
     $(RADC_DIR)/codegen_sema.rad \
     $(RADC_DIR)/linker.rad

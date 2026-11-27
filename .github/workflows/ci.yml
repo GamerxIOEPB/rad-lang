@@ -5,13 +5,11 @@ on:
     branches: [ main ]
     tags: [ 'v*', '[0-9]+.[0-9]+.[0-9]+*' ]
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
+      - 'README.md'
       - '.gitignore'
   pull_request:
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
+      - 'README.md'
       - '.gitignore'
   workflow_dispatch:
     inputs:
@@ -98,6 +96,11 @@ jobs:
       - name: Verify Stage-2 vs Stage-3 Self-Hosting Determinism
         run: |
           make self-host-check
+
+      - name: Verify Documentation Synchronization
+        run: |
+          make sync-docs
+          git diff --exit-code extensions/skills/rad/references/ docs/docs-data.js
 
       - name: Upload Quality Diagnostics Artifact
         if: always()
