@@ -1,0 +1,8 @@
+// Must fail: E0030 wildcard pattern must be the last arm
+fn main() {
+    let x = 10i64;
+    match x {
+        _ => println("wildcard"),
+        10i64 => println("ten"),
+    }
+}

@@ -179,6 +179,46 @@ fn main() {
 
 ---
 
+## 7.8 Multi-Return Functions (Tuples)
+
+Functions can return multiple values cleanly by returning a tuple type `(T1, T2, ...)`:
+
+```rad
+// Multi-return function returning quotient and remainder
+fn divmod(dividend: i64, divisor: i64) -> (i64, i64) {
+    let q = dividend / divisor;
+    let r = dividend % divisor;
+    return (q, r);
+}
+
+// Function returning statistics: (min, max, average)
+fn compute_stats(a: i64, b: i64, c: i64) -> (i64, i64, i64) {
+    var min = a;
+    if b < min { min = b; }
+    if c < min { min = c; }
+
+    var max = a;
+    if b > max { max = b; }
+    if c > max { max = c; }
+
+    let avg = (a + b + c) / 3i64;
+    return (min, max, avg);
+}
+
+fn main() {
+    // Destructuring function call returns
+    let (q, r) = divmod(10, 3);
+    println(f"10 / 3 = {q} remainder {r}");
+
+    // Ignoring return components with wildcard `_`
+    let (min, max, _) = compute_stats(42, 10, 88);
+    println(f"Range: {min} to {max}");
+}
+```
+
+
+---
+
 ## 7.8 Multi-Return Functions & Tuples
 
 Functions can return multiple values bundled in a lightweight tuple type `(T1, T2, ...)`:

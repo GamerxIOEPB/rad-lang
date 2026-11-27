@@ -31,7 +31,19 @@ clang -O3 -flto -s "$SCRIPT_DIR/suite/nqueens.c" -o "$BIN_DIR/nqueens_c"
 rustc -O -C lto=fat "$SCRIPT_DIR/suite/nqueens.rs" -o "$BIN_DIR/nqueens_rust"
 strip -s "$BIN_DIR/nqueens_rust"
 
-# 3. SHA-256
+# 3. Allocation & Vector Iteration
+"$RADC" "$SCRIPT_DIR/suite/alloc_bench.rad" -O3 -flto -s -o "$BIN_DIR/alloc_rad"
+clang -O3 -flto -s "$SCRIPT_DIR/suite/alloc_bench.c" -o "$BIN_DIR/alloc_c"
+rustc -O -C lto=fat "$SCRIPT_DIR/suite/alloc_bench.rs" -o "$BIN_DIR/alloc_rust"
+strip -s "$BIN_DIR/alloc_rust"
+
+# 4. Cold Start (Empty program)
+"$RADC" "$SCRIPT_DIR/suite/empty.rad" -O3 -flto -s -o "$BIN_DIR/empty_rad"
+clang -O3 -flto -s "$SCRIPT_DIR/suite/empty.c" -o "$BIN_DIR/empty_c"
+rustc -O -C lto=fat "$SCRIPT_DIR/suite/empty.rs" -o "$BIN_DIR/empty_rust"
+strip -s "$BIN_DIR/empty_rust"
+
+# 5. SHA-256
 "$RADC" "$SCRIPT_DIR/suite/sha256_bench.rad" -O3 -flto -s -o "$BIN_DIR/sha256_rad"
 
 echo "[✓] All benchmark binaries compiled successfully with -O3 + LTO."
@@ -51,6 +63,18 @@ printf "%-25s | %-12s | %-12s | %-12s\n" \
     "$(ls -lh "$BIN_DIR/nqueens_rad" | awk '{print $5}')" \
     "$(ls -lh "$BIN_DIR/nqueens_c" | awk '{print $5}')" \
     "$(ls -lh "$BIN_DIR/nqueens_rust" | awk '{print $5}')"
+
+printf "%-25s | %-12s | %-12s | %-12s\n" \
+    "1M Alloc & Iteration" \
+    "$(ls -lh "$BIN_DIR/alloc_rad" | awk '{print $5}')" \
+    "$(ls -lh "$BIN_DIR/alloc_c" | awk '{print $5}')" \
+    "$(ls -lh "$BIN_DIR/alloc_rust" | awk '{print $5}')"
+
+printf "%-25s | %-12s | %-12s | %-12s\n" \
+    "Cold Start (Minimal)" \
+    "$(ls -lh "$BIN_DIR/empty_rad" | awk '{print $5}')" \
+    "$(ls -lh "$BIN_DIR/empty_c" | awk '{print $5}')" \
+    "$(ls -lh "$BIN_DIR/empty_rust" | awk '{print $5}')"
 
 printf "%-25s | %-12s | %-12s | %-12s\n" \
     "SHA-256 Pure Engine" \
@@ -85,6 +109,26 @@ RAD_NQUEENS=$(run_trials "$BIN_DIR/nqueens_rad")
 C_NQUEENS=$(run_trials "$BIN_DIR/nqueens_c")
 RUST_NQUEENS=$(run_trials "$BIN_DIR/nqueens_rust")
 
+RAD_ALLOC=$(run_trials "$BIN_DIR/alloc_rad")
+C_ALLOC=$(run_trials "$BIN_DIR/alloc_c")
+RUST_ALLOC=$(run_trials "$BIN_DIR/alloc_rust")
+
+bench_cold_start() {
+    local bin="$1"
+    local start_ts=$(python3 -c "import time; print(int(time.time()*1000))")
+    for i in $(seq 1 50); do
+        "$bin"
+    done
+    local end_ts=$(python3 -c "import time; print(int(time.time()*1000))")
+    local diff=$((end_ts - start_ts))
+    local avg=$(python3 -c "print(f'{$diff/50:.2f} ms')")
+    echo "$avg ($diff ms / 50 runs)"
+}
+
+RAD_COLD=$(bench_cold_start "$BIN_DIR/empty_rad")
+C_COLD=$(bench_cold_start "$BIN_DIR/empty_c")
+RUST_COLD=$(bench_cold_start "$BIN_DIR/empty_rust")
+
 SHA256_OUT=$("$BIN_DIR/sha256_rad")
 RAD_SHA256=$(echo "$SHA256_OUT" | grep -oE "[0-9]+ ms")
 RAD_SHA256_TP=$(echo "$SHA256_OUT" | grep -oE "throughput: [0-9.]+ MB/s" | awk '{print $2, $3}')
@@ -96,5 +140,7 @@ printf "%-25s | %-14s | %-14s | %-14s\n" "Benchmark" "Rad (-O3+LTO)" "Clang C (-
 echo "----------------------------------------------------------------------"
 printf "%-25s | %-14s | %-14s | %-14s\n" "Matmul (512x512 f64)" "$RAD_MATMUL" "$C_MATMUL" "$RUST_MATMUL"
 printf "%-25s | %-14s | %-14s | %-14s\n" "14-Queens Recursion" "$RAD_NQUEENS" "$C_NQUEENS" "$RUST_NQUEENS"
+printf "%-25s | %-14s | %-14s | %-14s\n" "1M Alloc & Sum (10 iters)" "$RAD_ALLOC" "$C_ALLOC" "$RUST_ALLOC"
+printf "%-25s | %-14s | %-14s | %-14s\n" "Cold Start (per spawn)" "$RAD_COLD" "$C_COLD" "$RUST_COLD"
 printf "%-25s | %-14s | %-14s | %-14s\n" "SHA-256 (20k blocks)" "$RAD_SHA256 ($RAD_SHA256_TP)" "N/A" "N/A"
 echo "======================================================================"

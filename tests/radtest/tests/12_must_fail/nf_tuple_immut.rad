@@ -1,0 +1,6 @@
+// Spec: Assigning to immutable binding in tuple destructuring must fail with E0021
+fn main() {
+    let a = 1i64;
+    var b = 2i64;
+    (a, b) = (10i64, 20i64);
+}

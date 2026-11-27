@@ -198,3 +198,69 @@ Every block `{ ... }` in Rad (function bodies, `if`/`else` branches, `while`/`lo
    - Consecutive semicolons (`x = 1;; y = 2`) are tolerated as empty statements.
    - Semicolons before a closing brace `}` are optional (`{ foo(); }` and `{ foo() }` are both valid).
 
+---
+
+## 6.7 Pattern Matching (`match`)
+
+Rad provides expressive pattern matching with the `match` construct. It supports literal values, enum variants with extracted payloads, tuple patterns, and conditional pattern guards:
+
+### 1. Value Matching & Wildcard
+```rad
+let code = 200;
+match code {
+    200 => println("OK"),
+    404 => println("Not Found"),
+    500 => println("Internal Server Error"),
+    _   => println("Unknown Status"),
+}
+```
+
+### 2. Enum Variant & Payload Extraction
+Match arms can unpack payloads from standard and custom enum variants:
+```rad
+enum Shape {
+    Square,
+    Circle(i64),
+}
+
+fn describe(shape: Shape) {
+    match shape {
+        Shape::Circle(radius) => println(f"Circle with radius: {radius}"),
+        Shape::Square         => println("Square"),
+        _                     => println("Other shape"),
+    }
+}
+```
+
+### 3. Tuple Patterns & Destructuring
+Tuples can be matched and bound within match arms:
+```rad
+fn classify_point(p: (i64, i64)) {
+    match p {
+        (0i64, 0i64) => println("Origin"),
+        (x, 0i64)    => println(f"On X-axis at {x}"),
+        (0i64, y)    => println(f"On Y-axis at {y}"),
+        (x, y)       => println(f"Quadrant point ({x}, {y})"),
+    }
+}
+```
+
+### 4. Pattern Match Guards (`if <expr>`)
+Arms may specify guard conditions with `if` that must evaluate to `true` for the arm to be selected:
+```rad
+fn inspect_opt(o: Option<i64>) {
+    match o {
+        Option.Some(x) if x > 100i64 => println(f"Large: {x}"),
+        Option.Some(x) if x > 0i64   => println(f"Positive: {x}"),
+        Option.Some(x)               => println(f"Zero or negative: {x}"),
+        Option.None                  => println("None"),
+    }
+}
+```
+
+### 5. Match Arm Rules
+- Pattern guards have access to variables bound in the pattern arm (e.g., `x` above).
+- If a wildcard `_` pattern is present, it must be the last arm (`E0030`).
+- Match expressions can be used as statements or produce values in return and assignment positions.
+
+

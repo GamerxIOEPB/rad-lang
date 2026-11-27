@@ -11,19 +11,21 @@ fn solve_nqueens(n: i32, row: i32, var cols: *raw var u32, var diag1: *raw var u
     var count = 0i64
     var col = 0i32
     while col < n {
-        let d1 = (row - col + n) as usize
-        let d2 = (row + col) as usize
         let c = col as usize
-        if cols[c] == 0u32 && diag1[d1] == 0u32 && diag2[d2] == 0u32 {
-            cols[c] = 1u32
-            diag1[d1] = 1u32
-            diag2[d2] = 1u32
+        if cols[c] == 0u32 {
+            let d1 = (row - col + n) as usize
+            let d2 = (row + col) as usize
+            if diag1[d1] == 0u32 && diag2[d2] == 0u32 {
+                cols[c] = 1u32
+                diag1[d1] = 1u32
+                diag2[d2] = 1u32
 
-            count = count + solve_nqueens(n, row + 1, cols, diag1, diag2)
+                count = count + solve_nqueens(n, row + 1, cols, diag1, diag2)
 
-            cols[c] = 0u32
-            diag1[d1] = 0u32
-            diag2[d2] = 0u32
+                cols[c] = 0u32
+                diag1[d1] = 0u32
+                diag2[d2] = 0u32
+            }
         }
         col = col + 1
     }

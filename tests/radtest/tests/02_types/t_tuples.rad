@@ -1,0 +1,26 @@
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+    return (a / b, a % b);
+}
+
+fn get_info() -> (str, i64, bool) {
+    return ("rad", 2026i64, true);
+}
+
+fn main() {
+    let (q, r) = divmod(10i64, 3i64);
+    printf("divmod: %ld %ld\n", q, r);
+
+    let (lang, yr, is_ok) = get_info();
+    printf("info: %s %ld %d\n", lang, yr, is_ok as i32);
+
+    let (only_q, _) = divmod(25i64, 4i64);
+    printf("wildcard: %ld\n", only_q);
+
+    var a = 100i64;
+    var b = 200i64;
+    (a, b) = (b, a);
+    printf("swap: %ld %ld\n", a, b);
+
+    let pair = (42i64, 99i64);
+    printf("index: %ld %ld\n", pair.0, pair.1);
+}

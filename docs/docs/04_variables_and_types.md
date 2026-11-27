@@ -221,6 +221,14 @@ let (width: f64, height: f64) = dimensions();
 // Destructuring mutable bindings
 var (current, next) = (0, 1);
 current = current + next;
+
+// Wildcard ignoring of unused elements
+let (result, _) = calculate_and_log();
+
+// Tuple Destructuring Assignment & Variable Swapping
+var a = 10;
+var b = 20;
+(a, b) = (b, a); // Swaps values without a manual temporary variable
 ```
 
 ---

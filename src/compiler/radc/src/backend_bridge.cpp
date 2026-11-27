@@ -95,15 +95,28 @@ int rad_llvm_emit_obj(const char* ir_str, size_t ir_len, const char* out_obj_pat
         passes = "default<O3>";
     }
 
+    char* host_cpu = LLVMGetHostCPUName();
+    char* host_features = LLVMGetHostCPUFeatures();
+    const char* cpu = "generic";
+    const char* features = "";
+    bool is_host = (strstr(triple, "x86_64") && !strstr(triple, "unknown-unknown") && !strstr(triple, "wasm"));
+    if (opt_level >= 2 && is_host && host_cpu && strlen(host_cpu) > 0) {
+        cpu = host_cpu;
+        features = host_features ? host_features : "";
+    }
+
     LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
         target,
         triple,
-        "generic",
-        "",
+        cpu,
+        features,
         opt,
         LLVMRelocPIC,
         LLVMCodeModelDefault
     );
+
+    if (host_cpu) LLVMDisposeMessage(host_cpu);
+    if (host_features) LLVMDisposeMessage(host_features);
 
     if (passes) {
         LLVMPassBuilderOptionsRef pb_opts = LLVMCreatePassBuilderOptions();

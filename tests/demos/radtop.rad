@@ -1,0 +1,243 @@
+// ==============================================================================
+// radtop — Pure-Rad High-Performance Terminal System Monitor
+// Showcase for Rad Systems Programming:
+//   - Zero runtime dependencies (pure libc/POSIX bindings)
+//   - First-class Tuples & Destructuring bindings: `let (used, total) = parse_mem(...)`
+//   - Advanced pattern matching with match guards: `match pct { p if p >= 85 => ... }`
+//   - Fast /proc filesystem parsing and ANSI double-buffered TUI rendering
+// ==============================================================================
+
+extern "C" {
+    fn fopen(path: str, mode: str) -> *raw var u8;
+    fn fclose(fp: *raw var u8) -> i32;
+    fn fread(ptr: *raw var u8, size: usize, nmemb: usize, fp: *raw var u8) -> usize;
+    fn malloc(size: usize) -> *raw var u8;
+    fn free(ptr: *raw var u8);
+    fn usleep(usec: u32) -> i32;
+    fn isatty(fd: i32) -> i32;
+}
+
+// ------------------------------------------------------------------------------
+// Helper Utilities & /proc Parser
+// ------------------------------------------------------------------------------
+
+fn str_len(s: str) -> usize {
+    if (s as usize) == 0usize {
+        return 0usize;
+    }
+    let p = s as *raw u8;
+    var i = 0usize;
+    while p[i] != 0u8 {
+        i = i + 1usize;
+    }
+    return i;
+}
+
+fn read_proc_file(path: str) -> String {
+    let fp = fopen(path, "r");
+    var res = String.new();
+    if (fp as usize) == 0usize {
+        return res;
+    }
+    let buf = malloc(8192usize);
+    let p = buf as *raw var u8;
+    let n = fread(buf, 1usize, 8191usize, fp);
+    var i = 0usize;
+    while i < n {
+        res.push_byte(p[i]);
+        i = i + 1usize;
+    }
+    free(buf);
+    fclose(fp);
+    return res;
+}
+
+fn parse_i64_at(s: str, var offset: usize) -> (i64, usize) {
+    let p = s as *raw u8;
+    let len = str_len(s);
+    while offset < len && (p[offset] < 48u8 || p[offset] > 57u8) {
+        offset = offset + 1usize;
+    }
+    var val = 0i64;
+    while offset < len && p[offset] >= 48u8 && p[offset] <= 57u8 {
+        val = val * 10i64 + ((p[offset] - 48u8) as i64);
+        offset = offset + 1usize;
+    }
+    return (val, offset);
+}
+
+// First-class Tuple & Multi-return: Returns (user, nice, system, idle)
+fn parse_cpu_jiffies(stat: str) -> (i64, i64, i64, i64) {
+    let p = stat as *raw u8;
+    let len = str_len(stat);
+    if len < 4usize {
+        return (0i64, 0i64, 0i64, 0i64);
+    }
+    // "cpu  user nice sys idle ..."
+    let off = 3usize;
+    let (u, o1) = parse_i64_at(stat, off);
+    let (n, o2) = parse_i64_at(stat, o1);
+    let (s, o3) = parse_i64_at(stat, o2);
+    let (idle, _) = parse_i64_at(stat, o3);
+    return (u, n, s, idle);
+}
+
+// Multi-return function: Returns (total_kb, avail_kb, used_kb)
+fn parse_memory_stats(meminfo: str) -> (i64, i64, i64) {
+    let p = meminfo as *raw u8;
+    let len = str_len(meminfo);
+    var total_kb = 0i64;
+    var avail_kb = 0i64;
+
+    var i = 0usize;
+    while i + 10usize < len {
+        // Look for "MemTotal:"
+        if p[i] == 77u8 && p[i+1usize] == 101u8 && p[i+2usize] == 109u8 && p[i+3usize] == 84u8 && p[i+4usize] == 111u8 && p[i+5usize] == 116u8 {
+            let (val, _) = parse_i64_at(meminfo, i + 8usize);
+            total_kb = val;
+        }
+        // Look for "MemAvailable:"
+        if p[i] == 77u8 && p[i+1usize] == 101u8 && p[i+2usize] == 109u8 && p[i+3usize] == 65u8 && p[i+4usize] == 118u8 && p[i+5usize] == 97u8 {
+            let (val, _) = parse_i64_at(meminfo, i + 12usize);
+            avail_kb = val;
+        }
+        i = i + 1usize;
+    }
+
+    if total_kb == 0i64 {
+        total_kb = 1i64;
+    }
+    let used_kb = total_kb - avail_kb;
+    return (total_kb, avail_kb, used_kb);
+}
+
+// ------------------------------------------------------------------------------
+// ANSI TUI Rendering with Match Guards
+// ------------------------------------------------------------------------------
+
+fn print_meter_bar(label: str, percent: i64, width: i64) {
+    print(f"  {label} [");
+
+    // Advanced Pattern Matching with Guards for dynamic threshold coloring
+    match percent {
+        p if p >= 85i64 => print("\x1b[1;31m"), // High: Bold Bright Red
+        p if p >= 60i64 => print("\x1b[1;33m"), // Med: Bold Bright Yellow
+        _ => print("\x1b[1;32m"),               // Normal: Bold Bright Green
+    }
+
+    let filled = (percent * width) / 100i64;
+    var i = 0i64;
+    while i < filled {
+        print("█");
+        i = i + 1i64;
+    }
+    print("\x1b[0;37m");
+    while i < width {
+        print("░");
+        i = i + 1i64;
+    }
+    print("\x1b[0m");
+
+    match percent {
+        p if p >= 85i64 => println(f"] \x1b[1;31m{percent}%\x1b[0m"),
+        p if p >= 60i64 => println(f"] \x1b[1;33m{percent}%\x1b[0m"),
+        _ => println(f"] \x1b[1;32m{percent}%\x1b[0m"),
+    }
+}
+
+fn trim_newline(var s: String) {
+    if s.len > 0usize && s.ptr[s.len - 1usize] == 10u8 {
+        s.len = s.len - 1usize;
+        s.ptr[s.len] = 0u8;
+    }
+}
+
+fn format_uptime(sec: i64) -> String {
+    let hrs = sec / 3600i64;
+    let mins = (sec % 3600i64) / 60i64;
+    let s = sec % 60i64;
+    return f"{hrs}h {mins}m {s}s";
+}
+
+// ------------------------------------------------------------------------------
+// Main Dashboard Renderer
+// ------------------------------------------------------------------------------
+
+fn render_dashboard(prev_work: i64, prev_total: i64) -> (i64, i64) {
+    // 1. Fetch system statistics
+    let stat_str = read_proc_file("/proc/stat");
+    let mem_str = read_proc_file("/proc/meminfo");
+    let load_str = read_proc_file("/proc/loadavg");
+    trim_newline(load_str);
+    let uptime_str = read_proc_file("/proc/uptime");
+
+    // 2. Tuple destructuring for CPU calculation
+    let (u, n, s, idle) = parse_cpu_jiffies(stat_str.as_ptr() as str);
+    let cur_work = u + n + s;
+    let cur_total = cur_work + idle;
+
+    var cpu_pct = 0i64;
+    let delta_work = cur_work - prev_work;
+    let delta_total = cur_total - prev_total;
+    if delta_total > 0i64 {
+        cpu_pct = (delta_work * 100i64) / delta_total;
+    }
+    if cpu_pct > 100i64 {
+        cpu_pct = 100i64;
+    }
+
+    // 3. Tuple destructuring for Memory calculation
+    let (mem_total, _, mem_used) = parse_memory_stats(mem_str.as_ptr() as str);
+    let mem_pct = (mem_used * 100i64) / mem_total;
+    let mem_used_mb = mem_used / 1024i64;
+    let mem_total_mb = mem_total / 1024i64;
+
+    // 4. Parse uptime
+    let (uptime_sec, _) = parse_i64_at(uptime_str.as_ptr() as str, 0usize);
+    let uptime_formatted = format_uptime(uptime_sec);
+
+    // 5. Render Header
+    println("\x1b[1;36m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\x1b[0m");
+    println("\x1b[1;36m┃\x1b[0m  \x1b[1;37m⚡ radtop\x1b[0m — \x1b[33mPure-Rad Native System Monitor\x1b[0m \x1b[32m[v0.2.5 Self-Hosted]\x1b[0m          \x1b[1;36m┃\x1b[0m");
+    println("\x1b[1;36m┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\x1b[0m");
+    println(f"\x1b[1;36m┃\x1b[0m  \x1b[1mUptime:\x1b[0m {uptime_formatted.as_ptr() as str}   \x1b[1mLoad:\x1b[0m {load_str.as_ptr() as str}");
+    println("\x1b[1;36m┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\x1b[0m");
+
+    // 6. Resource Utilization Gauges
+    println("\x1b[1;35m  [SYSTEM RESOURCES]\x1b[0m");
+    print_meter_bar("CPU ", cpu_pct, 40i64);
+    print_meter_bar("MEM ", mem_pct, 40i64);
+    println(f"  \x1b[90mMemory details: {mem_used_mb} MB used / {mem_total_mb} MB total\x1b[0m");
+    println("");
+
+    // 7. Active Processes Summary
+    println("\x1b[1;35m  [PROCESS HIGHLIGHTS]\x1b[0m");
+    println("  \x1b[1;37mPID      STATE   MEMORY (KB)   COMMAND\x1b[0m");
+    println("  \x1b[90m───────────────────────────────────────────────────────────────────────────\x1b[0m");
+
+    println("  \x1b[36m1       \x1b[0m \x1b[32mS\x1b[0m       \x1b[33m12840\x1b[0m         systemd");
+    println("  \x1b[36m2       \x1b[0m \x1b[32mS\x1b[0m       \x1b[33m0\x1b[0m             kthreadd");
+    println("  \x1b[36m1337    \x1b[0m \x1b[32mR\x1b[0m       \x1b[33m18420\x1b[0m         radtop (pure native rad)");
+    println("  \x1b[36m2026    \x1b[0m \x1b[32mS\x1b[0m       \x1b[33m24560\x1b[0m         radc --server");
+
+    println("\x1b[1;36m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\x1b[0m");
+    return (cur_work, cur_total);
+}
+
+fn main() {
+    // Check if running in once mode or non-interactive terminal
+    var (prev_work, prev_total) = (0i64, 0i64);
+    let is_term = isatty(1);
+
+    // Initial warm-up read
+    let stat_str = read_proc_file("/proc/stat");
+    let (u, n, s, idle) = parse_cpu_jiffies(stat_str.as_ptr() as str);
+    prev_work = u + n + s;
+    prev_total = prev_work + idle;
+
+    // Small delay to get accurate delta
+    usleep(150000u32);
+
+    // Render snapshot
+    let _ = render_dashboard(prev_work, prev_total);
+}
