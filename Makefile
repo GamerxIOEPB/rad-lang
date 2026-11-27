@@ -71,6 +71,7 @@ RAD_SRCS := \
     $(RADPM_DIR)/lsp.rad \
     $(RADPM_DIR)/toml.rad \
     $(RADPM_DIR)/cmd_project.rad \
+    $(RADPM_DIR)/pkg_registry.rad \
     $(RADPM_DIR)/cmd_pkg.rad \
     $(RADPM_DIR)/cmd_build.rad \
     $(RADPM_DIR)/cmd_doctor.rad \
