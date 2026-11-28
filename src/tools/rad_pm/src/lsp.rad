@@ -391,6 +391,229 @@ fn publish_diagnostics(radc_path: str, uri: str, text: String) {
     lsp_send_response(notif)
 }
 
+fn lsp_uri_to_dir(uri: str) -> String {
+    var u = uri
+    if str_starts_with(u, "file://") {
+        u = (u as usize + 7usize) as str
+    }
+    let len = str_len(u)
+    let p: *raw u8 = u as *raw u8
+    var last_slash = -1i64
+    var i = 0usize
+    while i < len {
+        if p[i] == 47u8 { // '/'
+            last_slash = i as i64
+        }
+        i = i + 1usize
+    }
+    if last_slash < 0i64 {
+        return String.from_str(".")
+    }
+    var res = String.new()
+    i = 0usize
+    while i < (last_slash as usize) {
+        res.push_byte(p[i])
+        i = i + 1usize
+    }
+    return res
+}
+
+fn lsp_extract_base_symbol(sym: str) -> String {
+    let len = str_len(sym)
+    let p: *raw u8 = sym as *raw u8
+    var last_colons = -1i64
+    var i = 0usize
+    while i + 1usize < len {
+        if p[i] == 58u8 && p[i + 1usize] == 58u8 {
+            last_colons = (i + 2usize) as i64
+        }
+        i = i + 1usize
+    }
+    var res = String.new()
+    var start = 0usize
+    if last_colons >= 0i64 {
+        start = last_colons as usize
+    }
+    i = start
+    while i < len {
+        res.push_byte(p[i])
+        i = i + 1usize
+    }
+    return res
+}
+
+fn lsp_extract_mod_qual(sym: str) -> String {
+    let len = str_len(sym)
+    let p: *raw u8 = sym as *raw u8
+    var first_colons = -1i64
+    var i = 0usize
+    while i + 1usize < len {
+        if p[i] == 58u8 && p[i + 1usize] == 58u8 {
+            first_colons = i as i64
+            break
+        }
+        i = i + 1usize
+    }
+    var res = String.new()
+    if first_colons >= 0i64 {
+        i = 0usize
+        while i < (first_colons as usize) {
+            res.push_byte(p[i])
+            i = i + 1usize
+        }
+    }
+    return res
+}
+
+fn lsp_find_module_file(doc_dir: str, m_str: str) -> String {
+    let mlen = str_len(m_str)
+    let mp: *raw u8 = m_str as *raw u8
+    var has_slash = false
+    var slash_pos = 0usize
+    var mi = 0usize
+    while mi < mlen {
+        if mp[mi] == 47u8 { // '/'
+            has_slash = true
+            slash_pos = mi
+            break
+        }
+        mi = mi + 1usize
+    }
+
+    if has_slash {
+        var pkg_prefix = String.new()
+        var ki = 0usize
+        while ki < slash_pos {
+            pkg_prefix.push_byte(mp[ki])
+            ki = ki + 1usize
+        }
+        var sub_mod = String.new()
+        ki = slash_pos + 1usize
+        while ki < mlen {
+            sub_mod.push_byte(mp[ki])
+            ki = ki + 1usize
+        }
+
+        // 1. {doc_dir}/{m_str}.rad
+        var c0 = String.new()
+        if str_len(doc_dir) > 0usize && !str_eq(doc_dir, ".") {
+            c0.push_str(doc_dir)
+            c0.push_str("/")
+        }
+        c0.push_str(m_str)
+        c0.push_str(".rad")
+        if file_exists(c0.as_ptr() as str) {
+            return c0
+        }
+
+        // 2. lib/rad/{pkg}/src/{sub_mod}.rad
+        var c1 = String.new()
+        c1.push_str("lib/rad/")
+        c1.push_str(pkg_prefix.as_ptr() as str)
+        c1.push_str("/src/")
+        c1.push_str(sub_mod.as_ptr() as str)
+        c1.push_str(".rad")
+        if file_exists(c1.as_ptr() as str) {
+            return c1
+        }
+
+        // 3. lib/rad/{m_str}.rad
+        var c2 = String.new()
+        c2.push_str("lib/rad/")
+        c2.push_str(m_str)
+        c2.push_str(".rad")
+        if file_exists(c2.as_ptr() as str) {
+            return c2
+        }
+
+        // 4. src/{sub_mod}.rad
+        var c3 = String.new()
+        c3.push_str("src/")
+        c3.push_str(sub_mod.as_ptr() as str)
+        c3.push_str(".rad")
+        if file_exists(c3.as_ptr() as str) {
+            return c3
+        }
+    } else {
+        // 1. {doc_dir}/{m_str}.rad
+        var c0 = String.new()
+        if str_len(doc_dir) > 0usize && !str_eq(doc_dir, ".") {
+            c0.push_str(doc_dir)
+            c0.push_str("/")
+        }
+        c0.push_str(m_str)
+        c0.push_str(".rad")
+        if file_exists(c0.as_ptr() as str) {
+            return c0
+        }
+
+        // 2. {doc_dir}/src/{m_str}.rad
+        var c0b = String.new()
+        if str_len(doc_dir) > 0usize && !str_eq(doc_dir, ".") {
+            c0b.push_str(doc_dir)
+            c0b.push_str("/src/")
+        } else {
+            c0b.push_str("src/")
+        }
+        c0b.push_str(m_str)
+        c0b.push_str(".rad")
+        if file_exists(c0b.as_ptr() as str) {
+            return c0b
+        }
+
+        // 3. {doc_dir}/../{m_str}.rad
+        var c0c = String.new()
+        if str_len(doc_dir) > 0usize && !str_eq(doc_dir, ".") {
+            c0c.push_str(doc_dir)
+            c0c.push_str("/../")
+            c0c.push_str(m_str)
+            c0c.push_str(".rad")
+            if file_exists(c0c.as_ptr() as str) {
+                return c0c
+            }
+        }
+
+        // 4. lib/rad/{m_str}/src/{m_str}.rad
+        var c1 = String.new()
+        c1.push_str("lib/rad/")
+        c1.push_str(m_str)
+        c1.push_str("/src/")
+        c1.push_str(m_str)
+        c1.push_str(".rad")
+        if file_exists(c1.as_ptr() as str) {
+            return c1
+        }
+
+        // 5. lib/rad/{m_str}/src/lib.rad
+        var c2 = String.new()
+        c2.push_str("lib/rad/")
+        c2.push_str(m_str)
+        c2.push_str("/src/lib.rad")
+        if file_exists(c2.as_ptr() as str) {
+            return c2
+        }
+
+        // 6. src/{m_str}.rad
+        var c3 = String.new()
+        c3.push_str("src/")
+        c3.push_str(m_str)
+        c3.push_str(".rad")
+        if file_exists(c3.as_ptr() as str) {
+            return c3
+        }
+
+        // 7. lib/rad/{m_str}.rad
+        var c4 = String.new()
+        c4.push_str("lib/rad/")
+        c4.push_str(m_str)
+        c4.push_str(".rad")
+        if file_exists(c4.as_ptr() as str) {
+            return c4
+        }
+    }
+    return String.new()
+}
+
 // Find word under cursor at (target_line, target_col) in source text
 fn get_symbol_at_position(text: String, target_line: i64, target_col: i64) -> String {
     let lines = split_source_lines(text)
@@ -410,16 +633,38 @@ fn get_symbol_at_position(text: String, target_line: i64, target_col: i64) -> St
         }
     }
 
+    if p[c] == 58u8 { // ':'
+        if c > 0usize && p[c - 1usize] == 58u8 && c > 1usize && is_alnum_or_underscore(p[c - 2usize]) {
+            c = c - 2usize
+        } else if c + 1usize < len && p[c + 1usize] == 58u8 && c > 0usize && is_alnum_or_underscore(p[c - 1usize]) {
+            c = c - 1usize
+        } else if c + 1usize < len && p[c + 1usize] == 58u8 && c + 2usize < len && is_alnum_or_underscore(p[c + 2usize]) {
+            c = c + 2usize
+        }
+    }
+
     // Expand backwards
     var start = c
-    while start > 0usize && is_alnum_or_underscore(p[start - 1usize]) {
-        start = start - 1usize
+    while start > 0usize {
+        if is_alnum_or_underscore(p[start - 1usize]) {
+            start = start - 1usize
+        } else if start >= 3usize && p[start - 1usize] == 58u8 && p[start - 2usize] == 58u8 && is_alnum_or_underscore(p[start - 3usize]) {
+            start = start - 2usize
+        } else {
+            break
+        }
     }
 
     // Expand forwards
     var end = c
-    while end < len && is_alnum_or_underscore(p[end]) {
-        end = end + 1usize
+    while end < len {
+        if is_alnum_or_underscore(p[end]) {
+            end = end + 1usize
+        } else if end + 2usize < len && p[end] == 58u8 && p[end + 1usize] == 58u8 && is_alnum_or_underscore(p[end + 2usize]) {
+            end = end + 2usize
+        } else {
+            break
+        }
     }
 
     if start >= end {
@@ -453,7 +698,7 @@ fn get_symbol_at_position(text: String, target_line: i64, target_col: i64) -> St
 }
 
 // Hover handler
-fn handle_hover(id: i64, doc_text: String, line: i64, col: i64) {
+fn handle_hover(id: i64, uri: str, doc_text: String, line: i64, col: i64) {
     let sym = get_symbol_at_position(doc_text, line, col)
     let s = sym.as_ptr() as str
     if str_len(s) == 0usize {
@@ -567,69 +812,298 @@ fn handle_hover(id: i64, doc_text: String, line: i64, col: i64) {
     } else if str_eq(s, "Scheduler") {
         md.push_str("### Standard Type `Scheduler` (std/task)\nCooperative green thread and coroutine task scheduler.")
     } else {
-        // Search document for declaration of function, struct, enum, or const
-        let lines = split_source_lines(doc_text)
+        let mod_qual = lsp_extract_mod_qual(s)
+        let base_sym = lsp_extract_base_symbol(s)
+        let search_sym = base_sym.as_ptr() as str
+        let doc_dir = lsp_uri_to_dir(uri)
         var found_decl = false
-        var li = 0usize
-        while li < lines.len {
-            let l = lines.ptr[li].as_ptr() as str
-            let raw_t = trim_line_start(l)
-            var t = raw_t
-            if str_starts_with(t, "pub ") {
-                t = (t as usize + 4usize) as str
-                t = trim_line_start(t)
-            }
 
-            var matched = false
-            if str_starts_with(t, "fn ") {
-                var fn_chk = String.from_str("fn ")
-                fn_chk.push_str(s)
-                if str_starts_with(t, fn_chk.as_ptr() as str) {
-                    matched = true
-                }
-            } else if str_starts_with(t, "struct ") {
-                var st_chk = String.from_str("struct ")
-                st_chk.push_str(s)
-                if str_starts_with(t, st_chk.as_ptr() as str) {
-                    matched = true
-                }
-            } else if str_starts_with(t, "const ") {
-                var c_chk = String.from_str("const ")
-                c_chk.push_str(s)
-                if str_starts_with(t, c_chk.as_ptr() as str) {
-                    matched = true
-                }
-            } else if str_starts_with(t, "enum ") {
-                var en_chk = String.from_str("enum ")
-                en_chk.push_str(s)
-                if str_starts_with(t, en_chk.as_ptr() as str) {
-                    matched = true
-                }
-            } else if str_starts_with(t, "type ") {
-                var ty_chk = String.from_str("type ")
-                ty_chk.push_str(s)
-                if str_starts_with(t, ty_chk.as_ptr() as str) {
-                    matched = true
-                }
-            }
+        let lines = split_source_lines(doc_text)
 
-            if matched {
-                // If previous line is a doc-comment, prepend it
-                if li > 0usize {
-                    let prev = trim_line_start(lines.ptr[li - 1usize].as_ptr() as str)
-                    if str_starts_with(prev, "///") || str_starts_with(prev, "//") {
-                        md.push_str(prev)
-                        md.push_str("\n\n")
+        if mod_qual.len() == 0usize {
+            var li = 0usize
+            while li < lines.len {
+                let l = lines.ptr[li].as_ptr() as str
+                let raw_t = trim_line_start(l)
+                var t = raw_t
+                if str_starts_with(t, "pub ") {
+                    t = (t as usize + 4usize) as str
+                    t = trim_line_start(t)
+                }
+
+                var is_decl = false
+                var decl_offset = 0usize
+                if str_starts_with(t, "fn ") {
+                    is_decl = true
+                    decl_offset = 3usize
+                } else if str_starts_with(t, "struct ") {
+                    is_decl = true
+                    decl_offset = 7usize
+                } else if str_starts_with(t, "const ") {
+                    is_decl = true
+                    decl_offset = 6usize
+                } else if str_starts_with(t, "enum ") {
+                    is_decl = true
+                    decl_offset = 5usize
+                } else if str_starts_with(t, "type ") {
+                    is_decl = true
+                    decl_offset = 5usize
+                } else if str_starts_with(t, "trait ") {
+                    is_decl = true
+                    decl_offset = 6usize
+                } else if str_starts_with(t, "let ") {
+                    is_decl = true
+                    decl_offset = 4usize
+                } else if str_starts_with(t, "var ") {
+                    is_decl = true
+                    decl_offset = 4usize
+                }
+
+                if is_decl {
+                    let rest = trim_line_start((t as usize + decl_offset) as str)
+                    if str_starts_with(rest, search_sym) {
+                        let rlen = str_len(rest)
+                        let slen = str_len(search_sym)
+                        let rp: *raw u8 = rest as *raw u8
+                        if rlen == slen || !is_alnum_or_underscore(rp[slen]) {
+                            var doc_start = li
+                            while doc_start > 0usize {
+                                let prev = trim_line_start(lines.ptr[doc_start - 1usize].as_ptr() as str)
+                                if str_starts_with(prev, "///") || str_starts_with(prev, "//") {
+                                    doc_start = doc_start - 1usize
+                                } else {
+                                    break
+                                }
+                            }
+                            var dci = doc_start
+                            while dci < li {
+                                let dl = trim_line_start(lines.ptr[dci].as_ptr() as str)
+                                var cbody = dl
+                                if str_starts_with(cbody, "///") {
+                                    cbody = (cbody as usize + 3usize) as str
+                                } else if str_starts_with(cbody, "//") {
+                                    cbody = (cbody as usize + 2usize) as str
+                                }
+                                if str_starts_with(cbody, " ") {
+                                    cbody = (cbody as usize + 1usize) as str
+                                }
+                                md.push_str(cbody)
+                                md.push_str("\n")
+                                dci = dci + 1usize
+                            }
+                            if dci > doc_start {
+                                md.push_str("\n")
+                            }
+                            md.push_str("```rad\n")
+                            md.push_str(raw_t)
+                            md.push_str("\n```")
+                            found_decl = true
+                            break
+                        }
                     }
                 }
-                md.push_str("```rad\n")
-                md.push_str(raw_t)
-                md.push_str("\n```")
-                found_decl = true
-                break
+                li = li + 1usize
             }
-            li = li + 1usize
         }
+
+        // Cross-file fallback if not found locally or if qualified
+        if !found_decl {
+            if mod_qual.len() > 0usize {
+                let cand_chosen = lsp_find_module_file(doc_dir.as_ptr() as str, mod_qual.as_ptr() as str)
+                if cand_chosen.len() > 0usize {
+                    let other_doc = read_file_str(cand_chosen.as_ptr() as str)
+                    let other_lines = split_source_lines(other_doc)
+                    var oli = 0usize
+                    while oli < other_lines.len {
+                        let ol = other_lines.ptr[oli].as_ptr() as str
+                        let raw_ot = trim_line_start(ol)
+                        var ot = raw_ot
+                        if str_starts_with(ot, "pub ") {
+                            ot = (ot as usize + 4usize) as str
+                            ot = trim_line_start(ot)
+                        }
+                        var is_decl = false
+                        var decl_offset = 0usize
+                        if str_starts_with(ot, "fn ") {
+                            is_decl = true
+                            decl_offset = 3usize
+                        } else if str_starts_with(ot, "struct ") {
+                            is_decl = true
+                            decl_offset = 7usize
+                        } else if str_starts_with(ot, "const ") {
+                            is_decl = true
+                            decl_offset = 6usize
+                        } else if str_starts_with(ot, "enum ") {
+                            is_decl = true
+                            decl_offset = 5usize
+                        } else if str_starts_with(ot, "type ") {
+                            is_decl = true
+                            decl_offset = 5usize
+                        } else if str_starts_with(ot, "trait ") {
+                            is_decl = true
+                            decl_offset = 6usize
+                        } else if str_starts_with(ot, "let ") {
+                            is_decl = true
+                            decl_offset = 4usize
+                        } else if str_starts_with(ot, "var ") {
+                            is_decl = true
+                            decl_offset = 4usize
+                        }
+
+                        if is_decl {
+                            let rest = trim_line_start((ot as usize + decl_offset) as str)
+                            if str_starts_with(rest, search_sym) {
+                                let rlen = str_len(rest)
+                                let slen = str_len(search_sym)
+                                let rp: *raw u8 = rest as *raw u8
+                                if rlen == slen || !is_alnum_or_underscore(rp[slen]) {
+                                    var doc_start = oli
+                                    while doc_start > 0usize {
+                                        let prev = trim_line_start(other_lines.ptr[doc_start - 1usize].as_ptr() as str)
+                                        if str_starts_with(prev, "///") || str_starts_with(prev, "//") {
+                                            doc_start = doc_start - 1usize
+                                        } else {
+                                            break
+                                        }
+                                    }
+                                    var dci = doc_start
+                                    while dci < oli {
+                                        let dl = trim_line_start(other_lines.ptr[dci].as_ptr() as str)
+                                        var cbody = dl
+                                        if str_starts_with(cbody, "///") {
+                                            cbody = (cbody as usize + 3usize) as str
+                                        } else if str_starts_with(cbody, "//") {
+                                            cbody = (cbody as usize + 2usize) as str
+                                        }
+                                        if str_starts_with(cbody, " ") {
+                                            cbody = (cbody as usize + 1usize) as str
+                                        }
+                                        md.push_str(cbody)
+                                        md.push_str("\n")
+                                        dci = dci + 1usize
+                                    }
+                                    if dci > doc_start {
+                                        md.push_str("\n")
+                                    }
+                                    md.push_str("```rad\n")
+                                    md.push_str(raw_ot)
+                                    md.push_str("\n```")
+                                    found_decl = true
+                                    break
+                                }
+                            }
+                        }
+                        oli = oli + 1usize
+                    }
+                }
+            } else {
+                // Search imported modules
+                var im_i = 0usize
+                while im_i < lines.len && !found_decl {
+                    let iline = lines.ptr[im_i].as_ptr() as str
+                    let itrim = trim_line_start(iline)
+                    if str_starts_with(itrim, "import ") {
+                        var mod_spec = String.new()
+                        let ip: *raw u8 = itrim as *raw u8
+                        let ilen = str_len(itrim)
+                        var idx = 7usize
+                        while idx < ilen && ip[idx] != 59u8 && ip[idx] != 32u8 {
+                            mod_spec.push_byte(ip[idx])
+                            idx = idx + 1usize
+                        }
+                        let cand_file = lsp_find_module_file(doc_dir.as_ptr() as str, mod_spec.as_ptr() as str)
+                        if cand_file.len() > 0usize {
+                            let other_doc = read_file_str(cand_file.as_ptr() as str)
+                            let other_lines = split_source_lines(other_doc)
+                            var oli = 0usize
+                            while oli < other_lines.len {
+                                let ol = other_lines.ptr[oli].as_ptr() as str
+                                let raw_ot = trim_line_start(ol)
+                                var ot = raw_ot
+                                if str_starts_with(ot, "pub ") {
+                                    ot = (ot as usize + 4usize) as str
+                                    ot = trim_line_start(ot)
+                                }
+                                var is_decl = false
+                                var decl_offset = 0usize
+                                if str_starts_with(ot, "fn ") {
+                                    is_decl = true
+                                    decl_offset = 3usize
+                                } else if str_starts_with(ot, "struct ") {
+                                    is_decl = true
+                                    decl_offset = 7usize
+                                } else if str_starts_with(ot, "const ") {
+                                    is_decl = true
+                                    decl_offset = 6usize
+                                } else if str_starts_with(ot, "enum ") {
+                                    is_decl = true
+                                    decl_offset = 5usize
+                                } else if str_starts_with(ot, "type ") {
+                                    is_decl = true
+                                    decl_offset = 5usize
+                                } else if str_starts_with(ot, "trait ") {
+                                    is_decl = true
+                                    decl_offset = 6usize
+                                } else if str_starts_with(ot, "let ") {
+                                    is_decl = true
+                                    decl_offset = 4usize
+                                } else if str_starts_with(ot, "var ") {
+                                    is_decl = true
+                                    decl_offset = 4usize
+                                }
+
+                                if is_decl {
+                                    let rest = trim_line_start((ot as usize + decl_offset) as str)
+                                    if str_starts_with(rest, search_sym) {
+                                        let rlen = str_len(rest)
+                                        let slen = str_len(search_sym)
+                                        let rp: *raw u8 = rest as *raw u8
+                                        if rlen == slen || !is_alnum_or_underscore(rp[slen]) {
+                                            var doc_start = oli
+                                            while doc_start > 0usize {
+                                                let prev = trim_line_start(other_lines.ptr[doc_start - 1usize].as_ptr() as str)
+                                                if str_starts_with(prev, "///") || str_starts_with(prev, "//") {
+                                                    doc_start = doc_start - 1usize
+                                                } else {
+                                                    break
+                                                }
+                                            }
+                                            var dci = doc_start
+                                            while dci < oli {
+                                                let dl = trim_line_start(other_lines.ptr[dci].as_ptr() as str)
+                                                var cbody = dl
+                                                if str_starts_with(cbody, "///") {
+                                                    cbody = (cbody as usize + 3usize) as str
+                                                } else if str_starts_with(cbody, "//") {
+                                                    cbody = (cbody as usize + 2usize) as str
+                                                }
+                                                if str_starts_with(cbody, " ") {
+                                                    cbody = (cbody as usize + 1usize) as str
+                                                }
+                                                md.push_str(cbody)
+                                                md.push_str("\n")
+                                                dci = dci + 1usize
+                                            }
+                                            if dci > doc_start {
+                                                md.push_str("\n")
+                                            }
+                                            md.push_str("```rad\n")
+                                            md.push_str(raw_ot)
+                                            md.push_str("\n```")
+                                            found_decl = true
+                                            break
+                                        }
+                                    }
+                                }
+                                oli = oli + 1usize
+                            }
+                        }
+                    }
+                    im_i = im_i + 1usize
+                }
+            }
+        }
+
         if !found_decl {
             lsp_send_null(id)
             return
@@ -776,199 +1250,165 @@ fn handle_definition(id: i64, uri: str, doc_text: String, line: i64, col: i64) {
         return
     }
 
+    let mod_qual = lsp_extract_mod_qual(s)
+    let base_sym = lsp_extract_base_symbol(s)
+    let search_sym = base_sym.as_ptr() as str
+    let doc_dir = lsp_uri_to_dir(uri)
+
     let lines = split_source_lines(doc_text)
-    var li = 0usize
     var found_line = -1i64
     var found_col = 0i64
-
-    while li < lines.len {
-        let l = lines.ptr[li].as_ptr() as str
-        let t = trim_line_start(l)
-        if str_starts_with(t, "fn ") || str_starts_with(t, "pub fn ") || str_starts_with(t, "struct ") || str_starts_with(t, "pub struct ") || str_starts_with(t, "trait ") || str_starts_with(t, "pub trait ") || str_starts_with(t, "enum ") || str_starts_with(t, "pub enum ") || str_starts_with(t, "type ") || str_starts_with(t, "pub type ") || str_starts_with(t, "let ") || str_starts_with(t, "var ") || str_starts_with(t, "const ") {
-            let p: *raw u8 = l as *raw u8
-            let llen = str_len(l)
-            let slen = str_len(s)
-            // Search s in line
-            var match_idx = 0usize
-            while match_idx + slen <= llen {
-                var is_matched = true
-                var k = 0usize
-                while k < slen {
-                    if p[match_idx + k] != (s as *raw u8)[k] {
-                        is_matched = false
-                        break
-                    }
-                    k = k + 1usize
-                }
-                if is_matched {
-                    found_line = li as i64
-                    found_col = match_idx as i64
-                    break
-                }
-                match_idx = match_idx + 1usize
-            }
-            if found_line >= 0i64 {
-                break
-            }
-        }
-        li = li + 1usize
-    }
-
     var target_uri = String.from_str(uri)
 
-    // Cross-file definition search across imported modules if not found locally
+    // 1. Local declaration search (if unqualified)
+    if mod_qual.len() == 0usize {
+        var li = 0usize
+        while li < lines.len {
+            let l = lines.ptr[li].as_ptr() as str
+            let t = trim_line_start(l)
+            if str_starts_with(t, "fn ") || str_starts_with(t, "pub fn ") || str_starts_with(t, "struct ") || str_starts_with(t, "pub struct ") || str_starts_with(t, "trait ") || str_starts_with(t, "pub trait ") || str_starts_with(t, "enum ") || str_starts_with(t, "pub enum ") || str_starts_with(t, "type ") || str_starts_with(t, "pub type ") || str_starts_with(t, "let ") || str_starts_with(t, "var ") || str_starts_with(t, "const ") {
+                let p: *raw u8 = l as *raw u8
+                let llen = str_len(l)
+                let slen = str_len(search_sym)
+                var match_idx = 0usize
+                while match_idx + slen <= llen {
+                    var is_matched = true
+                    var k = 0usize
+                    while k < slen {
+                        if p[match_idx + k] != (search_sym as *raw u8)[k] {
+                            is_matched = false
+                            break
+                        }
+                        k = k + 1usize
+                    }
+                    if is_matched {
+                        let left_ok = (match_idx == 0usize) || !is_alnum_or_underscore(p[match_idx - 1usize])
+                        let right_ok = (match_idx + slen == llen) || !is_alnum_or_underscore(p[match_idx + slen])
+                        if left_ok && right_ok {
+                            found_line = li as i64
+                            found_col = match_idx as i64
+                            break
+                        }
+                    }
+                    match_idx = match_idx + 1usize
+                }
+                if found_line >= 0i64 {
+                    break
+                }
+            }
+            li = li + 1usize
+        }
+    }
+
+    // 2. Cross-file definition search
     if found_line < 0i64 {
-        var im_i = 0usize
-        while im_i < lines.len {
-            let iline = lines.ptr[im_i].as_ptr() as str
-            let itrim = trim_line_start(iline)
-            if str_starts_with(itrim, "import ") {
-                var mod_spec = String.new()
-                let ip: *raw u8 = itrim as *raw u8
-                let ilen = str_len(itrim)
-                var idx = 7usize
-                while idx < ilen && ip[idx] != 59u8 && ip[idx] != 32u8 { // ';' or ' '
-                    mod_spec.push_byte(ip[idx])
-                    idx = idx + 1usize
-                }
-                mod_spec.push_byte(0u8)
-
-                // Try candidates
-                var cand_chosen = String.new()
-                let m_str = mod_spec.as_ptr() as str
-                var has_slash = false
-                var slash_pos = 0usize
-                var mi = 0usize
-                let mlen = str_len(m_str)
-                let mp: *raw u8 = m_str as *raw u8
-                while mi < mlen {
-                    if mp[mi] == 47u8 { // '/'
-                        has_slash = true
-                        slash_pos = mi
-                        break
-                    }
-                    mi = mi + 1usize
-                }
-
-                if has_slash {
-                    var pkg_prefix = String.new()
-                    var ki = 0usize
-                    while ki < slash_pos {
-                        pkg_prefix.push_byte(mp[ki])
-                        ki = ki + 1usize
-                    }
-                    var mod_name = String.new()
-                    ki = slash_pos + 1usize
-                    while ki < mlen {
-                        mod_name.push_byte(mp[ki])
-                        ki = ki + 1usize
-                    }
-                    // Try lib/rad/{pkg}/src/{mod}.rad
-                    var c1 = String.new()
-                    c1.push_str("lib/rad/")
-                    c1.push_str(pkg_prefix.as_ptr() as str)
-                    c1.push_str("/src/")
-                    c1.push_str(mod_name.as_ptr() as str)
-                    c1.push_str(".rad")
-
-                    // Try lib/rad/{pkg}/{mod}.rad
-                    var c2 = String.new()
-                    c2.push_str("lib/rad/")
-                    c2.push_str(m_str)
-                    c2.push_str(".rad")
-
-                    // Try src/{mod}.rad
-                    var c3 = String.new()
-                    c3.push_str("src/")
-                    c3.push_str(mod_name.as_ptr() as str)
-                    c3.push_str(".rad")
-
-                    if file_exists(c1.as_ptr() as str) {
-                        cand_chosen = c1
-                    } else if file_exists(c2.as_ptr() as str) {
-                        cand_chosen = c2
-                    } else if file_exists(c3.as_ptr() as str) {
-                        cand_chosen = c3
-                    }
-                } else {
-                    var c1 = String.new()
-                    c1.push_str("lib/rad/")
-                    c1.push_str(m_str)
-                    c1.push_str("/src/")
-                    c1.push_str(m_str)
-                    c1.push_str(".rad")
-
-                    var c2 = String.new()
-                    c2.push_str("lib/rad/")
-                    c2.push_str(m_str)
-                    c2.push_str("/src/lib.rad")
-
-                    var c3 = String.new()
-                    c3.push_str("src/")
-                    c3.push_str(m_str)
-                    c3.push_str(".rad")
-
-                    var c4 = String.new()
-                    c4.push_str("lib/rad/")
-                    c4.push_str(m_str)
-                    c4.push_str(".rad")
-
-                    if file_exists(c1.as_ptr() as str) {
-                        cand_chosen = c1
-                    } else if file_exists(c2.as_ptr() as str) {
-                        cand_chosen = c2
-                    } else if file_exists(c3.as_ptr() as str) {
-                        cand_chosen = c3
-                    } else if file_exists(c4.as_ptr() as str) {
-                        cand_chosen = c4
-                    }
-                }
-
-                if cand_chosen.len() > 0usize {
-                    let other_doc = read_file_str(cand_chosen.as_ptr() as str)
-                    let other_lines = split_source_lines(other_doc)
-                    var oli = 0usize
-                    while oli < other_lines.len {
-                        let ol = other_lines.ptr[oli].as_ptr() as str
-                        let ot = trim_line_start(ol)
-                        if str_starts_with(ot, "fn ") || str_starts_with(ot, "pub fn ") || str_starts_with(ot, "struct ") || str_starts_with(ot, "pub struct ") || str_starts_with(ot, "trait ") || str_starts_with(ot, "pub trait ") || str_starts_with(ot, "enum ") || str_starts_with(ot, "pub enum ") || str_starts_with(ot, "type ") || str_starts_with(ot, "pub type ") {
-                            let op: *raw u8 = ol as *raw u8
-                            let ollen = str_len(ol)
-                            let slen = str_len(s)
-                            var omatch = 0usize
-                            while omatch + slen <= ollen {
-                                var o_ok = true
-                                var ok = 0usize
-                                while ok < slen {
-                                    if op[omatch + ok] != (s as *raw u8)[ok] {
-                                        o_ok = false
-                                        break
-                                    }
-                                    ok = ok + 1usize
+        if mod_qual.len() > 0usize {
+            let cand_chosen = lsp_find_module_file(doc_dir.as_ptr() as str, mod_qual.as_ptr() as str)
+            if cand_chosen.len() > 0usize {
+                let other_doc = read_file_str(cand_chosen.as_ptr() as str)
+                let other_lines = split_source_lines(other_doc)
+                var oli = 0usize
+                while oli < other_lines.len {
+                    let ol = other_lines.ptr[oli].as_ptr() as str
+                    let ot = trim_line_start(ol)
+                    if str_starts_with(ot, "fn ") || str_starts_with(ot, "pub fn ") || str_starts_with(ot, "struct ") || str_starts_with(ot, "pub struct ") || str_starts_with(ot, "trait ") || str_starts_with(ot, "pub trait ") || str_starts_with(ot, "enum ") || str_starts_with(ot, "pub enum ") || str_starts_with(ot, "type ") || str_starts_with(ot, "pub type ") || str_starts_with(ot, "let ") || str_starts_with(ot, "var ") || str_starts_with(ot, "const ") {
+                        let op: *raw u8 = ol as *raw u8
+                        let ollen = str_len(ol)
+                        let slen = str_len(search_sym)
+                        var omatch = 0usize
+                        while omatch + slen <= ollen {
+                            var o_ok = true
+                            var ok = 0usize
+                            while ok < slen {
+                                if op[omatch + ok] != (search_sym as *raw u8)[ok] {
+                                    o_ok = false
+                                    break
                                 }
-                                if o_ok {
+                                ok = ok + 1usize
+                            }
+                            if o_ok {
+                                let left_ok = (omatch == 0usize) || !is_alnum_or_underscore(op[omatch - 1usize])
+                                let right_ok = (omatch + slen == ollen) || !is_alnum_or_underscore(op[omatch + slen])
+                                if left_ok && right_ok {
                                     found_line = oli as i64
                                     found_col = omatch as i64
                                     target_uri = String.new()
                                     target_uri.push_str("file://")
                                     target_uri.push_str(cand_chosen.as_ptr() as str)
-                                    target_uri.push_byte(0u8)
                                     break
                                 }
-                                omatch = omatch + 1usize
                             }
-                            if found_line >= 0i64 {
-                                break
-                            }
+                            omatch = omatch + 1usize
                         }
-                        oli = oli + 1usize
+                        if found_line >= 0i64 {
+                            break
+                        }
                     }
+                    oli = oli + 1usize
                 }
             }
-            if found_line >= 0i64 {
-                break
+        } else {
+            // Search imported modules in doc_text
+            var im_i = 0usize
+            while im_i < lines.len && found_line < 0i64 {
+                let iline = lines.ptr[im_i].as_ptr() as str
+                let itrim = trim_line_start(iline)
+                if str_starts_with(itrim, "import ") {
+                    var mod_spec = String.new()
+                    let ip: *raw u8 = itrim as *raw u8
+                    let ilen = str_len(itrim)
+                    var idx = 7usize
+                    while idx < ilen && ip[idx] != 59u8 && ip[idx] != 32u8 {
+                        mod_spec.push_byte(ip[idx])
+                        idx = idx + 1usize
+                    }
+                    let cand_chosen = lsp_find_module_file(doc_dir.as_ptr() as str, mod_spec.as_ptr() as str)
+                    if cand_chosen.len() > 0usize {
+                        let other_doc = read_file_str(cand_chosen.as_ptr() as str)
+                        let other_lines = split_source_lines(other_doc)
+                        var oli = 0usize
+                        while oli < other_lines.len {
+                            let ol = other_lines.ptr[oli].as_ptr() as str
+                            let ot = trim_line_start(ol)
+                            if str_starts_with(ot, "fn ") || str_starts_with(ot, "pub fn ") || str_starts_with(ot, "struct ") || str_starts_with(ot, "pub struct ") || str_starts_with(ot, "trait ") || str_starts_with(ot, "pub trait ") || str_starts_with(ot, "enum ") || str_starts_with(ot, "pub enum ") || str_starts_with(ot, "type ") || str_starts_with(ot, "pub type ") || str_starts_with(ot, "let ") || str_starts_with(ot, "var ") || str_starts_with(ot, "const ") {
+                                let op: *raw u8 = ol as *raw u8
+                                let ollen = str_len(ol)
+                                let slen = str_len(search_sym)
+                                var omatch = 0usize
+                                while omatch + slen <= ollen {
+                                    var o_ok = true
+                                    var ok = 0usize
+                                    while ok < slen {
+                                        if op[omatch + ok] != (search_sym as *raw u8)[ok] {
+                                            o_ok = false
+                                            break
+                                        }
+                                        ok = ok + 1usize
+                                    }
+                                    if o_ok {
+                                        let left_ok = (omatch == 0usize) || !is_alnum_or_underscore(op[omatch - 1usize])
+                                        let right_ok = (omatch + slen == ollen) || !is_alnum_or_underscore(op[omatch + slen])
+                                        if left_ok && right_ok {
+                                            found_line = oli as i64
+                                            found_col = omatch as i64
+                                            target_uri = String.new()
+                                            target_uri.push_str("file://")
+                                            target_uri.push_str(cand_chosen.as_ptr() as str)
+                                            break
+                                        }
+                                    }
+                                    omatch = omatch + 1usize
+                                }
+                                if found_line >= 0i64 {
+                                    break
+                                }
+                            }
+                            oli = oli + 1usize
+                        }
+                    }
+                }
+                im_i = im_i + 1usize
             }
-            im_i = im_i + 1usize
         }
     }
 
@@ -987,7 +1427,7 @@ fn handle_definition(id: i64, uri: str, doc_text: String, line: i64, col: i64) {
     res.push_str("},\"end\":{\"line\":")
     res.push_str(int_to_str(found_line as i32).as_ptr() as str)
     res.push_str(",\"character\":")
-    res.push_str(int_to_str((found_col + (str_len(s) as i64)) as i32).as_ptr() as str)
+    res.push_str(int_to_str((found_col as i32) + (str_len(search_sym) as i32)).as_ptr() as str)
     res.push_str("}}}")
     lsp_send_result(id, res.as_ptr() as str)
 }
@@ -1308,7 +1748,7 @@ fn run_lsp_server(argv0: str) -> i32 {
             let line = json_get_int_field(json, "line")
             let col = json_get_int_field(json, "character")
             let doc_text = server.get_document(uri.as_ptr() as str)
-            handle_hover(id, doc_text, line, col)
+            handle_hover(id, uri.as_ptr() as str, doc_text, line, col)
         } else if str_eq(m, "textDocument/completion") {
             let uri = json_get_string(json, "uri")
             let doc_text = server.get_document(uri.as_ptr() as str)

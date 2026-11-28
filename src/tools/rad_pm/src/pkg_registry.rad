@@ -381,6 +381,74 @@ fn update_lockfile() {
     write_file_str("rad.lock", lock.as_ptr() as str)
 }
 
+pub fn verify_lockfile_checksums() -> bool {
+    if !file_exists("rad.lock") {
+        return true
+    }
+    let content = read_file_str("rad.lock")
+    if content.len() == 0usize {
+        return true
+    }
+    let reg_root = get_registry_root()
+    let lines = split_source_lines(content)
+    var cur_name = String.new()
+    var cur_ver = String.new()
+    var cur_chk = String.new()
+    var ok = true
+    var i = 0usize
+    while i <= lines.len {
+        var is_boundary = false
+        var line = ""
+        if i < lines.len {
+            line = lines.ptr[i].as_ptr() as str
+            let trimmed = trim_line_start(line)
+            if str_starts_with(trimmed, "[[package]]") {
+                is_boundary = true
+            }
+        } else {
+            is_boundary = true
+        }
+        if is_boundary {
+            if cur_name.len() > 0usize && cur_ver.len() > 0usize && cur_chk.len() > 0usize {
+                if !str_eq(cur_chk.as_ptr() as str, "git-head") && !str_eq(cur_chk.as_ptr() as str, "none") {
+                    let expected = get_package_checksum(reg_root.as_ptr() as str, cur_name.as_ptr() as str, cur_ver.as_ptr() as str)
+                    if expected.len() > 0usize && !str_eq(expected.as_ptr() as str, "none") && !str_eq(cur_chk.as_ptr() as str, expected.as_ptr() as str) {
+                        var msg = String.new()
+                        msg.push_str("error: checksum mismatch for package '")
+                        msg.push_str(cur_name.as_ptr() as str)
+                        msg.push_str("' in rad.lock (expected ")
+                        msg.push_str(expected.as_ptr() as str)
+                        msg.push_str(", found ")
+                        msg.push_str(cur_chk.as_ptr() as str)
+                        msg.push_str(")")
+                        println(msg.as_ptr() as str)
+                        ok = false
+                    }
+                }
+            }
+            cur_name = String.new()
+            cur_ver = String.new()
+            cur_chk = String.new()
+        }
+        if i < lines.len {
+            let f_name = extract_toml_field(line, "name")
+            if f_name.len() > 0usize && cur_name.len() == 0usize {
+                cur_name = f_name
+            }
+            let f_ver = extract_toml_field(line, "version")
+            if f_ver.len() > 0usize && cur_ver.len() == 0usize {
+                cur_ver = f_ver
+            }
+            let f_chk = extract_toml_field(line, "checksum")
+            if f_chk.len() > 0usize && cur_chk.len() == 0usize {
+                cur_chk = f_chk
+            }
+        }
+        i = i + 1usize
+    }
+    return ok
+}
+
 fn ensure_library_installed_global(reg_root: str, pkg_name: str, version: str) -> bool {
     let env_home = getenv("HOME")
     if (env_home as usize) == 0usize {

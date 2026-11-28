@@ -10,6 +10,10 @@ fn cmd_build(is_release: bool, target_triple: str, argv0: str) -> i32 {
         return 1
     }
 
+    if !verify_lockfile_checksums() {
+        return 1
+    }
+
     let ws_members = get_workspace_members()
     if ws_members.len > 0usize {
         let radc_bin = find_radc_compiler(argv0)

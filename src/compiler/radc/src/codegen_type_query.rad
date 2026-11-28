@@ -1,0 +1,1581 @@
+// radc/src/codegen_type_query.rad - Type Queries & Inferred Type Queries Pass
+import util;
+import token;
+import ast;
+import parser;
+
+impl Codegen {
+    fn find_var_type_in_stmts(self, stmt_id: usize, vname: str) -> str {
+        let sp = self.parser.stmts.ptr
+        let k = sp[stmt_id].kind
+        if k == STMT_LET || k == STMT_VAR {
+            if str_eq(sp[stmt_id].name.as_ptr() as str, vname) {
+                let st_ty = sp[stmt_id].type_name.as_ptr() as str
+                if str_len(st_ty) > 0usize {
+                    return st_ty
+                }
+                let init_e = sp[stmt_id].expr_id
+                if init_e != 0usize {
+                    if sp[stmt_id].index_expr == 1usize {
+                        var opt_expr_id = init_e
+                        if self.parser.exprs.ptr[init_e].kind == EXPR_CALL && self.parser.exprs.ptr[init_e].args.len > 0usize {
+                            opt_expr_id = self.parser.exprs.ptr[init_e].args.ptr[0usize]
+                        }
+                        var inner_ty = self.get_expr_struct_name(opt_expr_id)
+                        if str_len(inner_ty) == 0usize && self.parser.exprs.ptr[opt_expr_id].kind == EXPR_IDENT {
+                            inner_ty = self.get_raw_var_type(self.parser.exprs.ptr[opt_expr_id].str_val.as_ptr() as str)
+                        }
+                        if str_starts_with(inner_ty, "Option<") {
+                            let plen = str_len(inner_ty)
+                            if plen > 8usize {
+                                var inner = String.new()
+                                let cp = inner_ty as *raw u8
+                                var ci = 7usize
+                                while ci < plen && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        }
+                        if str_starts_with(inner_ty, "Result<") {
+                            let plen = str_len(inner_ty)
+                            if plen > 8usize {
+                                var inner = String.new()
+                                let cp = inner_ty as *raw u8
+                                var ci = 7usize
+                                while ci < plen && cp[ci] != 44u8 && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        }
+                        if str_len(inner_ty) > 0usize && !str_eq(inner_ty, "Option") && !str_eq(inner_ty, "Result") {
+                            return inner_ty
+                        }
+                    }
+                    if self.is_expr_float(init_e) {
+                        return "f64"
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_ARRAY_LITERAL {
+                        if self.parser.exprs.ptr[init_e].args.len > 0usize {
+                            let first_arg = self.parser.exprs.ptr[init_e].args.ptr[0usize]
+                            if self.is_expr_float(first_arg) {
+                                return "[]f64"
+                            }
+                        }
+                        return "[]i64"
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_FSTRING {
+                        return "String"
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_LAMBDA {
+                        return self.build_lambda_fn_type_str(self.parser.exprs.ptr[init_e].int_val as usize)
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_TUPLE {
+                        var tup_ty = String.new()
+                        tup_ty.push_str("(")
+                        var ai = 0usize
+                        while ai < self.parser.exprs.ptr[init_e].args.len {
+                            let a_id = self.parser.exprs.ptr[init_e].args.ptr[ai]
+                            if self.is_expr_float(a_id) {
+                                tup_ty.push_str("f64")
+                            } else if self.is_expr_ptr(a_id) {
+                                tup_ty.push_str("ptr")
+                            } else {
+                                tup_ty.push_str("i64")
+                            }
+                            if ai + 1usize < self.parser.exprs.ptr[init_e].args.len {
+                                tup_ty.push_str(", ")
+                            }
+                            ai = ai + 1usize
+                        }
+                        tup_ty.push_str(")")
+                        return tup_ty.as_ptr() as str
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_CALL {
+                        let callee = self.parser.exprs.ptr[init_e].left
+                        if self.parser.exprs.ptr[callee].kind == EXPR_IDENT {
+                            let callee_name = self.parser.exprs.ptr[callee].str_val.as_ptr() as str
+                            let ret_t = self.get_raw_func_ret_type(callee_name)
+                            if str_len(ret_t) > 0usize && !str_eq(ret_t, "void") {
+                                return ret_t
+                            }
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_TRY {
+                        let inner_id = self.parser.exprs.ptr[init_e].left
+                        var inner_ty = self.get_expr_struct_name(inner_id)
+                        if str_len(inner_ty) == 0usize && self.parser.exprs.ptr[inner_id].kind == EXPR_IDENT {
+                            inner_ty = self.get_raw_var_type(self.parser.exprs.ptr[inner_id].str_val.as_ptr() as str)
+                        }
+                        if str_starts_with(inner_ty, "Option<") {
+                            let plen = str_len(inner_ty)
+                            if plen > 8usize {
+                                var inner = String.new()
+                                let cp = inner_ty as *raw u8
+                                var ci = 7usize
+                                while ci < plen && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        }
+                        if str_starts_with(inner_ty, "Result<") {
+                            let plen = str_len(inner_ty)
+                            if plen > 8usize {
+                                var inner = String.new()
+                                let cp = inner_ty as *raw u8
+                                var ci = 7usize
+                                while ci < plen && cp[ci] != 44u8 && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        }
+                        if str_len(inner_ty) > 0usize {
+                            return inner_ty
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_IDENT {
+                        let id_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        if str_eq(id_name, "None") || str_eq(id_name, "Option::None") {
+                            return "Option"
+                        }
+                        let raw_t = self.get_raw_var_type(id_name)
+                        if str_len(raw_t) > 0usize {
+                            return raw_t
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_CAST {
+                        let c_ty = self.parser.exprs.ptr[init_e].target_type.as_ptr() as str
+                        if str_len(c_ty) > 0usize {
+                            return c_ty
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_FIELD_ACCESS {
+                        let fname = self.parser.exprs.ptr[init_e].field_name.as_ptr() as str
+                        let recv_id = self.parser.exprs.ptr[init_e].left
+                        let fname_p = fname as *raw u8
+                        if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                            let f_idx = parse_int(fname)
+                            let elem_ty = self.get_tuple_elem_type(recv_id, f_idx)
+                            if str_len(elem_ty) > 0usize {
+                                return elem_ty
+                            }
+                        }
+                        let parent_struct = self.get_expr_struct_name(recv_id)
+                        if str_eq(parent_struct, "Option") {
+                            return "Option"
+                        }
+                        if str_eq(parent_struct, "Result") {
+                            return "Result"
+                        }
+                        if str_len(parent_struct) > 0usize {
+                            var si = 0usize
+                            while si < self.parser.structs.len {
+                                let sdef = self.parser.structs.ptr[si]
+                                if self.match_struct_name(sdef.struct_name.as_ptr() as str, parent_struct) {
+                                    var fi = 0usize
+                                    while fi < sdef.field_names.len {
+                                        if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                            return sdef.field_types.ptr[fi].as_ptr() as str
+                                        }
+                                        fi = fi + 1usize
+                                    }
+                                }
+                                si = si + 1usize
+                            }
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_METHOD_CALL {
+                        let recv_id = self.parser.exprs.ptr[init_e].left
+                        let member = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        let clean_m = self.clean_type_name(member)
+                        let struct_name = self.get_expr_struct_name(recv_id)
+                        if str_starts_with(struct_name, "Option") {
+                            if str_eq(clean_m, "is_some") || str_eq(clean_m, "is_none") {
+                                return "bool"
+                            }
+                            if str_eq(clean_m, "unwrap") || str_eq(clean_m, "unwrap_or") {
+                                if str_starts_with(struct_name, "Option<") {
+                                    let plen = str_len(struct_name)
+                                    if plen > 8usize {
+                                        var inner = String.new()
+                                        let cp = struct_name as *raw u8
+                                        var ci = 7usize
+                                        while ci < plen && cp[ci] != 62u8 {
+                                            inner.push_byte(cp[ci])
+                                            ci = ci + 1usize
+                                        }
+                                        inner.push_byte(0u8)
+                                        return inner.as_ptr() as str
+                                    }
+                                }
+                                return "i64"
+                            }
+                            if str_starts_with(struct_name, "Option<") {
+                                let plen = str_len(struct_name)
+                                if plen > 8usize {
+                                    var inner = String.new()
+                                    let cp = struct_name as *raw u8
+                                    var ci = 7usize
+                                    while ci < plen && cp[ci] != 62u8 {
+                                        inner.push_byte(cp[ci])
+                                        ci = ci + 1usize
+                                    }
+                                    inner.push_byte(0u8)
+                                    let inner_ty = inner.as_ptr() as str
+                                    var m_try = String.new()
+                                    m_try.push_str(inner_ty)
+                                    m_try.push_str("__")
+                                    m_try.push_str(clean_m)
+                                    m_try.push_byte(0u8)
+                                    var fi_opt = 0usize
+                                    while fi_opt < self.parser.functions.len {
+                                        if str_eq(self.parser.functions.ptr[fi_opt].fn_name.as_ptr() as str, m_try.as_ptr() as str) {
+                                            let raw_r = self.parser.functions.ptr[fi_opt].ret_type.as_ptr() as str
+                                            if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                                return raw_r
+                                            }
+                                        }
+                                        fi_opt = fi_opt + 1usize
+                                    }
+                                }
+                            }
+                            return "Option"
+                        }
+                        if str_eq(struct_name, "Result") {
+                            return "Result"
+                        }
+                        if (str_eq(clean_m, "get") || str_eq(clean_m, "pop")) && (str_eq(struct_name, "Vec") || str_starts_with(struct_name, "Vec<")) {
+                            if str_starts_with(struct_name, "Vec<") {
+                                let plen = str_len(struct_name)
+                                if plen > 5usize {
+                                    var opt_t = String.new()
+                                    opt_t.push_str("Option<")
+                                    let cp = struct_name as *raw u8
+                                    var ci = 4usize
+                                    while ci < plen && cp[ci] != 62u8 {
+                                        opt_t.push_byte(cp[ci])
+                                        ci = ci + 1usize
+                                    }
+                                    opt_t.push_byte(62u8) // '>'
+                                    opt_t.push_byte(0u8)
+                                    return opt_t.as_ptr() as str
+                                }
+                            }
+                            return "Option"
+                        }
+                        if str_len(struct_name) > 0usize {
+                            if str_eq(clean_m, "new") {
+                                return struct_name
+                            }
+                            if str_eq(struct_name, "String") && (str_eq(clean_m, "to_int") || str_eq(clean_m, "parse_int")) {
+                                return "i64"
+                            }
+                            if str_eq(struct_name, "Vec") && (str_eq(clean_m, "map") || str_eq(clean_m, "filter")) {
+                                return "Vec"
+                            }
+                            var mangled = String.new()
+                            mangled.push_str(struct_name)
+                            mangled.push_str("__")
+                            mangled.push_str(clean_m)
+                            mangled.push_byte(0u8)
+                            var fi = 0usize
+                            while fi < self.parser.functions.len {
+                                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, mangled.as_ptr() as str) {
+                                    let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                    if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                        return raw_r
+                                    }
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
+                            let base_ty = self.clean_type_name(struct_name)
+                            if !str_eq(base_ty, struct_name) && str_len(base_ty) > 0usize {
+                                var bm = String.new()
+                                bm.push_str(base_ty)
+                                bm.push_str("__")
+                                bm.push_str(clean_m)
+                                bm.push_byte(0u8)
+                                fi = 0usize
+                                while fi < self.parser.functions.len {
+                                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm.as_ptr() as str) {
+                                        let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                        if str_contains(struct_name, "<") {
+                                            var si = 0usize
+                                            while si < self.parser.structs.len {
+                                                let sdef = self.parser.structs.ptr[si]
+                                                if self.match_struct_name(sdef.struct_name.as_ptr() as str, base_ty) {
+                                                    var fld_i = 0usize
+                                                    while fld_i < sdef.field_names.len {
+                                                        if str_eq(sdef.field_types.ptr[fld_i].as_ptr() as str, raw_r) {
+                                                            let mono = self.get_monomorphized_field_type(sdef, struct_name, fld_i)
+                                                            if str_len(mono) > 0usize {
+                                                                return mono
+                                                            }
+                                                        }
+                                                        fld_i = fld_i + 1usize
+                                                    }
+                                                    break
+                                                }
+                                                si = si + 1usize
+                                            }
+                                        }
+                                        if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                            return raw_r
+                                        }
+                                        break
+                                    }
+                                    fi = fi + 1usize
+                                }
+                            }
+                        }
+                        var fi_std = 0usize
+                        while fi_std < self.parser.functions.len {
+                            if str_eq(self.parser.functions.ptr[fi_std].fn_name.as_ptr() as str, member) {
+                                let raw_r = self.parser.functions.ptr[fi_std].ret_type.as_ptr() as str
+                                if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                    return raw_r
+                                }
+                                break
+                            }
+                            fi_std = fi_std + 1usize
+                        }
+                        if self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
+                            let rname = self.parser.exprs.ptr[recv_id].str_val.as_ptr() as str
+                            let rty = self.get_raw_var_type(rname)
+                            if str_eq(rname, "Vec") || str_starts_with(rty, "Vec") {
+                                if str_eq(clean_m, "get") || str_eq(clean_m, "pop") {
+                                    return "Option"
+                                }
+                                return "Vec"
+                            }
+                            if str_eq(rname, "String") {
+                                if str_eq(clean_m, "to_int") || str_eq(clean_m, "parse_int") {
+                                    return "i64"
+                                }
+                                return "String"
+                            }
+                            if str_eq(rname, "Option") {
+                                return "Option"
+                            }
+                            if str_eq(rname, "Result") {
+                                return "Result"
+                            }
+                            if self.is_struct_name(rname) {
+                                if str_eq(member, "new") {
+                                    return rname
+                                }
+                                var mangled = String.new()
+                                mangled.push_str(rname)
+                                mangled.push_str("__")
+                                mangled.push_str(member)
+                                mangled.push_byte(0u8)
+                                var fi = 0usize
+                                while fi < self.parser.functions.len {
+                                    if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, mangled.as_ptr() as str) {
+                                        let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                        if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                            return raw_r
+                                        }
+                                        break
+                                    }
+                                    fi = fi + 1usize
+                                }
+                                return rname
+                            }
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_INDEX {
+                        let idx_ty = self.get_expr_struct_name(init_e)
+                        if str_len(idx_ty) > 0usize {
+                            return idx_ty
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_IDENT {
+                        let rhs_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        let rhs_ty = self.get_raw_var_type(rhs_name)
+                        if str_len(rhs_ty) > 0usize && !str_eq(rhs_ty, "i64") {
+                            return rhs_ty
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_CALL {
+                        let callee = self.parser.exprs.ptr[init_e].left
+                        if self.parser.exprs.ptr[callee].kind == EXPR_IDENT {
+                            let cname = self.parser.exprs.ptr[callee].str_val.as_ptr() as str
+                            if str_eq(cname, "Some") || str_eq(cname, "None") {
+                                return "Option"
+                            }
+                            if str_eq(cname, "Ok") || str_eq(cname, "Err") {
+                                return "Result"
+                            }
+                            if str_eq(cname, "input") {
+                                return "String"
+                            }
+                            if str_eq(cname, "parse_int") || str_eq(cname, "String__to_int") || str_eq(cname, "String__parse_int") {
+                                return "i64"
+                            }
+                            if self.is_struct_name(cname) {
+                                return cname
+                            }
+                            let resolved_cname = self.resolve_function_name(cname, 0usize)
+                            var fi = 0usize
+                            while fi < self.parser.functions.len {
+                                let fn_s = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+                                if str_eq(fn_s, cname) || str_eq(fn_s, resolved_cname) {
+                                    let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                    if str_len(raw_r) > 0usize && !str_eq(raw_r, "i64") && !str_eq(raw_r, "void") {
+                                        return raw_r
+                                    }
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
+                        } else if self.parser.exprs.ptr[callee].kind == EXPR_FIELD_ACCESS {
+                            let recv_id = self.parser.exprs.ptr[callee].left
+                            if self.parser.exprs.ptr[recv_id].kind == EXPR_IDENT {
+                                let rname = self.parser.exprs.ptr[recv_id].str_val.as_ptr() as str
+                                if str_eq(rname, "Vec") {
+                                    return "Vec"
+                                }
+                                if str_eq(rname, "String") {
+                                    return "String"
+                                }
+                                if str_eq(rname, "Option") {
+                                    return "Option"
+                                }
+                                if str_eq(rname, "Result") {
+                                    return "Result"
+                                }
+                                if self.is_struct_name(rname) {
+                                    return rname
+                                }
+                            }
+                        }
+                    }
+                    if self.parser.exprs.ptr[init_e].kind == EXPR_METHOD_CALL {
+                        let m_recv = self.parser.exprs.ptr[init_e].left
+                        let m_name = self.parser.exprs.ptr[init_e].str_val.as_ptr() as str
+                        if self.parser.exprs.ptr[m_recv].kind == EXPR_IDENT {
+                            let rec_id = self.parser.exprs.ptr[m_recv].str_val.as_ptr() as str
+                            if str_eq(rec_id, "Option") {
+                                return "Option"
+                            }
+                            if str_eq(rec_id, "Result") {
+                                return "Result"
+                            }
+                        }
+                        let recv_ty = self.get_expr_struct_name(m_recv)
+                        if str_len(recv_ty) > 0usize {
+                            let base_ty = self.clean_type_name(recv_ty)
+                            var bm = String.new()
+                            bm.push_str(base_ty)
+                            bm.push_str("__")
+                            bm.push_str(m_name)
+                            bm.push_byte(0u8)
+                            let bm_name = bm.as_ptr() as str
+                            var fi = 0usize
+                            while fi < self.parser.functions.len {
+                                if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, bm_name) {
+                                    let raw_r = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                                    if str_contains(recv_ty, "<") {
+                                        var si = 0usize
+                                        while si < self.parser.structs.len {
+                                            let sdef = self.parser.structs.ptr[si]
+                                            if self.match_struct_name(sdef.struct_name.as_ptr() as str, base_ty) {
+                                                var fld_i = 0usize
+                                                while fld_i < sdef.field_names.len {
+                                                    if str_eq(sdef.field_types.ptr[fld_i].as_ptr() as str, raw_r) {
+                                                        let mono = self.get_monomorphized_field_type(sdef, recv_ty, fld_i)
+                                                        if str_len(mono) > 0usize {
+                                                            return mono
+                                                        }
+                                                    }
+                                                    fld_i = fld_i + 1usize
+                                                }
+                                                break
+                                            }
+                                            si = si + 1usize
+                                        }
+                                    }
+                                    if str_len(raw_r) > 0usize && !str_eq(raw_r, "void") {
+                                        return raw_r
+                                    }
+                                    break
+                                }
+                                fi = fi + 1usize
+                            }
+                        }
+                    }
+                }
+                return "i64"
+            }
+        }
+        if k == STMT_IF {
+            var i = 0usize
+            while i < sp[stmt_id].then_stmts.len {
+                let ty = self.find_var_type_in_stmts(sp[stmt_id].then_stmts.ptr[i], vname)
+                if str_len(ty) > 0usize { return ty }
+                i = i + 1usize
+            }
+            var j = 0usize
+            while j < sp[stmt_id].else_stmts.len {
+                let ty = self.find_var_type_in_stmts(sp[stmt_id].else_stmts.ptr[j], vname)
+                if str_len(ty) > 0usize { return ty }
+                j = j + 1usize
+            }
+        }
+        if k == STMT_WHILE {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                let ty = self.find_var_type_in_stmts(sp[stmt_id].body_stmts.ptr[i], vname)
+                if str_len(ty) > 0usize { return ty }
+                i = i + 1usize
+            }
+        }
+        if k == STMT_FOR_RANGE {
+            if str_eq(sp[stmt_id].name.as_ptr() as str, vname) {
+                return "usize"
+            }
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                let ty = self.find_var_type_in_stmts(sp[stmt_id].body_stmts.ptr[i], vname)
+                if str_len(ty) > 0usize { return ty }
+                i = i + 1usize
+            }
+        }
+        if k == STMT_FOR_IN {
+            if str_eq(sp[stmt_id].name.as_ptr() as str, vname) {
+                let st_ty = sp[stmt_id].type_name.as_ptr() as str
+                if str_len(st_ty) > 0usize {
+                    return st_ty
+                }
+                let coll_id = sp[stmt_id].expr_id
+                if coll_id != 0usize && coll_id < self.parser.exprs.len {
+                    let ep = self.parser.exprs.ptr
+                    if ep[coll_id].kind == EXPR_ARRAY_LITERAL {
+                        if ep[coll_id].args.len > 0usize {
+                            let first_arg = ep[coll_id].args.ptr[0usize]
+                            if self.is_expr_float(first_arg) {
+                                return "f64"
+                            }
+                        }
+                    }
+                    if ep[coll_id].kind == EXPR_IDENT {
+                        let cname = ep[coll_id].str_val.as_ptr() as str
+                        let raw_coll_ty = self.get_raw_var_type(cname)
+                        if str_starts_with(raw_coll_ty, "Vec<") {
+                            let plen = str_len(raw_coll_ty)
+                            if plen > 5usize {
+                                var inner = String.new()
+                                let cp = raw_coll_ty as *raw u8
+                                var ci = 4usize
+                                while ci < plen && cp[ci] != 62u8 {
+                                    inner.push_byte(cp[ci])
+                                    ci = ci + 1usize
+                                }
+                                inner.push_byte(0u8)
+                                return inner.as_ptr() as str
+                            }
+                        } else if str_starts_with(raw_coll_ty, "[]") {
+                            return (raw_coll_ty as usize + 2usize) as str
+                        } else if str_eq(raw_coll_ty, "Vec") {
+                            if self.current_func_idx < self.parser.functions.len {
+                                let cur_fn = self.parser.functions.ptr[self.current_func_idx]
+                                var bi = 0usize
+                                while bi < cur_fn.body.len {
+                                    let bs = cur_fn.body.ptr[bi]
+                                    if sp[bs].kind == STMT_EXPR {
+                                        let eid = sp[bs].expr_id
+                                        if ep[eid].kind == EXPR_METHOD_CALL {
+                                            let recv = ep[eid].left
+                                            let mname = ep[eid].str_val.as_ptr() as str
+                                            if ep[recv].kind == EXPR_IDENT && str_eq(ep[recv].str_val.as_ptr() as str, cname) && str_eq(mname, "push") && ep[eid].args.len > 0usize {
+                                                let arg0 = ep[eid].args.ptr[0usize]
+                                                if ep[arg0].kind == EXPR_STR {
+                                                    return "String"
+                                                }
+                                                if ep[arg0].kind == EXPR_CALL {
+                                                    let c_callee = ep[arg0].left
+                                                    if ep[c_callee].kind == EXPR_IDENT {
+                                                        let cfn = ep[c_callee].str_val.as_ptr() as str
+                                                        if self.is_struct_name(cfn) {
+                                                            return cfn
+                                                        }
+                                                    }
+                                                }
+                                                if ep[arg0].kind == EXPR_METHOD_CALL {
+                                                    let mrecv = ep[arg0].left
+                                                    if ep[mrecv].kind == EXPR_IDENT && str_eq(ep[mrecv].str_val.as_ptr() as str, "String") {
+                                                        return "String"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    bi = bi + 1usize
+                                }
+                            }
+                        }
+                    }
+                }
+                return "i64"
+            }
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                let ty = self.find_var_type_in_stmts(sp[stmt_id].body_stmts.ptr[i], vname)
+                if str_len(ty) > 0usize { return ty }
+                i = i + 1usize
+            }
+        }
+        if k == STMT_DEFER {
+            var i = 0usize
+            while i < sp[stmt_id].body_stmts.len {
+                let ty = self.find_var_type_in_stmts(sp[stmt_id].body_stmts.ptr[i], vname)
+                if str_len(ty) > 0usize { return ty }
+                i = i + 1usize
+            }
+        }
+        return ""
+    }
+
+    fn get_raw_var_type(self, vname: str) -> str {
+        if str_eq(vname, "argv") {
+            return "*raw *raw u8"
+        }
+        if self.current_func_idx < self.parser.functions.len {
+            let cur_fn = self.parser.functions.ptr[self.current_func_idx]
+            var pi = 0usize
+            while pi < cur_fn.param_names.len {
+                if str_eq(cur_fn.param_names.ptr[pi].as_ptr() as str, vname) {
+                    return cur_fn.param_types.ptr[pi].as_ptr() as str
+                }
+                pi = pi + 1usize
+            }
+            var bi = 0usize
+            while bi < cur_fn.body.len {
+                let ty = self.find_var_type_in_stmts(cur_fn.body.ptr[bi], vname)
+                if str_len(ty) > 0usize {
+                    return ty
+                }
+                bi = bi + 1usize
+            }
+        }
+        var si = 0usize
+        while si < self.parser.stmts.len {
+            let sk = self.parser.stmts.ptr[si].kind
+            if (sk == STMT_LET || sk == STMT_VAR) && str_eq(self.parser.stmts.ptr[si].name.as_ptr() as str, vname) {
+                let st_ty = self.parser.stmts.ptr[si].type_name.as_ptr() as str
+                if str_len(st_ty) > 0usize {
+                    return st_ty
+                }
+                let init_e = self.parser.stmts.ptr[si].expr_id
+                if init_e != 0usize && self.is_expr_float(init_e) {
+                    return "f64"
+                }
+                if init_e != 0usize && self.parser.exprs.ptr[init_e].kind == EXPR_ARRAY_LITERAL {
+                    return "[]i64"
+                }
+                if init_e != 0usize && self.parser.exprs.ptr[init_e].kind == EXPR_FSTRING {
+                    return "String"
+                }
+            }
+            si = si + 1usize
+        }
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            var pi = 0usize
+            while pi < self.parser.functions.ptr[fi].param_names.len {
+                if str_eq(self.parser.functions.ptr[fi].param_names.ptr[pi].as_ptr() as str, vname) {
+                    return self.parser.functions.ptr[fi].param_types.ptr[pi].as_ptr() as str
+                }
+                pi = pi + 1usize
+            }
+            fi = fi + 1usize
+        }
+        return ""
+    }
+
+    fn get_var_type(self, vname: str) -> str {
+        let raw: str = self.get_raw_var_type(vname)
+        if str_len(raw) > 0usize {
+            let lt = self.emit_llvm_type(raw)
+            if str_eq(lt, "void") {
+                return "i64"
+            }
+            return lt
+        }
+        return "i64"
+    }
+
+    fn emit_to_bool_i1(var self, expr_id: usize, reg: i32) -> i32 {
+        let bool_reg = self.alloc_ssa()
+        self.ir.push_str("  %")
+        self.ir.push_str(int_to_str(bool_reg).as_ptr() as str)
+        if self.is_expr_ptr(expr_id) {
+            self.ir.push_str(" = icmp ne ptr %")
+            self.ir.push_str(int_to_str(reg).as_ptr() as str)
+            self.ir.push_str(", null\n")
+        } else if self.is_expr_float(expr_id) {
+            if self.is_expr_f32(expr_id) {
+                self.ir.push_str(" = fcmp one float %")
+                self.ir.push_str(int_to_str(reg).as_ptr() as str)
+                self.ir.push_str(", 0.0\n")
+            } else {
+                self.ir.push_str(" = fcmp one double %")
+                self.ir.push_str(int_to_str(reg).as_ptr() as str)
+                self.ir.push_str(", 0.0\n")
+            }
+        } else {
+            self.ir.push_str(" = icmp ne i64 %")
+            self.ir.push_str(int_to_str(reg).as_ptr() as str)
+            self.ir.push_str(", 0\n")
+        }
+        return bool_reg
+    }
+
+    fn is_expr_float(self, id: usize) -> bool {
+        let ep = self.parser.exprs.ptr
+        let k = ep[id].kind
+        if k == EXPR_FLOAT {
+            return true
+        }
+        if k == EXPR_IDENT {
+            let vname = ep[id].str_val.as_ptr() as str
+            let ty = self.get_var_type(vname)
+            return str_eq(ty, "double") || str_eq(ty, "float")
+        }
+        if k == EXPR_BINARY {
+            let op = ep[id].op
+            if op == TOK_EQEQ || op == TOK_NEQ || op == TOK_LT || op == TOK_LEQ || op == TOK_GT || op == TOK_GEQ || op == TOK_ANDAND || op == TOK_OROR ||
+               op == TOK_AMP || op == TOK_PIPE || op == TOK_CARET || op == TOK_SHL || op == TOK_SHR || op == TOK_PERCENT {
+                return false
+            }
+            return self.is_expr_float(ep[id].left) || self.is_expr_float(ep[id].right)
+        }
+        if k == EXPR_CAST {
+            let tgt = ep[id].target_type.as_ptr() as str
+            return str_eq(tgt, "f64") || str_eq(tgt, "f32")
+        }
+        if k == EXPR_UNARY {
+            return self.is_expr_float(ep[id].left)
+        }
+        if k == EXPR_TRY || k == EXPR_AWAIT {
+            return self.is_expr_float(ep[id].left)
+        }
+        if k == EXPR_FIELD_ACCESS {
+            let fname = ep[id].field_name.as_ptr() as str
+            let fname_p = fname as *raw u8
+            if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                let recv_id = ep[id].left
+                let f_idx = parse_int(fname)
+                let elem_ty = self.get_tuple_elem_type(recv_id, f_idx)
+                if str_len(elem_ty) > 0usize {
+                    let lty = self.emit_llvm_type(elem_ty)
+                    return str_eq(lty, "double") || str_eq(lty, "float")
+                }
+                if ep[recv_id].kind == EXPR_TUPLE && (f_idx as usize) < ep[recv_id].args.len {
+                    return self.is_expr_float(ep[recv_id].args.ptr[f_idx as usize])
+                }
+                return false
+            }
+            let recv_id = ep[id].left
+            var s_type = self.get_expr_struct_name(recv_id)
+            if str_len(s_type) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                s_type = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+            }
+            var si = 0usize
+            while si < self.parser.structs.len {
+                let sdef = self.parser.structs.ptr[si]
+                if str_len(s_type) == 0usize || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                    var fi = 0usize
+                    while fi < sdef.field_names.len {
+                        if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                            let fty = self.get_monomorphized_field_type(sdef, s_type, fi)
+                            return str_eq(fty, "f64") || str_eq(fty, "f32")
+                        }
+                        fi = fi + 1usize
+                    }
+                }
+                si = si + 1usize
+            }
+        }
+        if k == EXPR_INDEX {
+            let left_id = ep[id].left
+            if ep[left_id].kind == EXPR_IDENT {
+                let raw_ty = self.get_raw_var_type(ep[left_id].str_val.as_ptr() as str)
+                if str_ends_with(raw_ty, "f64") || str_ends_with(raw_ty, "f32") {
+                    return true
+                }
+            } else if ep[left_id].kind == EXPR_FIELD_ACCESS {
+                let fname = ep[left_id].field_name.as_ptr() as str
+                let recv_id = ep[left_id].left
+                let s_type = self.get_expr_struct_name(recv_id)
+                var si = 0usize
+                while si < self.parser.structs.len {
+                    let sdef = self.parser.structs.ptr[si]
+                    if str_len(s_type) == 0usize || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                        var fi = 0usize
+                        while fi < sdef.field_names.len {
+                            if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                                if str_ends_with(fty, "f64") || str_ends_with(fty, "f32") {
+                                    return true
+                                }
+                            }
+                            fi = fi + 1usize
+                        }
+                    }
+                    si = si + 1usize
+                }
+            }
+        }
+        if k == EXPR_CALL {
+            let callee_id = ep[id].left
+            if ep[callee_id].kind == EXPR_LAMBDA {
+                let rty = self.get_indirect_ret_llvm_type(callee_id, "")
+                return str_eq(rty, "double") || str_eq(rty, "float")
+            }
+            if ep[callee_id].kind == EXPR_IDENT {
+                let fname = ep[callee_id].str_val.as_ptr() as str
+                let raw_var = self.get_raw_var_type(fname)
+                if str_starts_with(raw_var, "fn(") || str_starts_with(raw_var, "closure(") {
+                    let rty = self.get_func_ptr_ret_type(raw_var)
+                    return str_eq(rty, "double") || str_eq(rty, "float")
+                }
+                let rty = self.get_func_ret_type(fname)
+                return str_eq(rty, "double") || str_eq(rty, "float")
+            }
+            if ep[callee_id].kind == EXPR_FIELD_ACCESS {
+                let member = ep[callee_id].field_name.as_ptr() as str
+                let rty = self.get_func_ret_type(member)
+                return str_eq(rty, "double") || str_eq(rty, "float")
+            }
+        }
+        if k == EXPR_METHOD_CALL {
+            let recv_id = ep[id].left
+            let member = ep[id].str_val.as_ptr() as str
+            var raw_ty = self.get_expr_struct_name(recv_id)
+            if str_len(raw_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                raw_ty = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+            }
+            if str_starts_with(raw_ty, "dyn ") {
+                let trait_name = (raw_ty as usize + 4usize) as str
+                var ti = 0usize
+                while ti < self.parser.traits.len {
+                    if str_eq(self.parser.traits.ptr[ti].trait_name.as_ptr() as str, trait_name) {
+                        var mi = 0usize
+                        while mi < self.parser.traits.ptr[ti].methods.len {
+                            if str_eq(self.parser.traits.ptr[ti].methods.ptr[mi].method_name.as_ptr() as str, member) {
+                                let rty = self.parser.traits.ptr[ti].methods.ptr[mi].ret_type.as_ptr() as str
+                                return str_eq(rty, "f64") || str_eq(rty, "f32")
+                            }
+                            mi = mi + 1usize
+                        }
+                    }
+                    ti = ti + 1usize
+                }
+            }
+            if str_len(raw_ty) > 0usize && !str_eq(raw_ty, "String") && !str_eq(raw_ty, "Vec") {
+                var mangled = String.new()
+                mangled.push_str(raw_ty)
+                mangled.push_str("__")
+                mangled.push_str(member)
+                let rty = self.get_func_ret_type(mangled.as_ptr() as str)
+                if str_eq(rty, "double") || str_eq(rty, "float") {
+                    return true
+                }
+            }
+            let rty = self.get_func_ret_type(member)
+            return str_eq(rty, "double") || str_eq(rty, "float")
+        }
+        return false
+    }
+
+    fn is_expr_f32(self, id: usize) -> bool {
+        let ep = self.parser.exprs.ptr
+        let k = ep[id].kind
+        if k == EXPR_IDENT {
+            let vname = ep[id].str_val.as_ptr() as str
+            let ty = self.get_var_type(vname)
+            return str_eq(ty, "float")
+        }
+        if k == EXPR_CAST {
+            let tgt = ep[id].target_type.as_ptr() as str
+            return str_eq(tgt, "f32")
+        }
+        if k == EXPR_CALL {
+            let callee_id = ep[id].left
+            if ep[callee_id].kind == EXPR_LAMBDA {
+                let rty = self.get_indirect_ret_llvm_type(callee_id, "")
+                return str_eq(rty, "float")
+            }
+            if ep[callee_id].kind == EXPR_IDENT {
+                let fname = ep[callee_id].str_val.as_ptr() as str
+                let raw_var = self.get_raw_var_type(fname)
+                if str_starts_with(raw_var, "fn(") || str_starts_with(raw_var, "closure(") {
+                    let rty = self.get_func_ptr_ret_type(raw_var)
+                    return str_eq(rty, "float")
+                }
+                let rty = self.get_func_ret_type(fname)
+                return str_eq(rty, "float")
+            }
+            if ep[callee_id].kind == EXPR_FIELD_ACCESS {
+                let member = ep[callee_id].field_name.as_ptr() as str
+                let rty = self.get_func_ret_type(member)
+                return str_eq(rty, "float")
+            }
+        }
+        if k == EXPR_METHOD_CALL {
+            let recv_id = ep[id].left
+            let member = ep[id].str_val.as_ptr() as str
+            var raw_ty = self.get_expr_struct_name(recv_id)
+            if str_len(raw_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                raw_ty = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+            }
+            if str_starts_with(raw_ty, "dyn ") {
+                let trait_name = (raw_ty as usize + 4usize) as str
+                var ti = 0usize
+                while ti < self.parser.traits.len {
+                    if str_eq(self.parser.traits.ptr[ti].trait_name.as_ptr() as str, trait_name) {
+                        var mi = 0usize
+                        while mi < self.parser.traits.ptr[ti].methods.len {
+                            if str_eq(self.parser.traits.ptr[ti].methods.ptr[mi].method_name.as_ptr() as str, member) {
+                                let rty = self.parser.traits.ptr[ti].methods.ptr[mi].ret_type.as_ptr() as str
+                                return str_eq(rty, "f32")
+                            }
+                            mi = mi + 1usize
+                        }
+                    }
+                    ti = ti + 1usize
+                }
+            }
+            if str_len(raw_ty) > 0usize && !str_eq(raw_ty, "String") && !str_eq(raw_ty, "Vec") {
+                var mangled = String.new()
+                mangled.push_str(raw_ty)
+                mangled.push_str("__")
+                mangled.push_str(member)
+                let rty = self.get_func_ret_type(mangled.as_ptr() as str)
+                if str_eq(rty, "float") {
+                    return true
+                }
+            }
+            let rty = self.get_func_ret_type(member)
+            return str_eq(rty, "float")
+        }
+        return false
+    }
+
+    fn get_raw_func_param_type(self, fname: str, param_idx: usize) -> str {
+        let clean_fn = self.clean_type_name(fname)
+        let resolved = self.resolve_function_name(clean_fn, 0usize)
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let fn_s = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if str_eq(fn_s, fname) || str_eq(fn_s, clean_fn) || str_eq(fn_s, resolved) {
+                if param_idx < self.parser.functions.ptr[fi].param_types.len {
+                    return self.parser.functions.ptr[fi].param_types.ptr[param_idx].as_ptr() as str
+                }
+            }
+            fi = fi + 1usize
+        }
+        return ""
+    }
+
+    fn get_func_param_type(self, fname: str, param_idx: usize) -> str {
+        let clean_fn = self.clean_type_name(fname)
+        let resolved = self.resolve_function_name(clean_fn, 0usize)
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let fn_s = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if str_eq(fn_s, fname) || str_eq(fn_s, clean_fn) || str_eq(fn_s, resolved) {
+                if param_idx < self.parser.functions.ptr[fi].param_types.len {
+                    return self.emit_llvm_type(self.parser.functions.ptr[fi].param_types.ptr[param_idx].as_ptr() as str)
+                }
+            }
+            fi = fi + 1usize
+        }
+        if str_eq(fname, "__rad_is_some") || str_eq(fname, "__rad_get_val") || str_starts_with(fname, "Option__") || str_starts_with(fname, "Result__") {
+            if param_idx == 0usize { return "ptr" }
+        }
+        if str_eq(fname, "ptr_read") || str_eq(fname, "ptr_write") || str_eq(fname, "read_volatile") || str_eq(fname, "write_volatile") || str_eq(fname, "is_null") || str_eq(fname, "offset") || str_eq(fname, "offset_var") {
+            if param_idx == 0usize { return "ptr" }
+            return "i64"
+        }
+        if str_eq(fname, "atomic_swap_i32") {
+            if param_idx == 0usize { return "ptr" }
+            return "i32"
+        }
+        if str_eq(fname, "atomic_swap_i64") {
+            if param_idx == 0usize { return "ptr" }
+            return "i64"
+        }
+        if str_eq(fname, "size_of_val") {
+            return "i64"
+        }
+        if str_eq(fname, "len") || str_eq(fname, "is_empty") || str_eq(fname, "capacity") || str_eq(fname, "clear") || str_eq(fname, "reverse") || str_eq(fname, "drop") || str_eq(fname, "push") || str_eq(fname, "push_byte") || str_eq(fname, "push_str") || str_eq(fname, "pop") || str_eq(fname, "as_ptr") || str_eq(fname, "for_each") || str_eq(fname, "map") || str_eq(fname, "filter") {
+            if param_idx == 0usize { return "ptr" }
+        }
+        if str_eq(fname, "parse_int") || str_eq(fname, "String__to_int") || str_eq(fname, "String__parse_int") || str_eq(fname, "to_int") {
+            if param_idx == 0usize { return "ptr" }
+        }
+        if str_eq(fname, "puts") || str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "system") || str_eq(fname, "free") || str_eq(fname, "fclose") || str_eq(fname, "ftell") || str_eq(fname, "getenv") || (str_eq(fname, "printf") && param_idx == 0usize) || str_eq(fname, "atexit") || str_eq(fname, "panic") || str_eq(fname, "__rad_register_panic_hook") {
+            return "ptr"
+        }
+        if str_eq(fname, "fopen") {
+            return "ptr"
+        }
+        if str_eq(fname, "fread") || str_eq(fname, "fwrite") {
+            if param_idx == 0usize || param_idx == 3usize { return "ptr" }
+            return "i64"
+        }
+        if str_eq(fname, "fseek") {
+            if param_idx == 0usize { return "ptr" }
+            if param_idx == 1usize { return "i64" }
+            return "i32"
+        }
+        if str_eq(fname, "malloc") {
+            return "i64"
+        }
+        if str_eq(fname, "realloc") {
+            if param_idx == 0usize { return "ptr" }
+            return "i64"
+        }
+        if str_starts_with(fname, "syscall") {
+            return "i64"
+        }
+        return "i64"
+    }
+
+    fn get_raw_func_ret_type(self, fname: str) -> str {
+        if str_starts_with(fname, "syscall") {
+            return "i64"
+        }
+        let clean_fn = self.clean_type_name(fname)
+        let resolved = self.resolve_function_name(clean_fn, 0usize)
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let fn_s = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if str_eq(fn_s, fname) || str_eq(fn_s, clean_fn) || str_eq(fn_s, resolved) {
+                let rty = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                if str_contains(fname, "<") {
+                    let turboty = self.extract_type_arg(fname)
+                    if str_len(turboty) > 0usize && (str_eq(rty, "T") || str_eq(rty, "U") || str_eq(rty, "V")) {
+                        return turboty
+                    }
+                }
+                return rty
+            }
+            fi = fi + 1usize
+        }
+        return ""
+    }
+
+    fn get_func_ret_type(self, fname: str) -> str {
+        if str_starts_with(fname, "syscall") {
+            return "i64"
+        }
+        let clean_fn = self.clean_type_name(fname)
+        let resolved = self.resolve_function_name(clean_fn, 0usize)
+        var fi = 0usize
+        while fi < self.parser.functions.len {
+            let fn_s = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+            if str_eq(fn_s, fname) || str_eq(fn_s, clean_fn) || str_eq(fn_s, resolved) {
+                let rty = self.parser.functions.ptr[fi].ret_type.as_ptr() as str
+                if str_contains(fname, "<") {
+                    let turboty = self.extract_type_arg(fname)
+                    if str_len(turboty) > 0usize && (str_eq(rty, "T") || str_eq(rty, "U") || str_eq(rty, "V")) {
+                        return self.emit_llvm_type(turboty)
+                    }
+                }
+                return self.emit_llvm_type(rty)
+            }
+            fi = fi + 1usize
+        }
+        if str_eq(fname, "parse_int") || str_eq(fname, "String__to_int") || str_eq(fname, "String__parse_int") || str_eq(fname, "to_int") {
+            return "i64"
+        }
+        if str_eq(fname, "malloc") || str_eq(fname, "realloc") || str_eq(fname, "fopen") || str_eq(fname, "getenv") || str_eq(fname, "input") || str_eq(fname, "__rad_get_terminal_guard") || str_eq(fname, "null") || str_eq(fname, "null_var") || str_eq(fname, "offset") || str_eq(fname, "offset_var") || str_eq(fname, "map") || str_eq(fname, "Vec__map") || str_eq(fname, "filter") || str_eq(fname, "Vec__filter") || str_eq(fname, "Some") || str_eq(fname, "None") || str_eq(fname, "Ok") || str_eq(fname, "Err") || str_eq(fname, "get") || str_eq(fname, "Vec__get") || str_eq(fname, "pop") || str_eq(fname, "Vec__pop") || str_eq(fname, "as_ptr") || str_eq(fname, "new") || str_eq(fname, "from_str") {
+            return "ptr"
+        }
+        if str_eq(fname, "is_null") || str_eq(fname, "atomic_swap_i32") {
+            return "i32"
+        }
+        if str_eq(fname, "__rad_is_some") || str_eq(fname, "__rad_get_val") || str_eq(fname, "ptr_read") || str_eq(fname, "read_volatile") || str_eq(fname, "size_of_val") || str_eq(fname, "size_of") || str_eq(fname, "atomic_swap_i64") || str_eq(fname, "len") || str_eq(fname, "capacity") || str_eq(fname, "is_empty") {
+            return "i64"
+        }
+        if str_starts_with(fname, "__rad_") || str_eq(fname, "panic") || str_eq(fname, "eprintln") || str_eq(fname, "ptr_write") || str_eq(fname, "write_volatile") || str_eq(fname, "for_each") || str_eq(fname, "Vec__for_each") || str_eq(fname, "clear") || str_eq(fname, "drop") || str_eq(fname, "reverse") || str_eq(fname, "push") || str_eq(fname, "push_byte") || str_eq(fname, "push_str") {
+            return "void"
+        }
+        if str_eq(fname, "atexit") {
+            return "i32"
+        }
+        if str_eq(fname, "fread") || str_eq(fname, "fwrite") || str_eq(fname, "ftell") {
+            return "i64"
+        }
+        if str_eq(fname, "main") || str_eq(fname, "rad_test_main") || str_eq(fname, "println") || str_eq(fname, "print") || str_eq(fname, "puts") || str_eq(fname, "system") || str_eq(fname, "fclose") || str_eq(fname, "printf") || str_eq(fname, "remove") {
+            return "i32"
+        }
+        return "i64"
+    }
+
+    fn is_expr_ptr(self, id: usize) -> bool {
+        let ep = self.parser.exprs.ptr
+        let k = ep[id].kind
+        if k == EXPR_ARRAY_LITERAL || k == EXPR_TUPLE || k == EXPR_FSTRING || k == EXPR_LAMBDA {
+            return true
+        }
+        if k == EXPR_STR {
+            return true
+        }
+        if k == EXPR_IDENT {
+            let vname = ep[id].str_val.as_ptr() as str
+            if str_eq(vname, "None") || str_eq(vname, "Option::None") {
+                return true
+            }
+            var is_alloc = false
+            var ai = 0usize
+            while ai < self.allocated_vars.len {
+                if str_eq(self.allocated_vars.ptr[ai].as_ptr() as str, vname) {
+                    is_alloc = true
+                    break
+                }
+                ai = ai + 1usize
+            }
+            if is_alloc {
+                return str_eq(self.get_var_type(vname), "ptr")
+            }
+            let resolved_vname = self.resolve_function_name(vname, 0usize)
+            var fi = 0usize
+            while fi < self.parser.functions.len {
+                let fn_s = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+                if str_eq(fn_s, vname) || str_eq(fn_s, resolved_vname) {
+                    return true
+                }
+                fi = fi + 1usize
+            }
+            if str_starts_with(vname, "__rad_") {
+                return true
+            }
+            return false
+        }
+        if k == EXPR_UNARY && ep[id].op == TOK_AMP {
+            return true
+        }
+        if k == EXPR_CAST {
+            let target_ty = self.emit_llvm_type(ep[id].target_type.as_ptr() as str)
+            return str_eq(target_ty, "ptr")
+        }
+        if k == EXPR_TRY {
+            let left_id = ep[id].left
+            var inner_ty = self.get_expr_struct_name(left_id)
+            if str_len(inner_ty) == 0usize && ep[left_id].kind == EXPR_IDENT {
+                inner_ty = self.get_raw_var_type(ep[left_id].str_val.as_ptr() as str)
+            }
+            if str_starts_with(inner_ty, "Option<") {
+                let plen = str_len(inner_ty)
+                if plen > 8usize {
+                    var inner = String.new()
+                    let cp = inner_ty as *raw u8
+                    var ci = 7usize
+                    while ci < plen && cp[ci] != 62u8 {
+                        inner.push_byte(cp[ci])
+                        ci = ci + 1usize
+                    }
+                    inner.push_byte(0u8)
+                    let elem_t = inner.as_ptr() as str
+                    return str_eq(self.emit_llvm_type(elem_t), "ptr")
+                }
+            }
+            if str_starts_with(inner_ty, "Result<") {
+                let plen = str_len(inner_ty)
+                if plen > 8usize {
+                    var inner = String.new()
+                    let cp = inner_ty as *raw u8
+                    var ci = 7usize
+                    while ci < plen && cp[ci] != 44u8 && cp[ci] != 62u8 {
+                        inner.push_byte(cp[ci])
+                        ci = ci + 1usize
+                    }
+                    inner.push_byte(0u8)
+                    let elem_t = inner.as_ptr() as str
+                    return str_eq(self.emit_llvm_type(elem_t), "ptr")
+                }
+            }
+            return false
+        }
+        if k == EXPR_AWAIT {
+            return self.is_expr_ptr(ep[id].left)
+        }
+        if k == EXPR_CALL {
+            let callee_id = ep[id].left
+            if ep[callee_id].kind == EXPR_LAMBDA {
+                let rty = self.get_indirect_ret_llvm_type(callee_id, "")
+                return str_eq(rty, "ptr")
+            }
+            if ep[callee_id].kind == EXPR_IDENT {
+                let fname = ep[callee_id].str_val.as_ptr() as str
+                if self.is_struct_name(fname) {
+                    return true
+                }
+                let turbofish_ty = ep[callee_id].target_type.as_ptr() as str
+                if str_len(turbofish_ty) > 0usize {
+                    let clean_t = self.clean_type_name(turbofish_ty)
+                    let lt = self.emit_llvm_type(clean_t)
+                    if str_eq(lt, "ptr") {
+                        return true
+                    }
+                }
+                if str_eq(self.get_func_ret_type(fname), "ptr") {
+                    return true
+                }
+                let raw_var = self.get_raw_var_type(fname)
+                if str_len(raw_var) > 0usize && str_contains(raw_var, "->") {
+                    let rty = self.get_func_ptr_ret_type(raw_var)
+                    return str_eq(rty, "ptr")
+                }
+            }
+            if ep[callee_id].kind == EXPR_FIELD_ACCESS {
+                let recv_id = ep[callee_id].left
+                let type_s = ep[recv_id].str_val.as_ptr() as str
+                let member_s = ep[callee_id].field_name.as_ptr() as str
+                var full_name = String.new()
+                full_name.push_str(type_s)
+                full_name.push_str("__")
+                full_name.push_str(member_s)
+                if str_eq(self.get_func_ret_type(full_name.as_ptr() as str), "ptr") {
+                    return true
+                }
+                if str_eq(self.get_func_ret_type(member_s), "ptr") {
+                    return true
+                }
+            }
+        }
+        if k == EXPR_METHOD_CALL {
+            let recv_id = ep[id].left
+            let member = ep[id].str_val.as_ptr() as str
+            let clean_m = self.clean_type_name(member)
+            if str_eq(clean_m, "as_ptr") || str_eq(clean_m, "new") || str_eq(clean_m, "from_str") || str_eq(clean_m, "as_str") || str_eq(clean_m, "to_string") {
+                return true
+            }
+            if str_contains(member, "<") {
+                let turbofish_ty = self.extract_type_arg(member)
+                if str_len(turbofish_ty) > 0usize {
+                    let clean_t = self.clean_type_name(turbofish_ty)
+                    let lt = self.emit_llvm_type(clean_t)
+                    if str_eq(lt, "ptr") {
+                        return true
+                    }
+                }
+            }
+            var is_static = false
+            if ep[recv_id].kind == EXPR_IDENT {
+                let p_recv: *raw u8 = ep[recv_id].str_val.as_ptr()
+                if (p_recv as usize) != 0usize && (p_recv[0usize] >= 65u8 && p_recv[0usize] <= 90u8) {
+                    is_static = true
+                } else {
+                    let vname = ep[recv_id].str_val.as_ptr() as str
+                    let is_var = str_len(self.get_raw_var_type(vname)) > 0usize
+                    if !is_var {
+                        is_static = true
+                    }
+                }
+            }
+            if is_static {
+                let type_s = ep[recv_id].str_val.as_ptr() as str
+                var mangled = String.new()
+                mangled.push_str(type_s)
+                mangled.push_str("__")
+                mangled.push_str(clean_m)
+                if str_eq(self.get_func_ret_type(mangled.as_ptr() as str), "ptr") {
+                    return true
+                }
+            }
+            if !is_static {
+                var raw_ty = self.get_expr_struct_name(recv_id)
+                if str_len(raw_ty) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                    raw_ty = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+                }
+                if str_starts_with(raw_ty, "dyn ") {
+                    let trait_name = (raw_ty as usize + 4usize) as str
+                    var ti = 0usize
+                    while ti < self.parser.traits.len {
+                        if str_eq(self.parser.traits.ptr[ti].trait_name.as_ptr() as str, trait_name) {
+                            var mi = 0usize
+                            while mi < self.parser.traits.ptr[ti].methods.len {
+                                if str_eq(self.parser.traits.ptr[ti].methods.ptr[mi].method_name.as_ptr() as str, clean_m) {
+                                    let rty = self.parser.traits.ptr[ti].methods.ptr[mi].ret_type.as_ptr() as str
+                                    let lty = self.emit_llvm_type(rty)
+                                    return str_eq(lty, "ptr")
+                                }
+                                mi = mi + 1usize
+                            }
+                        }
+                        ti = ti + 1usize
+                    }
+                }
+                if str_len(raw_ty) > 0usize {
+                    let base_ty = self.clean_type_name(raw_ty)
+                    if str_eq(base_ty, "Vec") && (str_eq(clean_m, "map") || str_eq(clean_m, "filter") || str_eq(clean_m, "get") || str_eq(clean_m, "pop")) {
+                        return true
+                    }
+                    if str_eq(base_ty, "Vec") && str_eq(clean_m, "for_each") {
+                        return false
+                    }
+                    var mangled = String.new()
+                    mangled.push_str(base_ty)
+                    mangled.push_str("__")
+                    mangled.push_str(clean_m)
+                    var found_m = false
+                    var fi = 0usize
+                    while fi < self.parser.functions.len {
+                        if str_eq(self.parser.functions.ptr[fi].fn_name.as_ptr() as str, mangled.as_ptr() as str) {
+                            found_m = true
+                            break
+                        }
+                        fi = fi + 1usize
+                    }
+                    if found_m {
+                        let ret_ty = self.get_func_ret_type(mangled.as_ptr() as str)
+                        if str_len(ret_ty) > 0usize && !str_eq(ret_ty, "void") {
+                            return str_eq(ret_ty, "ptr")
+                        }
+                    }
+                }
+            }
+            if str_eq(self.get_func_ret_type(clean_m), "ptr") {
+                return true
+            }
+            var fi = 0usize
+            while fi < self.parser.functions.len {
+                let fn_str = self.parser.functions.ptr[fi].fn_name.as_ptr() as str
+                if str_ends_with(fn_str, clean_m) {
+                    let flen = str_len(fn_str)
+                    let mlen = str_len(clean_m)
+                    if flen > mlen + 2usize {
+                        let p = fn_str as *raw u8
+                        if p[flen - mlen - 1usize] == 95u8 && p[flen - mlen - 2usize] == 95u8 {
+                            if str_eq(self.get_func_ret_type(fn_str), "ptr") {
+                                return true
+                            }
+                        }
+                    }
+                }
+                fi = fi + 1usize
+            }
+        }
+        if k == EXPR_FIELD_ACCESS {
+            let recv_id = ep[id].left
+            let fname = ep[id].field_name.as_ptr() as str
+            if ep[recv_id].kind == EXPR_IDENT {
+                let rec_name = ep[recv_id].str_val.as_ptr() as str
+                if str_eq(rec_name, "Option") && str_eq(fname, "None") {
+                    return true
+                }
+            }
+            if str_eq(fname, "ptr") {
+                return true
+            }
+            let fname_p = fname as *raw u8
+            if str_len(fname) > 0usize && fname_p[0] >= 48u8 && fname_p[0] <= 57u8 {
+                let recv_id = ep[id].left
+                let f_idx = parse_int(fname)
+                let elem_ty = self.get_tuple_elem_type(recv_id, f_idx)
+                if str_len(elem_ty) > 0usize {
+                    let lty = self.emit_llvm_type(elem_ty)
+                    return str_eq(lty, "ptr") || str_eq(elem_ty, "str") || str_eq(elem_ty, "String")
+                }
+                if ep[recv_id].kind == EXPR_TUPLE && (f_idx as usize) < ep[recv_id].args.len {
+                    return self.is_expr_ptr(ep[recv_id].args.ptr[f_idx as usize])
+                }
+                return false
+            }
+            let recv_id = ep[id].left
+            var s_type = self.get_expr_struct_name(recv_id)
+            if str_len(s_type) == 0usize && ep[recv_id].kind == EXPR_IDENT {
+                s_type = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+            }
+            var si = 0usize
+            while si < self.parser.structs.len {
+                let sdef = self.parser.structs.ptr[si]
+                if str_len(s_type) == 0usize || str_starts_with(s_type, "*") || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                    var fi = 0usize
+                    while fi < sdef.field_names.len {
+                        if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                            let fty = self.get_monomorphized_field_type(sdef, s_type, fi)
+                            let lty = self.emit_llvm_type(fty)
+                            return str_eq(lty, "ptr") || str_eq(fty, "str") || str_eq(fty, "String") || str_starts_with(fty, "*raw")
+                        }
+                        fi = fi + 1usize
+                    }
+                }
+                si = si + 1usize
+            }
+        }
+        if k == EXPR_INDEX {
+            let left_id = ep[id].left
+            if ep[left_id].kind == EXPR_IDENT {
+                let raw_ty = self.get_raw_var_type(ep[left_id].str_val.as_ptr() as str)
+                if str_starts_with(raw_ty, "*raw *raw") || str_starts_with(raw_ty, "**") {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    fn is_expr_string_obj(self, expr_id: usize) -> bool {
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if k == EXPR_FSTRING {
+            return true
+        }
+        if k == EXPR_AWAIT {
+            return self.is_expr_string_obj(ep[expr_id].left)
+        }
+        if k == EXPR_IDENT {
+            let vname = ep[expr_id].str_val.as_ptr() as str
+            let raw_ty = self.get_raw_var_type(vname)
+            return str_eq(raw_ty, "String")
+        }
+        if k == EXPR_CALL {
+            let callee = ep[expr_id].left
+            if ep[callee].kind == EXPR_IDENT {
+                let cname = ep[callee].str_val.as_ptr() as str
+                if str_eq(cname, "input") {
+                    return true
+                }
+            }
+        }
+        if k == EXPR_METHOD_CALL {
+            let mname = ep[expr_id].str_val.as_ptr() as str
+            if str_eq(mname, "new") || str_eq(mname, "from_str") {
+                let recv = ep[expr_id].left
+                if ep[recv].kind == EXPR_IDENT {
+                    let rname = ep[recv].str_val.as_ptr() as str
+                    if str_eq(rname, "String") {
+                        return true
+                    }
+                }
+            }
+            let st_nm = self.get_expr_struct_name(expr_id)
+            if str_eq(st_nm, "String") {
+                return true
+            }
+        }
+        if k == EXPR_FIELD_ACCESS {
+            let recv_id = ep[expr_id].left
+            let fname = ep[expr_id].field_name.as_ptr() as str
+            if ep[recv_id].kind == EXPR_IDENT {
+                let s_type = self.get_raw_var_type(ep[recv_id].str_val.as_ptr() as str)
+                var si = 0usize
+                while si < self.parser.structs.len {
+                    let sdef = self.parser.structs.ptr[si]
+                    if str_len(s_type) == 0usize || str_starts_with(s_type, "*") || self.match_struct_name(sdef.struct_name.as_ptr() as str, s_type) {
+                        var fi = 0usize
+                        while fi < sdef.field_names.len {
+                            if str_eq(sdef.field_names.ptr[fi].as_ptr() as str, fname) {
+                                let fty = sdef.field_types.ptr[fi].as_ptr() as str
+                                return str_eq(fty, "String")
+                            }
+                            fi = fi + 1usize
+                        }
+                    }
+                    si = si + 1usize
+                }
+            }
+        }
+        return false
+    }
+
+    fn is_expr_str_type(self, expr_id: usize) -> bool {
+        if expr_id == 0usize || expr_id >= self.parser.exprs.len {
+            return false
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if k == EXPR_STR {
+            return true
+        }
+        if k == EXPR_IDENT {
+            let vname = ep[expr_id].str_val.as_ptr() as str
+            let raw_ty = self.get_raw_var_type(vname)
+            return str_eq(raw_ty, "str")
+        }
+        if k == EXPR_CAST {
+            let tgt = ep[expr_id].target_type.as_ptr() as str
+            return str_eq(tgt, "str")
+        }
+        if k == EXPR_METHOD_CALL {
+            let mname = ep[expr_id].str_val.as_ptr() as str
+            let clean_m = self.clean_type_name(mname)
+            return str_eq(clean_m, "as_str") || str_eq(clean_m, "to_str")
+        }
+        return false
+    }
+
+    fn get_expr_type_name(self, expr_id: usize) -> str {
+        if expr_id == 0usize || expr_id >= self.parser.exprs.len {
+            return "unknown"
+        }
+        let ep = self.parser.exprs.ptr
+        let k = ep[expr_id].kind
+        if self.is_expr_float(expr_id) {
+            if self.is_expr_f32(expr_id) {
+                return "f32"
+            }
+            return "f64"
+        }
+        if self.is_expr_string_obj(expr_id) {
+            return "String"
+        }
+        if k == EXPR_STR {
+            return "str"
+        }
+        if k == EXPR_BOOL {
+            return "bool"
+        }
+        if k == EXPR_INT {
+            return "i64"
+        }
+        if k == EXPR_IDENT {
+            let vname = ep[expr_id].str_val.as_ptr() as str
+            let raw = self.get_raw_var_type(vname)
+            if str_len(raw) > 0usize {
+                return raw
+            }
+        }
+        if k == EXPR_CALL {
+            let callee = ep[expr_id].left
+            if ep[callee].kind == EXPR_IDENT {
+                let cname = ep[callee].str_val.as_ptr() as str
+                if str_eq(cname, "input") {
+                    return "String"
+                }
+                let raw_r = self.get_func_ret_type(cname)
+                if str_len(raw_r) > 0usize && !str_eq(raw_r, "ptr") {
+                    return raw_r
+                }
+            }
+        }
+        let s_ty = self.get_expr_struct_name(expr_id)
+        if str_len(s_ty) > 0usize {
+            return s_ty
+        }
+        if self.is_expr_ptr(expr_id) {
+            return "ptr"
+        }
+        return "i64"
+    }
+
+}

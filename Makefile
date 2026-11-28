@@ -59,7 +59,11 @@ RADC_SRCS := \
     $(RADC_DIR)/parser_decl.rad \
     $(RADC_DIR)/codegen.rad \
     $(RADC_DIR)/codegen_types.rad \
+    $(RADC_DIR)/codegen_struct.rad \
+    $(RADC_DIR)/codegen_type_query.rad \
     $(RADC_DIR)/codegen_expr.rad \
+    $(RADC_DIR)/codegen_expr_ops.rad \
+    $(RADC_DIR)/codegen_expr_access.rad \
     $(RADC_DIR)/codegen_call.rad \
     $(RADC_DIR)/codegen_stmt.rad \
     $(RADC_DIR)/codegen_sema.rad \
