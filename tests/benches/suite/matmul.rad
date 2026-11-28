@@ -1,59 +1,68 @@
-// ==============================================================================
-// Benchmark: Matrix Multiplication (512x512)
-// ==============================================================================
-
 import std/time
 
+extern "C" {
+    fn malloc(size: usize) -> *raw f64;
+    fn free(ptr: *raw f64);
+    fn printf(fmt: *raw u8, ...) -> i32;
+}
+
 fn main() -> i32 {
-    let n = 512usize
-    let total_elements = n * n
-    let bytes = total_elements * 8usize
+    let n = 512usize;
+    let total_elements = n * n;
+    let byte_size = total_elements * 8usize; // sizeof(f64) = 8
 
-    let a = malloc(bytes) as *raw var f64
-    let b = malloc(bytes) as *raw var f64
-    let c = malloc(bytes) as *raw var f64
+    let a = malloc(byte_size);
+    let b = malloc(byte_size);
+    let c = malloc(byte_size);
 
-    // Initialize matrices
-    var i = 0usize
+    if a == (0usize as *raw f64) || b == (0usize as *raw f64) || c == (0usize as *raw f64) {
+        printf("Memory allocation failed\n");
+        return 1;
+    }
+
+    var i = 0usize;
     while i < total_elements {
-        a[i] = ((i % 100usize) as f64) * 0.01
-        b[i] = (((i + 50usize) % 100usize) as f64) * 0.01
-        c[i] = 0.0
-        i = i + 1usize
+        a[i] = ((i % 100usize) as f64) * 0.01;
+        b[i] = (((i + 50usize) % 100usize) as f64) * 0.01;
+        c[i] = 0.0;
+        i = i + 1usize;
     }
 
-    let t0 = Instant.now()
+    let t0 = Instant.now();
 
-    var row = 0usize
+    // Cache-friendly contiguous iteration over B: row, k, col
+    var row = 0usize;
     while row < n {
-        var col = 0usize
-        while col < n {
-            var sum = 0.0
-            var k = 0usize
-            while k < n {
-                sum = sum + a[row * n + k] * b[k * n + col]
-                k = k + 1usize
+        let row_offset = row * n;
+        var k = 0usize;
+        while k < n {
+            let a_val = a[row_offset + k];
+            let b_row = k * n;
+            var col = 0usize;
+            while col < n {
+                c[row_offset + col] = c[row_offset + col] + a_val * b[b_row + col];
+                col = col + 1usize;
             }
-            c[row * n + col] = sum
-            col = col + 1usize
+            k = k + 1usize;
         }
-        row = row + 1usize
+        row = row + 1usize;
     }
 
-    let elapsed_ms = t0.elapsed().as_millis()
+    let elapsed_ms = t0.elapsed().as_millis();
 
-    // Compute checksum to verify correctness and prevent DCE
-    var checksum = 0.0
-    var ci = 0usize
-    while ci < total_elements {
-        checksum = checksum + c[ci]
-        ci = ci + 1024usize // Sample checksum
+    // Checksum: sample middle elements
+    var checksum = 0.0;
+    var idx = 0usize;
+    while idx < total_elements {
+        checksum = checksum + c[idx];
+        idx = idx + 1024usize;
     }
 
-    free(a as *raw var u8)
-    free(b as *raw var u8)
-    free(c as *raw var u8)
+    printf("RAD_MATMUL_RESULT: %llu ms (checksum: %lld)\n", elapsed_ms, checksum as i64);
 
-    printf("RAD_MATMUL_RESULT: %llu ms (checksum: %lld)\n", elapsed_ms, checksum as i64)
-    return 0
+    free(a);
+    free(b);
+    free(c);
+
+    return 0;
 }

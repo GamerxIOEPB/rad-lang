@@ -1,56 +1,29 @@
-// ==============================================================================
-// Benchmark: N-Queens (14-Queens Backtracking)
-// ==============================================================================
-
 import std/time
 
-fn solve_nqueens(n: i32, row: i32, var cols: *raw var u32, var diag1: *raw var u32, var diag2: *raw var u32) -> i64 {
-    if row == n {
-        return 1i64
-    }
-    var count = 0i64
-    var col = 0i32
-    while col < n {
-        let c = col as usize
-        if cols[c] == 0u32 {
-            let d1 = (row - col + n) as usize
-            let d2 = (row + col) as usize
-            if diag1[d1] == 0u32 && diag2[d2] == 0u32 {
-                cols[c] = 1u32
-                diag1[d1] = 1u32
-                diag2[d2] = 1u32
+extern "C" {
+    fn printf(fmt: *raw u8, ...) -> i32;
+}
 
-                count = count + solve_nqueens(n, row + 1, cols, diag1, diag2)
-
-                cols[c] = 0u32
-                diag1[d1] = 0u32
-                diag2[d2] = 0u32
-            }
-        }
-        col = col + 1
+fn solve_nqueens(cols: i64, diag1: i64, diag2: i64, mask: i64) -> i64 {
+    if cols == mask {
+        return 1i64;
     }
-    return count
+    var count = 0i64;
+    var valid = mask & (~(cols | diag1 | diag2));
+    while valid != 0i64 {
+        let bit = valid & (0i64 - valid);
+        valid = valid - bit;
+        count = count + solve_nqueens(cols | bit, (diag1 | bit) << 1, (diag2 | bit) >> 1, mask);
+    }
+    return count;
 }
 
 fn main() -> i32 {
-    let n = 14i32
-    let cols = malloc(128usize) as *raw var u32
-    let diag1 = malloc(256usize) as *raw var u32
-    let diag2 = malloc(256usize) as *raw var u32
+    let mask = (1i64 << 14) - 1i64;
+    let t0 = Instant.now();
+    let solutions = solve_nqueens(0i64, 0i64, 0i64, mask);
+    let elapsed_ms = t0.elapsed().as_millis();
 
-    var i = 0usize
-    while i < 32usize { cols[i] = 0u32; i = i + 1usize; }
-    i = 0usize
-    while i < 64usize { diag1[i] = 0u32; diag2[i] = 0u32; i = i + 1usize; }
-
-    let t0 = Instant.now()
-    let solutions = solve_nqueens(n, 0, cols, diag1, diag2)
-    let elapsed_ms = t0.elapsed().as_millis()
-
-    free(cols as *raw var u8)
-    free(diag1 as *raw var u8)
-    free(diag2 as *raw var u8)
-
-    printf("RAD_NQUEENS_RESULT: %llu ms (solutions: %lld)\n", elapsed_ms, solutions)
-    return 0
+    printf("RAD_NQUEENS_RESULT: %llu ms (solutions: %lld)\n", elapsed_ms, solutions);
+    return 0;
 }
